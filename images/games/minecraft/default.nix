@@ -16,7 +16,7 @@ in
 
   services.minecraft = {
     enable = true;
-    serverProperties = {
+    serverFiles."server.properties" = {
       motd = "ix-powered Minecraft";
       max-players = 20;
     };

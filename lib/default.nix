@@ -43,15 +43,10 @@ let
 
   mkMinecraftLoader = import ./minecraft-loader.nix;
 
-  # Serialize an attrset to Java .properties format (key=value lines).
-  toProperties =
-    attrs:
-    lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "${k}=${toString v}") attrs);
-
   # Helpers exposed to every module via specialArgs. Keep this surface small
   # and stable: anything here is part of the cross-module contract.
   ixSpecialArgs = {
-    inherit mkMinecraftLoader toProperties;
+    inherit mkMinecraftLoader;
   };
 
   mkIxImage =
@@ -121,6 +116,5 @@ in
     mkIxImage
     discoverImages
     mkMinecraftLoader
-    toProperties
     ;
 }

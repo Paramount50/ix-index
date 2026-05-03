@@ -1,18 +1,16 @@
 # Minecraft server runtime.
 #
-# Loader-agnostic. Provides systemd unit, server.properties templating, mods,
-# Java runtime, port. `serverJar` and `dropDir` are slots filled by a loader
-# module (fabric, folia, neoforge, paper, purpur, spigot, sponge, vanilla) via
-# module merging. `dropDir` is where mod jars get symlinked: fabric/neoforge/sponge
-# use `mods`, paper/folia/purpur/spigot use `plugins`.
+# Loader-agnostic. Provides systemd unit, mods, Java runtime, port.
+# `serverJar` and `dropDir` are slots filled by a loader module (fabric,
+# folia, neoforge, paper, purpur, spigot, sponge, vanilla) via module merging.
+# `dropDir` is where mod jars get symlinked: fabric/neoforge/sponge use
+# `mods`, paper/folia/purpur/spigot use `plugins`.
 #
-# Mods are selected via `services.minecraft.mods`, a slug-keyed attrset.
-# Bare `{}` includes the jar; attrsets with fields configure the mod (mod
-# modules read these and generate config files). The `modCatalog` maps slugs
-# to { url, hash } for fetchurl resolution.
+# All server config files (server.properties, bukkit.yml, spigot.yml, etc.)
+# go through `serverFiles`. Mod config files go through `configFiles` (placed
+# under config/).
 {
   config,
-  ix,
   lib,
   pkgs,
   ...
@@ -27,10 +25,6 @@ let
   cfg = config.services.minecraft;
 
   dataDir = "/var/lib/minecraft";
-
-  propsFile = pkgs.writeText "server.properties" (
-    ix.toProperties (cfg.serverProperties // { server-port = cfg.port; })
-  );
 
   modCatalogType = types.submodule {
     options = {
@@ -165,11 +159,6 @@ in
       description = "JVM flags used after heap sizing and before -jar.";
     };
 
-    serverProperties = mkOption {
-      type = types.attrsOf (types.oneOf [ types.str types.int types.bool ]);
-      default = { };
-    };
-
     configFiles = mkOption {
       type = types.attrsOf types.attrs;
       default = { };
@@ -177,9 +166,9 @@ in
     };
 
     serverFiles = mkOption {
-      type = types.attrsOf types.attrs;
+      type = types.attrsOf types.anything;
       default = { };
-      description = "Files to place relative to the server root. For loader configs like bukkit.yml, spigot.yml, paper-global.yml. Format inferred from extension.";
+      description = "Files to place relative to the server root. Keys are paths (server.properties, bukkit.yml, etc.). Format inferred from extension.";
     };
 
     port = mkOption {
@@ -189,6 +178,8 @@ in
   };
 
   config = mkIf cfg.enable {
+    services.minecraft.serverFiles."server.properties".server-port = lib.mkDefault cfg.port;
+
     networking.firewall.allowedTCPPorts = [ cfg.port ];
 
     systemd.services.minecraft = {
@@ -226,7 +217,6 @@ in
       };
       preStart = ''
         mkdir -p ${dataDir}/${cfg.dropDir}
-        ln -sf ${propsFile} ${dataDir}/server.properties
         echo "eula=true" > ${dataDir}/eula.txt
         ${modLinks}
         ${configLinks}
