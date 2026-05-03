@@ -55,9 +55,9 @@ ix-images.lib.mkIxImage {
       krypton = {};
       ferrite-core = {};
       chunky = {};
-      luckperms.mysql = true;
-      bluemap.mysql = true;
-      distanthorizons.maxRenderDistance = 512;
+      luckperms = { mysql = true; };
+      bluemap = { mysql = true; };
+      distanthorizons = { maxRenderDistance = 512; };
     };
     fabric = {
       enable = true;
