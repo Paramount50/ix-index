@@ -13,9 +13,9 @@ ix.mkMinecraftLoader {
   dropDir = "mods";
   urlFor =
     cfg:
-    "https://meta.fabricmc.net/v2/versions/loader/${cfg.minecraftVersion}/${cfg.loaderVersion}/${cfg.installerVersion}/server/jar";
+    "https://meta.fabricmc.net/v2/versions/loader/${cfg.version}/${cfg.loaderVersion}/${cfg.installerVersion}/server/jar";
   extraOptions = {
-    minecraftVersion = lib.mkOption { type = lib.types.str; };
+    version = lib.mkOption { type = lib.types.str; };
     loaderVersion = lib.mkOption { type = lib.types.str; };
     installerVersion = lib.mkOption { type = lib.types.str; };
   };

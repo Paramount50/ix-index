@@ -13,9 +13,9 @@ ix.mkMinecraftLoader {
   dropDir = "plugins";
   urlFor =
     cfg:
-    "https://api.papermc.io/v2/projects/folia/versions/${cfg.minecraftVersion}/builds/${toString cfg.build}/downloads/folia-${cfg.minecraftVersion}-${toString cfg.build}.jar";
+    "https://api.papermc.io/v2/projects/folia/versions/${cfg.version}/builds/${toString cfg.build}/downloads/folia-${cfg.version}-${toString cfg.build}.jar";
   extraOptions = {
-    minecraftVersion = lib.mkOption { type = lib.types.str; };
+    version = lib.mkOption { type = lib.types.str; };
     build = lib.mkOption { type = lib.types.int; };
   };
 }

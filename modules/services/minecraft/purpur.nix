@@ -13,9 +13,9 @@ ix.mkMinecraftLoader {
   dropDir = "plugins";
   urlFor =
     cfg:
-    "https://api.purpurmc.org/v2/purpur/${cfg.minecraftVersion}/${toString cfg.build}/download";
+    "https://api.purpurmc.org/v2/purpur/${cfg.version}/${toString cfg.build}/download";
   extraOptions = {
-    minecraftVersion = lib.mkOption { type = lib.types.str; };
+    version = lib.mkOption { type = lib.types.str; };
     build = lib.mkOption { type = lib.types.int; };
   };
 }

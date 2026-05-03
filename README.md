@@ -44,7 +44,7 @@ ix-images.lib.mkIxImage {
 
   services.minecraft.folia = {
     enable = true;
-    minecraftVersion = "1.21.4";
+    version = "1.21.4";
     build = 97;
     hash = lib.fakeHash;
   };
