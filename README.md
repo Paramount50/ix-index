@@ -47,7 +47,6 @@ ix-images.lib.mkImage {
 
 ```nix
 # images/games/my-mc/default.nix
-{ ... }:
 {
   ix.image.name = "my-mc";
 
