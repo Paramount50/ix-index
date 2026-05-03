@@ -67,22 +67,29 @@ in
     jvmFlags = mkOption {
       type = types.listOf types.str;
       default = [
+        # Aikar's flags: https://mcflags.emc.gs
         "-XX:+UseG1GC"
         "-XX:+ParallelRefProcEnabled"
         "-XX:MaxGCPauseMillis=200"
-        "-XX:+DisableExplicitGC"
-        "-XX:+AlwaysPreTouch"
+        "-XX:+DisableExplicitGC" # prevent plugins from triggering full GC
+        "-XX:+AlwaysPreTouch" # zero pages at startup so allocation never page-faults
+
+        # large young gen: MC allocates heavily per tick, then discards
         "-XX:G1NewSizePercent=30"
         "-XX:G1MaxNewSizePercent=40"
-        "-XX:G1HeapRegionSize=8M"
-        "-XX:G1ReservePercent=20"
+        "-XX:G1HeapRegionSize=8M" # fewer regions = less bookkeeping
+        "-XX:G1ReservePercent=20" # headroom so promotion doesn't force emergency collection
+
+        # mixed GC tuning: reclaim old-gen without long pauses
         "-XX:G1MixedGCCountTarget=4"
-        "-XX:InitiatingHeapOccupancyPercent=15"
+        "-XX:InitiatingHeapOccupancyPercent=15" # start concurrent mark early
         "-XX:G1MixedGCLiveThresholdPercent=90"
         "-XX:G1RSetUpdatingPauseTimePercent=5"
-        "-XX:SurvivorRatio=32"
-        "-XX:+PerfDisableSharedMem"
-        "-XX:MaxTenuringThreshold=1"
+
+        "-XX:SurvivorRatio=32" # tiny survivor spaces: most objects die in eden
+        "-XX:+PerfDisableSharedMem" # avoid mmap that causes GC stalls on some filesystems
+        "-XX:MaxTenuringThreshold=1" # promote survivors immediately, don't copy between survivor spaces
+
         "-Dusing.aikars.flags=https://mcflags.emc.gs"
         "-Daikars.new.flags=true"
       ];
