@@ -42,18 +42,17 @@ ix-images.lib.mkIxImage {
 {
   ix.image.name = "my-mc";
 
-  services.minecraft.folia = {
-    enable = true;
-    version = "1.21.4";
-    build = 97;
-  };
-
   services.minecraft = {
     memory = "8G";
     serverProperties = {
       view-distance = 32;
       simulation-distance = 12;
       max-players = 20;
+    };
+    folia = {
+      enable = true;
+      version = "1.21.4";
+      build = 97;
     };
     mods = {
       distanthorizons = { maxRenderDistance = 512; };
