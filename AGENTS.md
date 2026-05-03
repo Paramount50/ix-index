@@ -4,7 +4,7 @@ Pre-built OCI images for ix VMs, plus composable NixOS modules. All images targe
 
 ## How it works
 
-Every image is an independent NixOS system closure: `boot.isContainer = true`, systemd as PID 1, no kernel, no bootloader. `lib.mkIxImage` runs `nixpkgs.lib.nixosSystem` over the platform config (`lib/ix-platform.nix`), OCI packaging (`lib/ix-oci.nix`), the module registry (`modules/`), and any caller modules, then packages the toplevel into an OCI archive via `dockerTools.streamLayeredImage` plus a small docker-archive-to-OCI converter (`lib/docker-to-oci.py`).
+Every image is an independent NixOS system closure: `boot.isContainer = true`, systemd as PID 1, no kernel, no bootloader. `lib.mkIxImage` runs `nixpkgs.lib.nixosSystem` over the platform config (`lib/ix-platform.nix`), OCI packaging (`lib/ix-oci-layer.nix`), the module registry (`modules/`), and any caller modules, then packages the toplevel into an OCI archive via `dockerTools.streamLayeredImage` plus a small docker-archive-to-OCI converter (`lib/docker-to-oci.py`).
 
 Images are not stacked at runtime. ix runs one image. Layering is purely a build-time concern: the closure is split into ~67 OCI layers so the registry stores each shared store path once and clients only pay for deltas. Single-layer would force every image to ship a private copy of the multi-hundred-MB base closure.
 
@@ -15,7 +15,7 @@ flake.nix                                  # pure: ix.discoverImages ./images
 lib/
   default.nix                              # mkIxImage, discoverImages, helpers
   ix-platform.nix                          # target platform: EPYC Gen 5 (znver5), container mode
-  ix-oci.nix                               # OCI packaging, base profile
+  ix-oci-layer.nix                               # OCI packaging, base profile
   minecraft-loader.nix                     # helper used by loader modules
   docker-to-oci.py                         # docker-archive -> OCI archive transcoder
 modules/

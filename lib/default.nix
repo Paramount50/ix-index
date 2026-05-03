@@ -45,7 +45,7 @@ let
     }:
     (lib.nixosSystem {
       specialArgs.ix = ixSpecialArgs;
-      modules = [ ./ix-platform.nix ./ix-oci.nix ] ++ moduleList ++ modules;
+      modules = [ ./ix-platform.nix ./ix-oci-layer.nix ] ++ moduleList ++ modules;
     }).config.ix.build.ociImage;
 
   # Subdirectories of `dir`. Used to walk images/<cat>/<name>/.
