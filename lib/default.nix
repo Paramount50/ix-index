@@ -12,6 +12,10 @@
 # into a flake package. If a directory has a `versions.nix` sibling, every
 # version produces `<name>_<ver>` and the `default` key picks the unsuffixed
 # `<name>` alias.
+#
+# `mkMinecraftLoader` is one of several cross-cutting helpers exposed to
+# modules via `specialArgs.ix`. Modules access them as `{ ix, ... }: ix.foo`
+# instead of relative-path imports.
 { nixpkgs }:
 let
   inherit (nixpkgs) lib;
@@ -22,10 +26,19 @@ let
   # in sync without duplicating paths.
   moduleList = lib.attrValues (import ../modules);
 
+  mkMinecraftLoader = import ./minecraft-loader.nix;
+
+  # Helpers exposed to every module via specialArgs. Keep this surface small
+  # and stable: anything here is part of the cross-module contract.
+  ixSpecialArgs = {
+    inherit mkMinecraftLoader;
+  };
+
   mkIxImage =
     { modules ? [ ] }:
     (lib.nixosSystem {
       inherit system;
+      specialArgs.ix = ixSpecialArgs;
       modules = [ ./ix-base.nix ] ++ moduleList ++ modules;
     }).config.ix.build.ociImage;
 
@@ -73,5 +86,10 @@ let
     ) { } (subdirs root);
 in
 {
-  inherit system mkIxImage discoverImages;
+  inherit
+    system
+    mkIxImage
+    discoverImages
+    mkMinecraftLoader
+    ;
 }

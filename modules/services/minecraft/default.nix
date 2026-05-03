@@ -1,8 +1,8 @@
-# Minecraft Fabric server.
+# Minecraft server runtime.
 #
-# Version triple + jar hash are required: the loader/installer URL pins to
-# all three, and the upstream server jar is content-addressed via Nix. The
-# minecraft image's `versions.nix` supplies them.
+# Loader-agnostic. Provides systemd unit, server.properties templating, mods,
+# JDK, port. `serverJar` is required: a loader module (`./fabric.nix`,
+# `./paper.nix`, `./vanilla.nix`, ...) supplies it via module merging.
 {
   config,
   lib,
@@ -20,12 +20,7 @@ let
 
   dataDir = "/var/lib/minecraft";
 
-  serverJar = pkgs.fetchurl {
-    url = "https://meta.fabricmc.net/v2/versions/loader/${cfg.minecraftVersion}/${cfg.fabricLoaderVersion}/${cfg.fabricInstallerVersion}/server/jar";
-    hash = cfg.serverJarHash;
-  };
-
-  # Caller-provided properties win; we only force `server-port` so the
+  # Caller-provided properties first; we then pin server-port so the
   # systemd-managed firewall and the running server agree.
   propsFile = pkgs.writeText "server.properties" (
     lib.concatStringsSep "\n" (
@@ -39,12 +34,12 @@ let
 in
 {
   options.services.minecraft = {
-    enable = mkEnableOption "Minecraft server (Fabric)";
+    enable = mkEnableOption "Minecraft server runtime";
 
-    minecraftVersion = mkOption { type = types.str; };
-    fabricLoaderVersion = mkOption { type = types.str; };
-    fabricInstallerVersion = mkOption { type = types.str; };
-    serverJarHash = mkOption { type = types.str; };
+    serverJar = mkOption {
+      type = types.package;
+      description = "Server jar to launch. Set by a loader module (fabric/paper/vanilla).";
+    };
 
     memory = mkOption {
       type = types.str;
@@ -76,14 +71,14 @@ in
     networking.firewall.allowedTCPPorts = [ cfg.port ];
 
     systemd.services.minecraft = {
-      description = "Minecraft Fabric server";
+      description = "Minecraft server";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
         WorkingDirectory = dataDir;
-        ExecStart = "${cfg.jdk}/bin/java -Xms1G -Xmx${cfg.memory} -jar ${serverJar} nogui";
+        ExecStart = "${cfg.jdk}/bin/java -Xms1G -Xmx${cfg.memory} -jar ${cfg.serverJar} nogui";
         Restart = "on-failure";
       };
       preStart = ''

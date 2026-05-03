@@ -11,20 +11,22 @@ Images are not stacked at runtime. ix runs one image. Layering is purely a build
 ## Layout
 
 ```
-flake.nix                       # pure: ix.discoverImages ./images
+flake.nix                                  # pure: ix.discoverImages ./images
 lib/
-  default.nix                   # mkIxImage, discoverImages
-  ix-base.nix                   # implicit base layer (every image)
-  docker-to-oci.py              # docker-archive -> OCI archive transcoder
+  default.nix                              # mkIxImage, discoverImages, helpers
+  ix-base.nix                              # implicit base layer (every image)
+  minecraft-loader.nix                     # helper used by loader modules
+  docker-to-oci.py                         # docker-archive -> OCI archive transcoder
 modules/
-  default.nix                   # canonical module registry (attrset)
-  profiles/base.nix             # CLI tools, on by default
-  services/<name>.nix           # opt-in services
+  default.nix                              # canonical module registry (attrset)
+  profiles/base.nix                        # CLI tools, on by default
+  services/<name>.nix                      # opt-in service
+  services/<family>/{default,...}.nix      # service family (runtime + plugins)
 images/
-  <category>/<name>/default.nix # NixOS module
-  <category>/<name>/versions.nix# optional: per-version overlay modules
-template/                       # `nix flake init` starter
-nix/rules/                      # ast-grep lint rules
+  <category>/<name>/default.nix            # NixOS module
+  <category>/<name>/versions.nix           # optional: per-version overlay modules
+template/                                  # `nix flake init` starter
+nix/rules/                                 # ast-grep lint rules
 ```
 
 ## Adding an image
@@ -35,10 +37,10 @@ For a versioned image (multiple variants ship at once), add a `versions.nix` sib
 
 ```nix
 {
-  default = "26w17a";
-  "26w17a" = {
+  default = "26w17a-fabric";
+  "26w17a-fabric" = {
     ix.image.tag = "26w17a-fabric";
-    services.minecraft = { /* version-specific args */ };
+    services.minecraft.fabric = { /* loader-specific args */ };
   };
 }
 ```
@@ -49,12 +51,40 @@ Discovery then exposes `<name>_<ver>` for each version key plus `<name>` as an a
 
 Drop the file at `modules/services/<name>.nix` (or `modules/profiles/<name>.nix`) and register it in `modules/default.nix`. Keep modules independent: declare `options`, gate everything behind `mkIf cfg.enable`, never import another module. The registry exists so option sets are visible to every image; modules stay inert until their `enable` flag is set.
 
+## Service families
+
+When several modules vary along one axis (e.g. minecraft + fabric/paper/vanilla loaders), put the runtime in `modules/services/<name>/default.nix` and each variant in `modules/services/<name>/<variant>.nix`. The runtime declares a "slot" option; variants fill it. Wire each file into `modules/default.nix` as a separate registry entry.
+
+For minecraft this means:
+- `services.minecraft.serverJar` is the slot, declared by the runtime.
+- Each loader module (`fabric.nix`, `paper.nix`, `vanilla.nix`) sets `services.minecraft.serverJar` from its own URL/version options.
+- Enabling a loader auto-enables the runtime via `mkDefault`.
+- Enabling two loaders is a module-merge conflict → loud eval error.
+
+## Cross-cutting helpers (`specialArgs.ix`)
+
+Helpers shared across modules go in `lib/` and are exposed to every module through `specialArgs.ix`. Modules consume them as ordinary module args:
+
+```nix
+# modules/services/minecraft/fabric.nix
+{ ix, config, lib, pkgs, ... }:
+ix.mkMinecraftLoader {
+  inherit config lib pkgs;
+  name = "fabric";
+  urlFor = cfg: "https://meta.fabricmc.net/v2/...";
+  extraOptions = lib': { /* ... */ };
+}
+```
+
+This is the only way modules in this repo reach helpers in `lib/`. **Never** use `../` or `../../` paths to climb out of `modules/`. Relative-path imports between modules and lib break the abstraction (modules become coupled to lib's filesystem layout) and make module files harder to relocate. If a helper needs to be shared, expose it through `specialArgs.ix`. The helper bundle is also part of the public flake `lib` output, so external users get the same surface.
+
 ## Module conventions
 
 - Modules declare options and config. They never `imports` another module.
 - Top-level options live under `services.<name>` for services, `ix.profiles.<name>` for profiles. Never reach into another module's namespace.
 - Everything in `config` is wrapped in `mkIf cfg.enable`. The base profile is the only exception: it ships an enable flag so users can opt out.
-- Module options take strings or paths, not factory arguments. Versioning belongs in `versions.nix`, not in a function wrapping the module.
+- Module options take strings, paths, or packages — not factory arguments. Versioning belongs in `versions.nix`, not in a function wrapping the module.
+- Cross-module helpers come from `specialArgs.ix`. No `..` paths.
 
 ## Image conventions
 
@@ -62,16 +92,24 @@ Drop the file at `modules/services/<name>.nix` (or `modules/profiles/<name>.nix`
 - Images compose by enabling services and adding packages. They do not declare options. They do not `imports` anything.
 - Images stay version-agnostic when they have a `versions.nix`. The base file is what every variant shares; per-version data lives in the overlay.
 
+## Hashes
+
+Fetcher hashes (`pkgs.fetchurl { hash = "sha256-..."; }`) live **inline next to the URL**, in whichever file declares the fetch. For per-version artifacts (e.g. minecraft server jars) that's `versions.nix`. For per-package artifacts that's the module declaring the fetch.
+
+`flake.lock` only tracks flake inputs (other flakes you import). It does not track arbitrary fetchurl calls. Putting per-image hashes in `flake.nix` would force every version to become a flake input — the input list explodes and `nix flake update` becomes meaningless. Inline is the nixpkgs convention; follow it.
+
+To get a fresh SRI hash: set `hash = lib.fakeHash;` (or any obviously-wrong sha256-...= string), build, and copy the value Nix prints in the mismatch error. Or run `nix-prefetch-url --type sha256 <url>` and convert with `nix hash to-sri --type sha256 <hex>`.
+
 ## Nix philosophy
 
-- **Single source of truth.** `modules/default.nix` is the only place modules are listed; `attrValues` derives the list. Versions live next to the image in `versions.nix`, not in `flake.nix`.
+- **Single source of truth.** `modules/default.nix` is the only place modules are listed; `attrValues` derives the list. Versions live next to the image in `versions.nix`, not in `flake.nix`. Hashes live next to URLs.
 - **No backwards compat.** This repo is young and has no external consumers. Rename freely, change signatures, delete dead code. No shims, no aliases, no `// removed` comments, no feature flags for the old way. Update callers in the same change.
 - **Auto-discover, don't enumerate.** `flake.nix` walks `images/`. Adding an image is `mkdir + edit one file`. Hand-wired registries rot.
-- **DRY at the data layer, not the abstraction layer.** `inherit (pkgs) ...` over a wrapper helper. `attrValues` over a parallel list. Don't introduce a function unless it has at least two callers.
+- **DRY at the data layer, not the abstraction layer.** `inherit (pkgs) ...` over a wrapper helper. `attrValues` over a parallel list. Don't introduce a function unless it has at least two callers; the minecraft-loader helper qualifies because three loaders share the same shape.
 - **Comments explain why, not what.** Headers say what each file is for and what's load-bearing (e.g. `maxLayers = 67` with the registry-cap rationale, base profile auto-enabled). Don't restate what the code obviously does.
-- **Trust module merging.** Layer per-version overlays via the module system, not by passing args to factory functions.
+- **Trust module merging.** Layer per-version overlays via the module system, not by passing args to factory functions. Service families (runtime + variants) compose through option slots, not through wrappers.
 - **Pure eval.** No `builtins.currentSystem`, no `builtins.getEnv`, no `<nixpkgs>` channel refs, no `path:` flake refs. Every input flows through `flake.nix`.
-- **Strict, named failures.** `lib.assertMsg` over bare `assert`. Required options have no default so misuse fails at eval with the option name, not at runtime with a NullPointerException.
+- **Strict, named failures.** `lib.assertMsg` over bare `assert`. Required options have no default so misuse fails at eval with the option name. Two loaders enabled → module-merge conflict, not silently-last-wins.
 
 ## Nix style (ast-grep enforced)
 
@@ -83,6 +121,7 @@ Run `nix run nixpkgs#ast-grep -- scan` before committing. Hard rules:
 - No `lib.recursiveUpdate`. Build the attrset in one place or use `lib.mkMerge`.
 - No `builtins.currentSystem`, `builtins.getEnv`, `<nixpkgs>`, or `path:` flake refs.
 - No `(import ./foo.nix)` inside `imports = [ ... ]`. NixOS auto-imports paths.
+- No `..` paths inside `modules/`. Cross-cutting helpers come through `specialArgs.ix`.
 - No `writeShellScriptBin`. Use `writeShellScript` (or `writeShellApplication` for orchestrators).
 - No bare `assert cond;`. Use `assert lib.assertMsg cond "why";`.
 - `__structuredAttrs = true` on every `runCommand` and `mkDerivation`. `mkDerivation` also gets `strictDeps = true`.
