@@ -87,8 +87,7 @@ let
 
   javaArgs = [
     "${cfg.javaPackage}/bin/java"
-    "-Xms${cfg.memory}"
-    "-Xmx${cfg.memory}"
+    "-XX:MaxRAMPercentage=${toString cfg.maxRAMPercentage}"
   ]
   ++ cfg.jvmFlags
   ++ [
@@ -112,9 +111,10 @@ in
       description = "Subdirectory under the data dir where mod jars are symlinked. Loaders set this: fabric uses mods, paper uses plugins.";
     };
 
-    memory = mkOption {
-      type = types.str;
-      default = "2G";
+    maxRAMPercentage = mkOption {
+      type = types.int;
+      default = 85;
+      description = "Max heap as a percentage of available system RAM. The JVM auto-scales to the VM's memory.";
     };
 
     mods = mkOption {

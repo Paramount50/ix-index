@@ -84,8 +84,8 @@ let
       message = "minecraft ExecStart should launch Java";
     }
     {
-      assertion = lib.hasInfix "-Xms2G" minecraftExec && lib.hasInfix "-Xmx2G" minecraftExec;
-      message = "minecraft should use fixed heap sizing from services.minecraft.memory";
+      assertion = lib.hasInfix "-XX:MaxRAMPercentage=85" minecraftExec;
+      message = "minecraft should use MaxRAMPercentage for auto-scaling heap";
     }
     {
       assertion = lib.hasInfix "-XX:+UseG1GC" minecraftExec;

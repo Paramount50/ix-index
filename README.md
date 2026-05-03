@@ -43,7 +43,6 @@ ix-images.lib.mkIxImage {
   ix.image.name = "my-mc";
 
   services.minecraft = {
-    memory = "8G";
     serverProperties = {
       view-distance = 32;
       simulation-distance = 12;
