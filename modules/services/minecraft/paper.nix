@@ -1,5 +1,5 @@
-# Paper server jar. Pinned to a (version, build) pair from the
-# PaperMC API: https://api.papermc.io/v2/projects/paper/versions/<v>/builds/<b>
+# Paper server jar. https://papermc.io
+# API: https://api.papermc.io/v2/projects/paper/versions/<v>/builds/<b>
 {
   ix,
   config,

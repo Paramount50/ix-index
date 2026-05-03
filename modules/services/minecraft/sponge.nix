@@ -1,4 +1,5 @@
-# SpongeVanilla server jar. Standalone Sponge implementation (no Forge needed).
+# SpongeVanilla server jar. https://spongepowered.org
+# Standalone Sponge implementation (no Forge needed).
 # Maven: https://repo.spongepowered.org/repository/maven-releases/org/spongepowered/spongevanilla/
 {
   ix,

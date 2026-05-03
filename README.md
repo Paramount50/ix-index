@@ -34,7 +34,16 @@ ix-images.lib.mkIxImage {
 
 ### Minecraft with Folia
 
-[Folia](https://papermc.io/software/folia) is PaperMC's regionized multithreading fork. Supported loaders: Fabric, Folia, NeoForge, Paper, Purpur, Spigot, Sponge, Vanilla.
+[Folia](https://papermc.io/software/folia) is PaperMC's regionized multithreading fork. Supported loaders:
+
+- [Fabric](modules/services/minecraft/fabric.nix) - mod loader
+- [Folia](modules/services/minecraft/folia.nix) - regionized multithreading (Paper fork)
+- [NeoForge](modules/services/minecraft/neoforge.nix) - Forge successor
+- [Paper](modules/services/minecraft/paper.nix) - performance-focused server
+- [Purpur](modules/services/minecraft/purpur.nix) - Paper fork with extra patches
+- [Spigot](modules/services/minecraft/spigot.nix) - CraftBukkit fork
+- [Sponge](modules/services/minecraft/sponge.nix) - SpongeVanilla standalone
+- [Vanilla](modules/services/minecraft/vanilla.nix) - Mojang's official server
 
 ```nix
 # images/games/my-mc/default.nix

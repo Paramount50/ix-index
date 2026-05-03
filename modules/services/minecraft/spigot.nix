@@ -1,5 +1,6 @@
-# Spigot server jar. CraftBukkit fork. No direct download API (official method
-# is BuildTools), so this takes a URL like the vanilla loader.
+# Spigot server jar. https://www.spigotmc.org
+# CraftBukkit fork. No direct download API (official method is BuildTools),
+# so this takes a URL like the vanilla loader.
 {
   ix,
   config,

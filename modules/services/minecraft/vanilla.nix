@@ -1,5 +1,6 @@
-# Vanilla server jar. Mojang's manifest is dynamic, so we take the URL
-# directly instead of modeling the piston-meta lookup. Find URLs at
+# Vanilla server jar. https://www.minecraft.net
+# Mojang's manifest is dynamic, so we take the URL directly instead of
+# modeling the piston-meta lookup. Find URLs at
 # https://piston-meta.mojang.com/mc/game/version_manifest_v2.json.
 {
   ix,

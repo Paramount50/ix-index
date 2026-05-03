@@ -1,5 +1,6 @@
-# Folia server jar. PaperMC fork for regionized multithreading.
-# Same API as Paper: https://api.papermc.io/v2/projects/folia/versions/<v>/builds/<b>
+# Folia server jar. https://papermc.io/software/folia
+# PaperMC fork for regionized multithreading.
+# API: https://api.papermc.io/v2/projects/folia/versions/<v>/builds/<b>
 {
   ix,
   config,

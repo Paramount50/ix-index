@@ -1,4 +1,5 @@
-# Fabric server jar. Pinned via the upstream meta API URL: minecraft version
+# Fabric server jar. https://fabricmc.net
+# Pinned via the upstream meta API URL: minecraft version
 # + Fabric loader version + Fabric installer version are all part of the URL.
 {
   ix,

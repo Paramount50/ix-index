@@ -1,4 +1,5 @@
-# Purpur server jar. Paper fork with extra gameplay and performance patches.
+# Purpur server jar. https://purpurmc.org
+# Paper fork with extra gameplay and performance patches.
 # API: https://api.purpurmc.org/v2/purpur/<version>/<build>/download
 {
   ix,

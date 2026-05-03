@@ -1,5 +1,6 @@
-# NeoForge server jar. NeoForge uses an installer that generates server files,
-# so this takes a direct URL to the final server jar.
+# NeoForge server jar. https://neoforged.net
+# NeoForge uses an installer that generates server files, so this takes a
+# direct URL to the final server jar.
 {
   ix,
   config,
