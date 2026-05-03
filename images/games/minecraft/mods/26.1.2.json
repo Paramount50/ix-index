@@ -35,6 +35,10 @@
     "hash": "sha512-kjGtBWZ9Tu8DSMcAv1Fgkp4Lcj2eFF/ZfH/O+Th6wubVJPsV2Z9H+Pg48dI1Mk/XUM3LZgO2OqtghdefvqqzGw==",
     "url": "https://cdn.modrinth.com/data/gvQqBUqZ/versions/R7MxYvuW/lithium-fabric-0.24.2%2Bmc26.1.2.jar"
   },
+  "luckperms": {
+    "hash": "sha512-v+nw4OLZ3+PBxFYpjb13ivAjENq6tdf7SlT8xKTowmU7rgvoQVHXxSmSBl2YhM2rl+we6mYH5/fPARJqE76GMA==",
+    "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/fTIdfb46/LuckPerms-Fabric-5.5.42.jar"
+  },
   "servercore": {
     "hash": "sha512-uoMix1aWgPQPQWJpNiP0iMF98OjTlKruILvI4aMJeqswk4luqW5oOaNvgXwWV77Ym6UBMW+jmAoVpcBhji0ang==",
     "url": "https://cdn.modrinth.com/data/4WWQxlQP/versions/P8k080Af/servercore-fabric-1.5.16%2B26.1.jar"

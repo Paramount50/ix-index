@@ -44,6 +44,7 @@ let
         "clumps"
         "chunky"
         "bluemap"
+        "luckperms"
       ];
     };
   };
