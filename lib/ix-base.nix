@@ -1,10 +1,8 @@
-# Implicit base layer applied to every image.
+# OCI image packaging applied to every image.
 #
-# - `boot.isContainer` strips bootloader/kernel; the closure becomes a userland
-#   payload with systemd at PID 1.
+# - `ix.build.ociImage` is the published derivation: an OCI archive (tar).
 # - The `base` profile (CLI tools) is enabled by default. Images that want a
 #   minimal closure set `ix.profiles.base.enable = false`.
-# - `ix.build.ociImage` is the published derivation: an OCI archive (tar).
 #
 # Why layered (not single-layer): images share most of their closure (glibc,
 # systemd, base profile). `streamLayeredImage` splits the closure across many
@@ -38,18 +36,6 @@
   };
 
   config = {
-    # All images target EPYC Gen 5 (Turin, Zen 5). Every package in the
-    # closure is compiled with -march=znver5 -mtune=znver5.
-    nixpkgs.hostPlatform = {
-      system = "x86_64-linux";
-      gcc = {
-        arch = "znver5";
-        tune = "znver5";
-      };
-    };
-
-    boot.isContainer = true;
-    system.stateVersion = "25.05";
     ix.profiles.base.enable = lib.mkDefault true;
 
     ix.build.ociImage =

@@ -14,7 +14,8 @@ Images are not stacked at runtime. ix runs one image. Layering is purely a build
 flake.nix                                  # pure: ix.discoverImages ./images
 lib/
   default.nix                              # mkIxImage, discoverImages, helpers
-  ix-base.nix                              # implicit base layer (every image)
+  ix-platform.nix                          # target platform: EPYC Gen 5 (znver5), container mode
+  ix-base.nix                              # OCI packaging, base profile
   minecraft-loader.nix                     # helper used by loader modules
   docker-to-oci.py                         # docker-archive -> OCI archive transcoder
 modules/
