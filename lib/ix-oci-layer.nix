@@ -1,17 +1,11 @@
-# OCI packaging applied to every image.
+# OCI layer: builds the final OCI archive from the NixOS system closure.
 #
-# - `ix.build.ociImage` is the published derivation: an OCI archive (tar).
-# - The `base` profile (CLI tools) is enabled by default. Images that want a
-#   minimal closure set `ix.profiles.base.enable = false`.
+# The closure is split into ~67 OCI layers (`streamLayeredImage`) so the
+# registry deduplicates shared store paths across images. A `systemRoot`
+# layer adds FHS symlinks (/bin, /etc, /usr, ...) pointing into the toplevel.
 #
-# Why layered (not single-layer): images share most of their closure (glibc,
-# systemd, base profile). `streamLayeredImage` splits the closure across many
-# layers so the registry stores each shared store path once and clients only
-# fetch the deltas. Collapsing to one layer would make every image ship its
-# own multi-hundred-MB copy of the same files.
-#
-# Why python conversion: nixpkgs only ships a docker-archive streamer. We
-# transcode to OCI on the fly so the output is the format `ix push` expects.
+# nixpkgs only ships a docker-archive streamer, so we transcode to OCI on
+# the fly via `docker-to-oci.py`.
 {
   config,
   pkgs,
