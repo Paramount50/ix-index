@@ -10,6 +10,7 @@
   base = ./profiles/base.nix;
   git-clone = ./services/git-clone.nix;
   minecraft = ./services/minecraft;
+  postgresql = ./services/postgresql.nix;
   minecraft-fabric = ./services/minecraft/fabric.nix;
   minecraft-paper = ./services/minecraft/paper.nix;
   minecraft-vanilla = ./services/minecraft/vanilla.nix;
