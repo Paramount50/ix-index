@@ -14,6 +14,7 @@
   minecraft-fabric = ./services/minecraft/fabric.nix;
   minecraft-paper = ./services/minecraft/paper.nix;
   minecraft-vanilla = ./services/minecraft/vanilla.nix;
+  minecraft-mod-bluemap = ./services/minecraft/mods/bluemap.nix;
   minecraft-mod-distant-horizons = ./services/minecraft/mods/distant-horizons.nix;
   remote-desktop = ./services/remote-desktop.nix;
 }

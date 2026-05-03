@@ -1,4 +1,8 @@
 {
+  "bluemap": {
+    "hash": "sha512-sUA5DFBWVUkRMPdGU/wOnNlQHzXwAcF0llwTvM9Fu5GQDE7UOezbjYJHI/tXaIogzjdYK3s6SgRiOvCYVPb7LQ==",
+    "url": "https://cdn.modrinth.com/data/swbUV1cr/versions/D9j76thC/bluemap-5.20-fabric.jar"
+  },
   "c2me-fabric": {
     "hash": "sha512-NN1gWqgf8ScPlpfPBFHKmmAj5X9Ic0aP8B/BniZNZDT7wMEI4ZSmpnWwJp3Rbtgp95oY6gbTLYms2j+/dnUwLw==",
     "url": "https://cdn.modrinth.com/data/VSNURh3q/versions/utLSz8Lf/c2me-fabric-mc26.1.2-0.3.7%2Balpha.0.68.jar"

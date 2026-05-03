@@ -43,6 +43,7 @@ let
         "vmp-fabric"
         "clumps"
         "chunky"
+        "bluemap"
       ];
     };
   };
