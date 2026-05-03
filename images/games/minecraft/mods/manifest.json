@@ -5,7 +5,7 @@
     "game_versions": ["26.1.2", "26.2-snapshot-5"]
   },
   "versions": {
-    "26.1.2": ["fabric-api", "lithium", "c2me-fabric", "krypton", "ferrite-core", "distanthorizons", "servercore", "vmp-fabric", "clumps", "chunky", "bluemap", "luckperms", "simple-voice-chat", "spark"],
+    "26.1.2": ["fabric-api", "lithium", "c2me-fabric", "krypton", "ferrite-core", "distanthorizons", "servercore", "vmp-fabric", "clumps", "chunky", "bluemap", "luckperms", "simple-voice-chat", "spark", "terralith", "tectonic"],
     "26.2-snapshot-5": ["fabric-api", "c2me-fabric"]
   }
 }

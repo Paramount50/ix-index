@@ -35,6 +35,10 @@
     "hash": "sha512-kjGtBWZ9Tu8DSMcAv1Fgkp4Lcj2eFF/ZfH/O+Th6wubVJPsV2Z9H+Pg48dI1Mk/XUM3LZgO2OqtghdefvqqzGw==",
     "url": "https://cdn.modrinth.com/data/gvQqBUqZ/versions/R7MxYvuW/lithium-fabric-0.24.2%2Bmc26.1.2.jar"
   },
+  "lithostitched": {
+    "hash": "sha512-Dgz7VfZGenrf+EdSbnbV2q8hLrN9KXMHv5fduhLCxiAvVyckht1VD2j/RN9lPCiNaXJMAeflXWlyPMhGuBNFAw==",
+    "url": "https://cdn.modrinth.com/data/XaDC71GB/versions/cHH1mPJL/lithostitched-1.7.2-fabric-26.1.jar"
+  },
   "luckperms": {
     "hash": "sha512-v+nw4OLZ3+PBxFYpjb13ivAjENq6tdf7SlT8xKTowmU7rgvoQVHXxSmSBl2YhM2rl+we6mYH5/fPARJqE76GMA==",
     "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/fTIdfb46/LuckPerms-Fabric-5.5.42.jar"
@@ -50,6 +54,14 @@
   "spark": {
     "hash": "sha512-4Gl2Y2icVFm37ZLyHYawGRu+f2MnrH6Jcq2fYxjveoypPaOoSVRZ7m8UQ8rf92VrFQ6g78gfjPEwDJMBSDovsw==",
     "url": "https://cdn.modrinth.com/data/l6YH9Als/versions/J1GUYyGQ/spark-1.10.172-fabric.jar"
+  },
+  "tectonic": {
+    "hash": "sha512-GHez55Vq9FJe64dYOScZ/qjGJLC4XDb9Pjd4CvSqWCOjvWmBzv/yc2TJmatJKrz+oCRIonpAS8QeO52SThvJcQ==",
+    "url": "https://cdn.modrinth.com/data/lWDHr9jE/versions/jL2ZsTzx/tectonic-3.0.22-fabric-26.1.jar"
+  },
+  "terralith": {
+    "hash": "sha512-WjvimGpiREbIKoh5405Mewn2+YoZN/1Nm89TVrgyHwuc67XlZ+jQCugWHSYbEI+3yagOvtYfLtuM2whSszy6zA==",
+    "url": "https://cdn.modrinth.com/data/8oi3bsk5/versions/FCzSjHeG/Terralith_26.1_v2.6.2_Fabric.jar"
   },
   "vmp-fabric": {
     "hash": "sha512-JKDfJAeJOxz7VeJ9wcH+8AjfU1GNEYqjJFkk03tkKifXtq/elQ+/XQfEERxErCZNmuVrjYxqm1Ws37kboKFfFg==",

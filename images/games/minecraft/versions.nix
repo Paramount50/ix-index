@@ -47,6 +47,8 @@ let
         "luckperms"
         "simple-voice-chat"
         "spark"
+        "terralith"
+        "tectonic"
       ];
     };
   };

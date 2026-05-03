@@ -32,7 +32,7 @@ ix-images.lib.mkIxImage {
 }
 ```
 
-### Fabric server with BlueMap, Distant Horizons, and LuckPerms
+### Fabric server with worldgen, web map, voice chat, and permissions
 
 ```nix
 # images/games/my-mc/default.nix
@@ -49,17 +49,25 @@ ix-images.lib.mkIxImage {
       white-list = true;
     };
     mods = {
+      # performance
       fabric-api = {};
       lithium = {};
       c2me-fabric = {};
       krypton = {};
       ferrite-core = {};
-      chunky = {};
-      luckperms = { mysql = true; };
-      bluemap = { mysql = true; };
-      distanthorizons = { maxRenderDistance = 512; };
-      simple-voice-chat = {};
+      servercore = {};
       spark = {};
+
+      # terrain
+      terralith = {};
+      tectonic = {};
+      distanthorizons = { maxRenderDistance = 512; };
+      chunky = {};
+
+      # features
+      bluemap = { mysql = true; };
+      luckperms = { mysql = true; };
+      simple-voice-chat = {};
     };
     fabric = {
       enable = true;
