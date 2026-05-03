@@ -1,4 +1,4 @@
-# OCI image packaging applied to every image.
+# OCI packaging applied to every image.
 #
 # - `ix.build.ociImage` is the published derivation: an OCI archive (tar).
 # - The `base` profile (CLI tools) is enabled by default. Images that want a

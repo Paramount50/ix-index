@@ -4,7 +4,7 @@ Pre-built OCI images for ix VMs, plus composable NixOS modules. All images targe
 
 ## How it works
 
-Every image is an independent NixOS system closure: `boot.isContainer = true`, systemd as PID 1, no kernel, no bootloader. `lib.mkIxImage` runs `nixpkgs.lib.nixosSystem` over the implicit base layer (`lib/ix-base.nix`), the module registry (`modules/`), and any caller modules, then packages the toplevel into an OCI archive via `dockerTools.streamLayeredImage` plus a small docker-archive-to-OCI converter (`lib/docker-to-oci.py`).
+Every image is an independent NixOS system closure: `boot.isContainer = true`, systemd as PID 1, no kernel, no bootloader. `lib.mkIxImage` runs `nixpkgs.lib.nixosSystem` over the platform config (`lib/ix-platform.nix`), OCI packaging (`lib/ix-oci.nix`), the module registry (`modules/`), and any caller modules, then packages the toplevel into an OCI archive via `dockerTools.streamLayeredImage` plus a small docker-archive-to-OCI converter (`lib/docker-to-oci.py`).
 
 Images are not stacked at runtime. ix runs one image. Layering is purely a build-time concern: the closure is split into ~67 OCI layers so the registry stores each shared store path once and clients only pay for deltas. Single-layer would force every image to ship a private copy of the multi-hundred-MB base closure.
 
@@ -15,7 +15,7 @@ flake.nix                                  # pure: ix.discoverImages ./images
 lib/
   default.nix                              # mkIxImage, discoverImages, helpers
   ix-platform.nix                          # target platform: EPYC Gen 5 (znver5), container mode
-  ix-base.nix                              # OCI packaging, base profile
+  ix-oci.nix                               # OCI packaging, base profile
   minecraft-loader.nix                     # helper used by loader modules
   docker-to-oci.py                         # docker-archive -> OCI archive transcoder
 modules/
@@ -115,7 +115,7 @@ To get a fresh SRI hash: set `hash = lib.fakeHash;` (or any obviously-wrong sha2
 
 ## Target platform
 
-All images run on AMD EPYC Gen 5 (Turin, Zen 5). `lib/ix-base.nix` sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` and `tune = "znver5"`, which propagates `-march=znver5 -mtune=znver5` to every package in the closure. This enables AVX-512, VNNI, and other Zen 5 instructions across the board.
+All images run on AMD EPYC Gen 5 (Turin, Zen 5). `lib/ix-platform.nix` sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` and `tune = "znver5"`, which propagates `-march=znver5 -mtune=znver5` to every package in the closure. This enables AVX-512, VNNI, and other Zen 5 instructions across the board.
 
 Because the arch differs from the nixpkgs binary cache (generic x86_64), every package builds from source. This is intentional: these images run on known hardware and the build cost is paid once.
 
