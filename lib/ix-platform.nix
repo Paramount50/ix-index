@@ -6,10 +6,11 @@
 {
   nixpkgs.hostPlatform = {
     system = "x86_64-linux";
-    gcc = {
-      arch = "znver5";
-      tune = "znver5";
-    };
+    # TODO: add back znver5 tuning for EPYC Gen 5
+    # gcc = {
+    #   arch = "znver5";
+    #   tune = "znver5";
+    # };
   };
 
   boot.isContainer = true;
