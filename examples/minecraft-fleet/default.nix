@@ -1,5 +1,8 @@
 { ix }:
 let
+  # TODO: settle the fleet secret API. This sketches "generate once and share
+  # with these nodes", but the final design may want scoped secret objects,
+  # automatic dependency wiring, rotation policy, or module-owned secrets.
   secrets = {
     velocityForwarding = {
       generate = true;
