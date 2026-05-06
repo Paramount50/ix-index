@@ -1,5 +1,11 @@
 # ix/images
 
+## Workflow
+
+Commit and push after making changes by default.
+
+## Overview
+
 Pre-built OCI images for ix VMs, plus composable NixOS modules. All images target AMD EPYC Gen 5 (Turin, Zen 5). The base layer sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` so every package in the closure is compiled with `-march=znver5 -mtune=znver5`. No binary cache hits: everything builds from source.
 
 ## How it works
