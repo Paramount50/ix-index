@@ -49,19 +49,10 @@ let
   kernelDevConfig = evalConfig [ ../images/dev/kernel-dev ];
 
   fleet = ix.mkFleet {
-    defaults = (
-      { name, lib, ... }:
-      {
-        ix.image.name = lib.mkDefault "fleet-${name}";
-        networking.hostName = name;
-      }
-    );
-
     deployment.region = "hil-1";
 
     groups.web = {
       tags = [ "http" ];
-      deployment.region = "vint-1";
       modules = [
         {
           environment.etc."ix-fleet-role".text = "web";
@@ -267,7 +258,7 @@ let
     }
     {
       assertion = fleet.nodes.db.networking.hostName == "db";
-      message = "fleet defaults should receive the node name";
+      message = "fleet nodes should default hostName to the node name";
     }
     {
       assertion = fleet.nodes.web.environment.etc."db-host".text == "db";
@@ -278,8 +269,8 @@ let
       message = "fleet deployment destination should flow into the generated plan";
     }
     {
-      assertion = fleetPlan.web.region == "vint-1";
-      message = "fleet group deployment settings should apply to member nodes";
+      assertion = fleetPlan.web.region == "hil-1";
+      message = "fleet nodes should inherit the top-level deployment region";
     }
     {
       assertion =

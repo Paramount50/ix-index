@@ -105,6 +105,7 @@ let
           };
 
           ix.image.name = lib.mkDefault name;
+          networking.hostName = lib.mkDefault name;
         }
       ]
       ++ spec.modules;

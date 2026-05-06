@@ -54,41 +54,19 @@ so modules can reference `nodes.<name>.config`.
 
 ```nix
 ix-images.lib.mkFleet {
-  defaults = { name, lib, ... }: {
-    ix.image.name = lib.mkDefault "acme-${name}";
-    networking.hostName = name;
-  };
-
   deployment.region = "hil-1";
 
-  groups.minecraft = {
-    tags = [ "games" ];
-    deployment = {
-      region = "vint-1";
-      ipv4 = true;
-    };
-  };
-
   nodes = {
-    db = {
-      modules = [
-        {
-          services.ix-postgresql.enable = true;
-        }
-      ];
+    db = { ... }: {
+      services.ix-postgresql.enable = true;
     };
 
-    lobby = {
-      group = "minecraft";
-      modules = [
-        ({ nodes, ... }: {
-          services.minecraft = {
-            paper.enable = true;
-            serverFiles."server.properties".motd =
-              "database host: ${nodes.db.config.networking.hostName}";
-          };
-        })
-      ];
+    lobby = { nodes, ... }: {
+      services.minecraft = {
+        paper.enable = true;
+        serverFiles."server.properties".motd =
+          "database host: ${nodes.db.config.networking.hostName}";
+      };
     };
   };
 }
