@@ -114,10 +114,25 @@ let
   };
 
   plan = pkgs.writeText "ix-fleet-plan.json" (builtins.toJSON planValue);
+  python = pkgs.python3.withPackages (ps: [ ps.pydantic ]);
+  command = pkgs.writeShellApplication {
+    name = "ix-fleet";
+    runtimeInputs = [ python ];
+    text = ''exec python3 ${../tools/ix-fleet.py} --plan ${plan} "$@"'';
+  };
+  deploy = pkgs.writeShellApplication {
+    name = "ix-fleet-deploy";
+    runtimeInputs = [ python ];
+    text = ''exec python3 ${../tools/ix-fleet.py} --plan ${plan} deploy "$@"'';
+  };
 
 in
 {
-  inherit plan;
+  inherit
+    command
+    deploy
+    plan
+    ;
 
   inherit planValue;
   nodes = nodeConfigs;

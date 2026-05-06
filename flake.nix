@@ -93,6 +93,21 @@
                 }
               }/bin/update-mods";
             };
+          value.ix-fleet =
+            let
+              pkgs = nixpkgs.legacyPackages.${system};
+              python = pkgs.python3.withPackages (ps: [ ps.pydantic ]);
+            in
+            {
+              type = "app";
+              program = "${
+                pkgs.writeShellApplication {
+                  name = "ix-fleet";
+                  runtimeInputs = [ python ];
+                  text = ''exec python3 ${./tools/ix-fleet.py} "$@"'';
+                }
+              }/bin/ix-fleet";
+            };
         }) devSystems
       );
     };

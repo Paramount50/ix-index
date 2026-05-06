@@ -22,7 +22,13 @@ ix-images.lib.mkFleet {
 }
 ```
 
-Outputs `packages.<node>` (OCI archives) and `plan` (JSON for the ix CLI).
+Outputs `packages.<node>` (OCI archives), `plan` (JSON), `command`, and `deploy`.
+
+```nix
+apps.deploy.program = "${fleet.deploy}/bin/ix-fleet-deploy";
+```
+
+`nix run .#deploy` builds the fleet images, pushes them, and deploys nodes in dependency order.
 
 ## Contributing
 
