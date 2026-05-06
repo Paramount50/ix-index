@@ -10,7 +10,7 @@ let
   survivalReplicas = 3;
   replicaNames = name: count: builtins.genList (index: "${name}-${toString index}") count;
   survivalNodes = replicaNames "survival" survivalReplicas;
-  survival = import ./folia-node.nix {
+  survival = import ./nodes/survival.nix {
     inherit forwardingSecret;
     motd = "ix survival";
     extraServerProperties = {
@@ -23,14 +23,14 @@ ix.lib.mkFleet {
   inherit secrets;
 
   nodes = {
-    proxy = import ./proxy.nix {
+    proxy = import ./nodes/proxy.nix {
       inherit
         forwardingSecret
         survivalNodes
         ;
     };
 
-    lobby = import ./folia-node.nix {
+    lobby = import ./nodes/lobby.nix {
       inherit forwardingSecret;
       motd = "ix lobby";
     };

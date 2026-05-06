@@ -4,10 +4,14 @@ This directory is a multi-file example of a production-shaped Minecraft network 
 
 ```text
 examples/minecraft-fleet/
-  flake.nix        # exposes runnable fleet commands
-  default.nix      # defines the fleet graph
-  proxy.nix        # Velocity + Geyser + Floodgate edge node
-  folia-node.nix   # shared Folia backend node module
+  flake.nix          # exposes runnable fleet commands
+  default.nix        # defines the fleet graph
+  nodes/
+    proxy.nix        # Velocity + Geyser + Floodgate edge node
+    lobby.nix        # lobby node
+    survival.nix     # replicated survival node group
+  modules/
+    folia.nix        # shared Folia backend shape
 ```
 
 ## Topology
