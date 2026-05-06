@@ -7,7 +7,6 @@
 {
   defaults ? [ ],
   deployment ? { },
-  groups ? { },
   nodes,
 }:
 let
@@ -37,53 +36,24 @@ let
     in
     merged // { inherit env l7ProxyPorts; };
 
-  normalizeGroup = name: value: {
-    inherit name;
-    modules = moduleList value;
-    tags = lib.unique ([ name ] ++ asList (value.tags or [ ]));
-    deployment = value.deployment or { };
-  };
-
-  normalizedGroups = lib.mapAttrs normalizeGroup groups;
-
-  looksStructured =
-    value:
-    builtins.isAttrs value
-    && lib.any (key: builtins.hasAttr key value) [
-      "module"
-      "modules"
-      "group"
-      "groups"
-      "tags"
-      "deployment"
-      "dependsOn"
-    ];
+  isWrappedNode = value: builtins.isAttrs value && (value ? module || value ? modules);
 
   normalizeNode =
     name: value:
     let
-      spec = if looksStructured value then value else { modules = [ value ]; };
-      groupNames = lib.unique (asList (spec.groups or (spec.group or [ ])));
-      missingGroups = lib.filter (group: !(builtins.hasAttr group normalizedGroups)) groupNames;
-      groupValues = map (group: normalizedGroups.${group}) groupNames;
-      groupModules = lib.concatMap (group: group.modules) groupValues;
-      groupTags = lib.concatMap (group: group.tags) groupValues;
+      spec = if isWrappedNode value then value else { modules = [ value ]; };
       deploymentParts = [
         deploymentDefaults
         deployment
       ]
-      ++ map (group: group.deployment) groupValues
       ++ [
         (spec.deployment or { })
       ];
     in
-    assert lib.assertMsg (
-      missingGroups == [ ]
-    ) "fleet node '${name}' references unknown groups: ${lib.concatStringsSep ", " missingGroups}";
     {
-      inherit name groupNames;
-      modules = asList defaults ++ groupModules ++ moduleList spec;
-      tags = lib.unique (groupTags ++ asList (spec.tags or [ ]));
+      inherit name;
+      modules = asList defaults ++ moduleList spec;
+      tags = lib.unique (asList (spec.tags or [ ]));
       deployment = mergeDeployments deploymentParts;
       dependsOn = asList (spec.dependsOn or [ ]);
     };
@@ -98,10 +68,7 @@ let
           _module.args = {
             inherit name;
             nodes = nodeRefs;
-            fleet = {
-              inherit normalizedGroups;
-              groups = normalizedGroups;
-            };
+            fleet.nodes = nodeRefs;
           };
 
           ix.image.name = lib.mkDefault name;
@@ -135,7 +102,6 @@ let
       ipv4 = deploy.ipv4;
       replace = deploy.replace;
       tags = spec.tags;
-      groups = spec.groupNames;
       env = deploy.env;
       l7ProxyPorts = deploy.l7ProxyPorts;
       dependsOn = spec.dependsOn;

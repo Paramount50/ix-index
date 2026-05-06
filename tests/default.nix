@@ -51,28 +51,17 @@ let
   fleet = ix.mkFleet {
     deployment.region = "hil-1";
 
-    groups.web = {
-      tags = [ "http" ];
-      modules = [
-        {
-          environment.etc."ix-fleet-role".text = "web";
-        }
-      ];
-    };
-
     nodes = {
       db = {
-        modules = [
-          {
-            services.ix-postgresql.enable = true;
-          }
-        ];
-        deployment.destination = "fleet-db:latest";
+        services.ix-postgresql.enable = true;
       };
 
       web = {
-        group = "web";
-        tags = [ "edge" ];
+        tags = [ "public" ];
+        deployment = {
+          destination = "fleet-web:latest";
+          ipv4 = true;
+        };
         modules = [
           (
             { nodes, ... }:
@@ -265,21 +254,24 @@ let
       message = "fleet node modules should be able to reference nodes.<name>.config";
     }
     {
-      assertion = fleetPlan.db.destination == "fleet-db:latest";
-      message = "fleet deployment destination should flow into the generated plan";
+      assertion = fleet.nodes.db.services.ix-postgresql.enable;
+      message = "fleet plain attrset nodes should be treated as modules";
+    }
+    {
+      assertion = fleetPlan.web.destination == "fleet-web:latest";
+      message = "fleet wrapped-node deployment destination should flow into the generated plan";
     }
     {
       assertion = fleetPlan.web.region == "hil-1";
       message = "fleet nodes should inherit the top-level deployment region";
     }
     {
-      assertion =
-        fleetPlan.web.tags == [
-          "web"
-          "http"
-          "edge"
-        ];
-      message = "fleet plan should combine group and node tags in order";
+      assertion = fleetPlan.web.tags == [ "public" ];
+      message = "fleet wrapped-node tags should flow into the generated plan";
+    }
+    {
+      assertion = fleetPlan.web.ipv4;
+      message = "fleet wrapped-node deployment overrides should flow into the generated plan";
     }
   ];
 

@@ -57,7 +57,7 @@ ix-images.lib.mkFleet {
   deployment.region = "hil-1";
 
   nodes = {
-    db = { ... }: {
+    db = {
       services.ix-postgresql.enable = true;
     };
 
