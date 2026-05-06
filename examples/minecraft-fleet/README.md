@@ -21,6 +21,26 @@ examples/minecraft-fleet/
 
 The Velocity/Geyser/Floodgate modules shown here are the intended API shape, not a claim that those modules all exist in this repo today. The OCI image is only the bootstrap artifact; normal updates use `switch` to activate a new NixOS system closure in place.
 
+## Secrets
+
+Velocity modern forwarding needs one shared secret. The proxy uses it to sign forwarded player identity, and the Folia backends use the same secret to trust only the proxy.
+
+In this example the fleet asks ix to generate that secret once and mount it on the proxy and backend nodes:
+
+```nix
+secrets.velocityForwarding = {
+  generate = true;
+  path = "/run/ix-secrets/velocity-forwarding";
+  sharedWith = [
+    "proxy"
+    "lobby"
+    "survival"
+  ];
+};
+```
+
+Then the proxy reads `secretFile = forwardingSecret.path`, and the Folia nodes reference the same file from `paper-global.yml`. The exact `secrets` API is hypothetical here, but the invariant is real: generated once, shared with every node that participates in Velocity forwarding, and rotated deliberately.
+
 ## Use
 
 From this directory:

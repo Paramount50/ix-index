@@ -1,5 +1,5 @@
 {
-  forwardingSecretFile,
+  forwardingSecret,
   motd,
   extraServerProperties ? { },
 }:
@@ -27,7 +27,7 @@
             "config/paper-global.yml".proxies.velocity = {
               enabled = true;
               online-mode = true;
-              secret = "@secret:${toString forwardingSecretFile}";
+              secret = "@secret:${forwardingSecret.path}";
             };
           };
         };

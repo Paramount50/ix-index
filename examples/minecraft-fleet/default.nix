@@ -1,13 +1,24 @@
 { ix }:
 let
-  forwardingSecretFile = /run/secrets/velocity-forwarding-secret;
+  secrets = {
+    velocityForwarding = {
+      generate = true;
+      path = "/run/ix-secrets/velocity-forwarding";
+      sharedWith = [
+        "proxy"
+        "lobby"
+        "survival"
+      ];
+    };
+  };
+  forwardingSecret = secrets.velocityForwarding;
   survivalNodes = [
     "survival-0"
     "survival-1"
     "survival-2"
   ];
   survival = import ./folia-node.nix {
-    inherit forwardingSecretFile;
+    inherit forwardingSecret;
     motd = "ix survival";
     extraServerProperties = {
       view-distance = 10;
@@ -16,13 +27,15 @@ let
   };
 in
 ix.lib.mkFleet {
+  inherit secrets;
+
   nodes = {
     proxy = import ./proxy.nix {
-      inherit forwardingSecretFile survivalNodes;
+      inherit forwardingSecret survivalNodes;
     };
 
     lobby = import ./folia-node.nix {
-      inherit forwardingSecretFile;
+      inherit forwardingSecret;
       motd = "ix lobby";
     };
 

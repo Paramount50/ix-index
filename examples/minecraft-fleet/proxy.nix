@@ -1,5 +1,5 @@
 {
-  forwardingSecretFile,
+  forwardingSecret,
   survivalNodes,
 }:
 {
@@ -23,7 +23,7 @@
           onlineMode = true;
           forwarding = {
             mode = "modern";
-            secretFile = forwardingSecretFile;
+            secretFile = forwardingSecret.path;
           };
 
           servers = {
