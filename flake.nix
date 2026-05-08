@@ -1,27 +1,153 @@
 {
   description = "Pre-built OCI images for ix VMs";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.llm-agents = {
-    url = "github:numtide/llm-agents.nix";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-  inputs.claude-code-nix = {
-    url = "github:sadjow/claude-code-nix";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
-  inputs.codex-cli-nix = {
-    url = "github:sadjow/codex-cli-nix";
-    inputs.nixpkgs.follows = "nixpkgs";
+  inputs = {
+    artifact-tonbo-artifacts = {
+      url = "https://artifacts.tonbo.dev/release/e16636b0e5ce/artifacts";
+      flake = false;
+    };
+
+    artifact-minecraft-server-26w17a-fabric = {
+      url = "https://meta.fabricmc.net/v2/versions/loader/26.2-snapshot-5/0.19.2/1.1.1/server/jar";
+      flake = false;
+    };
+    artifact-minecraft-server-26-1-2-fabric = {
+      url = "https://meta.fabricmc.net/v2/versions/loader/26.1.2/0.19.2/1.1.1/server/jar";
+      flake = false;
+    };
+    artifact-minecraft-server-1-21-11-fabric = {
+      url = "https://meta.fabricmc.net/v2/versions/loader/1.21.11/0.19.2/1.1.1/server/jar";
+      flake = false;
+    };
+    artifact-minecraft-server-1-21-11-paper = {
+      url = "https://api.papermc.io/v2/projects/paper/versions/1.21.11/builds/69/downloads/paper-1.21.11-69.jar";
+      flake = false;
+    };
+
+    artifact-minecraft-mod-almanac = {
+      url = "https://cdn.modrinth.com/data/Gi02250Z/versions/7IRzJzBP/almanac-1.26.x-fabric-1.6.2.1.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-bluemap = {
+      url = "https://cdn.modrinth.com/data/swbUV1cr/versions/D9j76thC/bluemap-5.20-fabric.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-c2me-fabric-26-2-snapshot-5 = {
+      url = "https://cdn.modrinth.com/data/VSNURh3q/versions/h0G6V9wK/c2me-fabric-mc26.2-snapshot-5-0.3.7%2Balpha.0.68.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-c2me-fabric-26-1-2 = {
+      url = "https://cdn.modrinth.com/data/VSNURh3q/versions/utLSz8Lf/c2me-fabric-mc26.1.2-0.3.7%2Balpha.0.68.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-chunky = {
+      url = "https://cdn.modrinth.com/data/fALzjamp/versions/4Eotm6ov/Chunky-Fabric-1.5.3.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-clumps = {
+      url = "https://cdn.modrinth.com/data/Wnxd13zP/versions/RXNrUIjA/Clumps-fabric-26.1.2-26.1.2.1.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-distanthorizons = {
+      url = "https://cdn.modrinth.com/data/uCdwusMi/versions/FJrLlu3p/DistantHorizons-3.0.3-b-26.1.2-fabric-neoforge.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-fabric-api-26-1-2 = {
+      url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/dZsorAUN/fabric-api-0.147.0%2B26.1.2.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-fabric-api-1-21-11 = {
+      url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/i5tSkVBH/fabric-api-0.141.3%2B1.21.11.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-fabric-api-26-2 = {
+      url = "https://cdn.modrinth.com/data/P7dR8mSH/versions/kw0Rlte8/fabric-api-0.147.1%2B26.2.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-ferrite-core = {
+      url = "https://cdn.modrinth.com/data/uXXizFIs/versions/d5ddUdiB/ferritecore-9.0.0-fabric.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-grimac = {
+      url = "https://cdn.modrinth.com/data/LJNGWSvH/versions/65YzWD8i/grimac-fabric-2.3.74-ce86075.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-krypton = {
+      url = "https://cdn.modrinth.com/data/fQEb0iXm/versions/kYAGItyj/krypton-0.3.0.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-ksyxis = {
+      url = "https://cdn.modrinth.com/data/2ecVyZ49/versions/kL32PN9Q/Ksyxis-1.4.3.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-lithium = {
+      url = "https://cdn.modrinth.com/data/gvQqBUqZ/versions/R7MxYvuW/lithium-fabric-0.24.2%2Bmc26.1.2.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-lithostitched = {
+      url = "https://cdn.modrinth.com/data/XaDC71GB/versions/cHH1mPJL/lithostitched-1.7.2-fabric-26.1.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-lmd = {
+      url = "https://cdn.modrinth.com/data/vE2FN5qn/versions/eW5P1rHo/letmedespawn-1.26.x-fabric-1.6.2.1.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-luckperms = {
+      url = "https://cdn.modrinth.com/data/Vebnzrzj/versions/fTIdfb46/LuckPerms-Fabric-5.5.42.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-servercore = {
+      url = "https://cdn.modrinth.com/data/4WWQxlQP/versions/P8k080Af/servercore-fabric-1.5.16%2B26.1.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-simple-voice-chat = {
+      url = "https://cdn.modrinth.com/data/9eGKb6K1/versions/gVPjsMto/voicechat-fabric-2.6.17%2B26.1.2.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-spark = {
+      url = "https://cdn.modrinth.com/data/l6YH9Als/versions/J1GUYyGQ/spark-1.10.172-fabric.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-tectonic = {
+      url = "https://cdn.modrinth.com/data/lWDHr9jE/versions/jL2ZsTzx/tectonic-3.0.22-fabric-26.1.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-terrain-diffusion = {
+      url = "https://github.com/xandergos/terrain-diffusion-mc/releases/download/v2.1.0/terrain-diffusion-mc-2.1.0-cpu%2B1.21.11.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-terralith = {
+      url = "https://cdn.modrinth.com/data/8oi3bsk5/versions/FCzSjHeG/Terralith_26.1_v2.6.2_Fabric.jar";
+      flake = false;
+    };
+    artifact-minecraft-mod-vmp-fabric = {
+      url = "https://cdn.modrinth.com/data/wnEe9KBa/versions/9f7J0dAp/vmp-fabric-mc26.1.2-0.2.0%2Bbeta.7.234-all.jar";
+      flake = false;
+    };
+
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    llm-agents = {
+      url = "github:numtide/llm-agents.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    claude-code-nix = {
+      url = "github:sadjow/claude-code-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    codex-cli-nix = {
+      url = "github:sadjow/codex-cli-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    {
+    inputs@{
       self,
       nixpkgs,
       llm-agents,
       claude-code-nix,
       codex-cli-nix,
+      ...
     }:
     let
       ix = import ./lib {
@@ -31,6 +157,7 @@
           claude-code-nix
           codex-cli-nix
           ;
+        artifactInputs = inputs;
       };
       devSystems = [
         "x86_64-linux"

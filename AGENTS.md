@@ -96,7 +96,7 @@ services.minecraft.mods = {
 };
 ```
 
-The `modCatalog` option maps slugs to `{ url, hash }`. Set by the image base (from `common.json`) and version overlays (from `<version>.json`). The runtime resolves every key in `mods` against the catalog via `pkgs.fetchurl`.
+The `modCatalog` option maps slugs to locked artifact sources. Set by the image base (from `common.json`) and version overlays (from `<version>.json`), then enriched through `ix.artifacts.attachArtifactSources`. The runtime resolves every key in `mods` to a flake-locked store path.
 
 ### Mod modules
 
@@ -167,15 +167,15 @@ This is the only way modules in this repo reach helpers in `lib/`. **Never** use
 - Use a single `services.<name>` block per service. Nest sub-options (loaders, mods) inside it instead of writing separate `services.<name>.<sub> = ...;` assignments.
 - Options that are redundant with their namespace should be shortened. `services.minecraft.folia.version`, not `services.minecraft.folia.minecraftVersion`.
 
-## Hashes
+## Artifact inputs
 
-Hashes are an internal concern of the module or library that declares the fetch. Consumers (images, `versions.nix`) should never need to provide a hash. If a loader module fetches a server jar, the hash belongs inside that module alongside the URL, not in the consumer's config.
+Fixed upstream artifacts belong in `flake.nix` as non-flake inputs. This keeps content hashes in `flake.lock`, so `nix flake update` is the one update path for nixpkgs, tooling flakes, server jars, mod jars, and other pinned downloads.
 
-Fetcher hashes (`pkgs.fetchurl { hash = "sha256-..."; }`) live **inline next to the URL**, in whichever file declares the fetch. For per-package artifacts that's the module declaring the fetch.
+Do not add inline fetcher hashes for tracked repo artifacts. Add or update the artifact URL in the flake inputs, wire the resulting input through `ix.artifacts`, and let the lock file record the `narHash`. `images/games/minecraft/mods/*.json` stores URLs only; `ix.artifacts.attachArtifactSources` attaches the corresponding locked source path at evaluation time.
 
-`flake.lock` only tracks flake inputs (other flakes you import). It does not track arbitrary fetchurl calls. Putting per-image hashes in `flake.nix` would force every version to become a flake input. Inline is the nixpkgs convention; follow it.
+Exception: the Minecraft Bedrock server zip currently stays as `pkgs.fetchurl` with an inline SRI hash because Mojang's endpoint requires `curlOptsList` (`--http1.1` and a browser user-agent). Flake URL inputs cannot express those fetch options.
 
-Tracked Nix files must contain real SRI hashes. Do not write `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSha512`, or placeholder hashes such as `sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=` into the repo, even temporarily. Compute the real hash first, then edit the file. For direct URL fetches, run `nix-prefetch-url --type sha256 <url>` and convert with `nix hash to-sri --type sha256 <hex>`. For other fixed-output derivations, use a pure scratch expression or command outside tracked files to obtain the `got:` hash.
+Tracked Nix files must not contain `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSha512`, or placeholder hashes such as `sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`. If an artifact cannot be represented as a flake input, compute the real SRI hash outside tracked files first and explain why the exception is necessary.
 
 ## Target platform
 
@@ -210,7 +210,7 @@ Run `nix run nixpkgs#ast-grep -- scan` before committing. Hard rules:
 - No `writeShellScriptBin`. Use `writeShellScript` (or `writeShellApplication` for orchestrators).
 - No bare `assert cond;`. Use `assert lib.assertMsg cond "why";`.
 - `strictDeps = true` on every `mkDerivation`. `__structuredAttrs` is the nixpkgs default; do not set it explicitly.
-- `hash = "sha256-...="` (SRI) on fetchers. Never `sha256 = ...`.
+- No inline fetcher hashes for repo-managed artifacts. Prefer non-flake inputs in `flake.nix` so `flake.lock` owns artifact content hashes.
 - No fake hash helpers or placeholder hashes in tracked Nix files. Compute the real SRI hash first.
 - x86_64-linux only. `system` is a single string, not a `forAllSystems` fold.
 

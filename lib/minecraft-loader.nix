@@ -22,9 +22,9 @@ in
 {
   options.services.minecraft.${name} = {
     enable = lib.mkEnableOption "${name} server jar";
-    hash = lib.mkOption {
-      type = lib.types.str;
-      description = "SRI hash of the server jar.";
+    src = lib.mkOption {
+      type = lib.types.path;
+      description = "Locked server jar artifact.";
     };
   }
   // extraOptions;
@@ -32,9 +32,6 @@ in
   config = lib.mkIf cfg.enable {
     services.minecraft.enable = lib.mkDefault true;
     services.minecraft.dropDir = lib.mkDefault dropDir;
-    services.minecraft.serverJar = pkgs.fetchurl {
-      url = urlFor cfg;
-      inherit (cfg) hash;
-    };
+    services.minecraft.serverJar = cfg.src;
   };
 }

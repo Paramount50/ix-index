@@ -8,7 +8,10 @@ let
   pkgs = nixpkgs.legacyPackages.${system};
 
   moduleList = lib.collect builtins.isPath (import ../modules);
-  versions = import ../images/games/minecraft/versions.nix { inherit lib; };
+  versions = import ../images/games/minecraft/versions.nix {
+    inherit lib;
+    inherit (ix) artifacts;
+  };
   defaultMinecraftVersion = versions.default;
   defaultMinecraftModule = versions.${defaultMinecraftVersion};
   minecraftVersions = builtins.attrNames (builtins.removeAttrs versions [ "default" ]);
@@ -18,7 +21,7 @@ let
     (lib.nixosSystem {
       inherit system;
       specialArgs.ix = {
-        inherit (ix) mkMinecraftLoader;
+        inherit (ix) artifacts mkMinecraftLoader;
       };
       modules = [
         ../lib/ix-platform.nix

@@ -1,74 +1,56 @@
 {
   "bluemap": {
-    "hash": "sha512-sUA5DFBWVUkRMPdGU/wOnNlQHzXwAcF0llwTvM9Fu5GQDE7UOezbjYJHI/tXaIogzjdYK3s6SgRiOvCYVPb7LQ==",
     "url": "https://cdn.modrinth.com/data/swbUV1cr/versions/D9j76thC/bluemap-5.20-fabric.jar"
   },
   "c2me-fabric": {
-    "hash": "sha512-NN1gWqgf8ScPlpfPBFHKmmAj5X9Ic0aP8B/BniZNZDT7wMEI4ZSmpnWwJp3Rbtgp95oY6gbTLYms2j+/dnUwLw==",
     "url": "https://cdn.modrinth.com/data/VSNURh3q/versions/utLSz8Lf/c2me-fabric-mc26.1.2-0.3.7%2Balpha.0.68.jar"
   },
   "chunky": {
-    "hash": "sha512-uDv+eyGNCqYjKvl3rnQdwfgrEOUM0Su3WfZc9Ba4tivsy1Q+WH7wuWcKvgOBVmD44JG8aCNiTWXPBzAFcVc1Fg==",
     "url": "https://cdn.modrinth.com/data/fALzjamp/versions/4Eotm6ov/Chunky-Fabric-1.5.3.jar"
   },
   "clumps": {
-    "hash": "sha512-Npwg2Ih8Nsn9RWmnyNrB/8Ub4Da7WHY2BVNQNKWuvZ+7Nd5DzAzIx3TY3QKyqxd2+QvhZX83lrOBB/d57bSneg==",
     "url": "https://cdn.modrinth.com/data/Wnxd13zP/versions/RXNrUIjA/Clumps-fabric-26.1.2-26.1.2.1.jar"
   },
   "distanthorizons": {
-    "hash": "sha512-EbJS3jMI1ymdNGJazmUiPZxdQuUqNAu5yF+gJQwMNUrVlLcvCoJ9nXwEa5XdF6XlAPk5VPFNA9qf2sdZbEG1FA==",
     "url": "https://cdn.modrinth.com/data/uCdwusMi/versions/FJrLlu3p/DistantHorizons-3.0.3-b-26.1.2-fabric-neoforge.jar"
   },
   "fabric-api": {
-    "hash": "sha512-fjwF394NLFXRTvaOQDisHTM17Ujfyk28+ym4c9aYrgaevYXyR9igtIQ35IRCJUmhf/XLv+c00VkVPDvA4AN0Fw==",
     "url": "https://cdn.modrinth.com/data/P7dR8mSH/versions/dZsorAUN/fabric-api-0.147.0%2B26.1.2.jar"
   },
   "ferrite-core": {
-    "hash": "sha512-2B+pfhF4TBnUL4nC9DODHQB2A91xk87kX6F35KapxSs4SxmFhuBKD39jzZlv7XEzIleL3pqNtX4RiIVK5cvlhA==",
     "url": "https://cdn.modrinth.com/data/uXXizFIs/versions/d5ddUdiB/ferritecore-9.0.0-fabric.jar"
   },
   "grimac": {
-    "hash": "sha512-1lWcGD1JsHADp65o47BhkLAtYxihhn4CZ/KL10FqxJrlz3FZa+rHM2kZheS+cbJ9+DBwtN8IokUjIa7Um7nZTw==",
     "url": "https://cdn.modrinth.com/data/LJNGWSvH/versions/65YzWD8i/grimac-fabric-2.3.74-ce86075.jar"
   },
   "krypton": {
-    "hash": "sha512-FCMyECg6dvPPQ1o7jdvL1lqFjSsaELiP9kPAoBSG39K/GEO9NFbNT7hsuzsG8t6gxOZjsZdqSOlt4W07WnB+yQ==",
     "url": "https://cdn.modrinth.com/data/fQEb0iXm/versions/kYAGItyj/krypton-0.3.0.jar"
   },
   "lithium": {
-    "hash": "sha512-kjGtBWZ9Tu8DSMcAv1Fgkp4Lcj2eFF/ZfH/O+Th6wubVJPsV2Z9H+Pg48dI1Mk/XUM3LZgO2OqtghdefvqqzGw==",
     "url": "https://cdn.modrinth.com/data/gvQqBUqZ/versions/R7MxYvuW/lithium-fabric-0.24.2%2Bmc26.1.2.jar"
   },
   "lithostitched": {
-    "hash": "sha512-Dgz7VfZGenrf+EdSbnbV2q8hLrN9KXMHv5fduhLCxiAvVyckht1VD2j/RN9lPCiNaXJMAeflXWlyPMhGuBNFAw==",
     "url": "https://cdn.modrinth.com/data/XaDC71GB/versions/cHH1mPJL/lithostitched-1.7.2-fabric-26.1.jar"
   },
   "luckperms": {
-    "hash": "sha512-v+nw4OLZ3+PBxFYpjb13ivAjENq6tdf7SlT8xKTowmU7rgvoQVHXxSmSBl2YhM2rl+we6mYH5/fPARJqE76GMA==",
     "url": "https://cdn.modrinth.com/data/Vebnzrzj/versions/fTIdfb46/LuckPerms-Fabric-5.5.42.jar"
   },
   "servercore": {
-    "hash": "sha512-uoMix1aWgPQPQWJpNiP0iMF98OjTlKruILvI4aMJeqswk4luqW5oOaNvgXwWV77Ym6UBMW+jmAoVpcBhji0ang==",
     "url": "https://cdn.modrinth.com/data/4WWQxlQP/versions/P8k080Af/servercore-fabric-1.5.16%2B26.1.jar"
   },
   "simple-voice-chat": {
-    "hash": "sha512-HraHpSEOfhWIfoSpMZXdjrz0XYWitlfSfHEa0B7Y6QlvSZ/LhNZWSFSYntLBO2qABmX7s4IimXfREl4NPrWoNg==",
     "url": "https://cdn.modrinth.com/data/9eGKb6K1/versions/gVPjsMto/voicechat-fabric-2.6.17%2B26.1.2.jar"
   },
   "spark": {
-    "hash": "sha512-4Gl2Y2icVFm37ZLyHYawGRu+f2MnrH6Jcq2fYxjveoypPaOoSVRZ7m8UQ8rf92VrFQ6g78gfjPEwDJMBSDovsw==",
     "url": "https://cdn.modrinth.com/data/l6YH9Als/versions/J1GUYyGQ/spark-1.10.172-fabric.jar"
   },
   "tectonic": {
-    "hash": "sha512-GHez55Vq9FJe64dYOScZ/qjGJLC4XDb9Pjd4CvSqWCOjvWmBzv/yc2TJmatJKrz+oCRIonpAS8QeO52SThvJcQ==",
     "url": "https://cdn.modrinth.com/data/lWDHr9jE/versions/jL2ZsTzx/tectonic-3.0.22-fabric-26.1.jar"
   },
   "terralith": {
-    "hash": "sha512-WjvimGpiREbIKoh5405Mewn2+YoZN/1Nm89TVrgyHwuc67XlZ+jQCugWHSYbEI+3yagOvtYfLtuM2whSszy6zA==",
     "url": "https://cdn.modrinth.com/data/8oi3bsk5/versions/FCzSjHeG/Terralith_26.1_v2.6.2_Fabric.jar"
   },
   "vmp-fabric": {
-    "hash": "sha512-JKDfJAeJOxz7VeJ9wcH+8AjfU1GNEYqjJFkk03tkKifXtq/elQ+/XQfEERxErCZNmuVrjYxqm1Ws37kboKFfFg==",
     "url": "https://cdn.modrinth.com/data/wnEe9KBa/versions/9f7J0dAp/vmp-fabric-mc26.1.2-0.2.0%2Bbeta.7.234-all.jar"
   }
 }

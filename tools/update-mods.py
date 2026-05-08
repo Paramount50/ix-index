@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""Query Modrinth and generate per-version mod JSON files for Nix fetchurl."""
+"""Query Modrinth and generate per-version mod URL catalogs."""
 
 import argparse
-import base64
-import binascii
-import hashlib
 import json
 import sys
 import time
@@ -64,19 +61,6 @@ def pick_version(versions: list[dict]) -> dict | None:
     return versions[0]
 
 
-def hex_to_sri(hex_hash: str) -> str:
-    return "sha512-" + base64.b64encode(binascii.unhexlify(hex_hash)).decode()
-
-
-def url_to_sri(url: str) -> str:
-    req = urllib.request.Request(url, headers=HEADERS)
-    h = hashlib.sha256()
-    with urllib.request.urlopen(req) as resp:
-        while chunk := resp.read(1024 * 1024):
-            h.update(chunk)
-    return "sha256-" + base64.b64encode(h.digest()).decode()
-
-
 def primary_file(version: dict) -> dict:
     return next((f for f in version["files"] if f["primary"]), version["files"][0])
 
@@ -87,7 +71,7 @@ def resolve(
     loader: str,
     resolved: dict[str, dict] | None = None,
 ) -> dict[str, dict]:
-    """Resolve mod identifiers to slug -> {url, hash} dicts, including transitive required deps."""
+    """Resolve mod identifiers to slug -> {url} dicts, including transitive required deps."""
     if resolved is None:
         resolved = {}
 
@@ -100,7 +84,6 @@ def resolve(
             url = ref["url"]
             resolved[slug] = {
                 "url": url,
-                "hash": url_to_sri(url),
             }
             print(f"  {slug}: explicit artifact", file=sys.stderr)
             continue
@@ -120,7 +103,6 @@ def resolve(
         f = primary_file(version)
         resolved[proj["slug"]] = {
             "url": f["url"],
-            "hash": hex_to_sri(f["hashes"]["sha512"]),
         }
         print(f"  {proj['slug']}: {version['name']}", file=sys.stderr)
 
@@ -178,7 +160,7 @@ def generate(manifest_path: Path, output_dir: Path, only_version: str | None):
 
 
 def write_json(path: Path, catalog: dict[str, dict]):
-    """Write {slug: {url, hash}} sorted by slug for deterministic diffs."""
+    """Write {slug: {url}} sorted by slug for deterministic diffs."""
     sorted_catalog = dict(sorted(catalog.items()))
     path.write_text(json.dumps(sorted_catalog, indent=2, sort_keys=True) + "\n")
     print(f"  wrote {path} ({len(catalog)} mods)", file=sys.stderr)

@@ -1,16 +1,13 @@
 {
   stdenvNoCC,
-  fetchurl,
+  src,
 }:
 
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "tonbo-artifacts";
   version = "e16636b0e5ce";
 
-  src = fetchurl {
-    url = "https://artifacts.tonbo.dev/release/${finalAttrs.version}/artifacts";
-    hash = "sha256-sYSENVI+l1DOfRtpnROkPY0/hJQoOjP1EsagrXSwIWY=";
-  };
+  inherit src;
 
   dontUnpack = true;
   dontBuild = true;

@@ -10,6 +10,7 @@ note: |
   NIXPKGS: Yes — nixpkgs#310373 tracks migration. nixpkgs reviewers routinely
   request 'hash' over 'sha256'. Community consensus is strong and CI linting
   is planned (nixpkgs#410468).
-  REPO: Preferred by convention. Use hash = "sha256-...=" SRI format.
+  REPO: Prefer flake-locked non-flake inputs for repo-managed artifacts. If a
+  fetcher hash is unavoidable, use hash = "sha256-...=" SRI format, not sha256.
 rule:
   pattern: sha256 = $VAL
