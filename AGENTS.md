@@ -173,9 +173,9 @@ Fixed upstream artifacts belong in `flake.nix` as non-flake inputs. This keeps c
 
 Do not add inline fetcher hashes for tracked repo artifacts. Add or update the artifact URL in the flake inputs, wire the resulting input through `ix.artifacts`, and let the lock file record the `narHash`. `images/games/minecraft/mods/*.json` stores URLs only; `ix.artifacts.attachArtifactSources` attaches the corresponding locked source path at evaluation time.
 
-Exception: the Minecraft Bedrock server zip currently stays as `pkgs.fetchurl` with an inline SRI hash because Mojang's endpoint requires `curlOptsList` (`--http1.1` and a browser user-agent). Flake URL inputs cannot express those fetch options.
+If an upstream cannot be fetched as a flake input, do not add a repo-managed download for it. Leave the module package as an explicit option until there is a flake-lockable source.
 
-Tracked Nix files must not contain `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSha512`, or placeholder hashes such as `sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`. If an artifact cannot be represented as a flake input, compute the real SRI hash outside tracked files first and explain why the exception is necessary.
+Tracked Nix files must not contain `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSha512`, or placeholder hashes such as `sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`.
 
 ## Target platform
 
