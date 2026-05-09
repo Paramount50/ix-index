@@ -26,7 +26,7 @@ let
     region = "hil-1";
     ipv4 = false;
     snapshot = true;
-    switch.buildOn = "auto";
+    switch.buildOn = "remote";
   };
 
   mergeDeployments =
@@ -127,8 +127,10 @@ let
       imageTag = config.ix.image.tag;
       deploy = spec.deployment;
       destination = deploy.destination or "${imageName}:${imageTag}";
-      switchTarget = deploy.switch.target or "${config.system.build.toplevel}";
-      switchBuildOn = deploy.switch.buildOn or "auto";
+      switchTarget =
+        deploy.switch.target or builtins.unsafeDiscardStringContext
+          config.system.build.toplevel.drvPath;
+      switchBuildOn = deploy.switch.buildOn or "remote";
     in
     {
       inherit
@@ -136,7 +138,7 @@ let
         ;
       baseName = spec.baseName;
       replicaIndex = spec.replicaIndex or null;
-      system = "${config.system.build.toplevel}";
+      system = builtins.unsafeDiscardStringContext "${config.system.build.toplevel}";
       switch = {
         target = switchTarget;
         buildOn = switchBuildOn;
@@ -147,7 +149,8 @@ let
           imageTag
           destination
           ;
-        source = "${config.ix.build.ociImage}";
+        source = builtins.unsafeDiscardStringContext "${config.ix.build.ociImage}";
+        sourceDrv = builtins.unsafeDiscardStringContext config.ix.build.ociImage.drvPath;
       };
       region = deploy.region;
       ipv4 = deploy.ipv4;

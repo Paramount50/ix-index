@@ -65,10 +65,6 @@ let
         deployment = {
           destination = "fleet-web:latest";
           ipv4 = true;
-          switch = {
-            target = "github:indexable-inc/images#web-system";
-            buildOn = "remote";
-          };
         };
         modules = [
           (
@@ -309,10 +305,16 @@ let
     {
       assertion =
         fleetPlan.web.switch == {
-          target = "github:indexable-inc/images#web-system";
+          target = builtins.unsafeDiscardStringContext fleet.nodes.web.system.build.toplevel.drvPath;
           buildOn = "remote";
         };
-      message = "fleet plans should expose explicit switch target metadata";
+      message = "fleet plans should default to local eval and remote build switch metadata";
+    }
+    {
+      assertion =
+        fleetPlan.web.bootstrapImage.sourceDrv
+        == builtins.unsafeDiscardStringContext fleet.nodes.web.ix.build.ociImage.drvPath;
+      message = "fleet plans should expose bootstrap image derivations without forcing local image builds";
     }
     {
       assertion = fleetPlan.web.region == "hil-1";

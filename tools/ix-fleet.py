@@ -31,6 +31,7 @@ class BootstrapImage(BaseModel):
     imageTag: str = Field(min_length=1)
     destination: str = Field(min_length=1)
     source: str = Field(min_length=1)
+    sourceDrv: str = Field(min_length=1)
 
 
 class SwitchSpec(BaseModel):
@@ -157,17 +158,24 @@ async def maybe_await(value: typing.Any) -> typing.Any:
 
 async def push_bootstrap_image(client: typing.Any, node: FleetNode, *, dry_run: bool) -> str:
     image = node.bootstrapImage
+    source = image.source
+    if not dry_run and not Path(source).exists():
+        out = run_cli(["nix-store", "--realise", image.sourceDrv], dry_run=False)
+        realised = [line.strip() for line in out.splitlines() if line.strip()]
+        if realised:
+            source = realised[-1]
+
     push_archive = getattr(client, "push_image_archive", None) if client is not None else None
     if push_archive is not None:
-        step(f"push {image.source} -> {image.destination}")
+        step(f"push {source} -> {image.destination}")
         if dry_run:
             return image.destination
-        pushed = await maybe_await(push_archive(source=image.source, destination=image.destination))
+        pushed = await maybe_await(push_archive(source=source, destination=image.destination))
         if not isinstance(pushed, str):
             raise TypeError("ix_sdk.Client.push_image_archive must return the pushed image ref")
         return pushed
 
-    out = run_cli(["ix", "push", image.source, image.destination], dry_run=dry_run)
+    out = run_cli(["ix", "push", source, image.destination], dry_run=dry_run)
     refs = [line.strip() for line in out.splitlines() if line.strip()]
     return refs[-1] if refs else image.destination
 
