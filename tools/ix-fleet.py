@@ -142,22 +142,7 @@ def run_cli(command: list[str], *, dry_run: bool) -> str:
     return result.stdout
 
 
-def import_ix_sdk() -> typing.Any:
-    try:
-        import ix_sdk  # type: ignore[import-not-found]
-    except ModuleNotFoundError:
-        return None
-    client = getattr(ix_sdk, "Client", None) or getattr(ix_sdk, "IxClient", None)
-    return None if client is None else client()
-
-
-async def maybe_await(value: typing.Any) -> typing.Any:
-    if typing.is_awaitable(value):
-        return await value
-    return value
-
-
-async def push_bootstrap_image(client: typing.Any, node: FleetNode, *, dry_run: bool) -> str:
+async def push_bootstrap_image(node: FleetNode, *, dry_run: bool) -> str:
     image = node.bootstrapImage
     source = image.source
     if not dry_run and not Path(source).exists():
@@ -166,36 +151,12 @@ async def push_bootstrap_image(client: typing.Any, node: FleetNode, *, dry_run: 
         if realised:
             source = realised[-1]
 
-    push_archive = getattr(client, "push_image_archive", None) if client is not None else None
-    if push_archive is not None:
-        step(f"push {source} -> {image.destination}")
-        if dry_run:
-            return image.destination
-        pushed = await maybe_await(push_archive(source=source, destination=image.destination))
-        if not isinstance(pushed, str):
-            raise TypeError("ix_sdk.Client.push_image_archive must return the pushed image ref")
-        return pushed
-
     out = run_cli(["ix", "push", source, image.destination], dry_run=dry_run)
     refs = [line.strip() for line in out.splitlines() if line.strip()]
     return refs[-1] if refs else image.destination
 
 
-async def node_exists(client: typing.Any, node: FleetNode) -> bool:
-    find_by_name = getattr(client, "find_by_name", None) if client is not None else None
-    if find_by_name is not None:
-        return await maybe_await(find_by_name(node.name)) is not None
-
-    get_by_name = getattr(client, "get_by_name", None) if client is not None else None
-    if get_by_name is not None:
-        try:
-            await maybe_await(get_by_name(node.name))
-        except Exception as error:
-            if error.__class__.__name__ == "IxNotFoundError":
-                return False
-            raise
-        return True
-
+async def node_exists(node: FleetNode) -> bool:
     out = run_cli(["ix", "ls", "--output", "json"], dry_run=False)
     rows = json.loads(out)
     if not isinstance(rows, list):
@@ -203,29 +164,7 @@ async def node_exists(client: typing.Any, node: FleetNode) -> bool:
     return any(isinstance(row, dict) and row.get("name") == node.name for row in rows)
 
 
-async def create_node(client: typing.Any, node: FleetNode, image: str, *, dry_run: bool) -> None:
-    create = getattr(client, "create", None) if client is not None else None
-    if create is not None:
-        step(f"create {node.name} from {image}")
-        if not dry_run:
-            await maybe_await(
-                create(
-                    image,
-                    name=node.name,
-                    region=node.region,
-                    env=node.env,
-                    l7_proxy_ports=node.l7ProxyPorts,
-                    ipv4=node.ipv4,
-                )
-            )
-        return
-
-    if node.env or node.l7ProxyPorts:
-        raise RuntimeError(
-            f"node {node.name!r} needs typed ix_sdk create support "
-            "(env/l7 ports are not representable through the current ix CLI fallback)"
-        )
-
+async def create_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
     command = [
         "ix",
         "new",
@@ -236,79 +175,39 @@ async def create_node(client: typing.Any, node: FleetNode, image: str, *, dry_ru
         node.region,
         "--no-shell",
     ]
+    for name, value in sorted(node.env.items()):
+        command.extend(["--env", f"{name}={value}"])
+    for port in node.l7ProxyPorts:
+        command.extend(["--l7-proxy-port", str(port)])
     if node.ipv4:
         command.append("--ipv4")
     run_cli(command, dry_run=dry_run)
 
 
-async def ensure_node(client: typing.Any, node: FleetNode, *, dry_run: bool) -> bool:
+async def ensure_node(node: FleetNode, *, dry_run: bool) -> bool:
     if dry_run:
         step(f"ensure {node.name} exists from {node.bootstrapImage.destination}")
         return False
-    if await node_exists(client, node):
+    if await node_exists(node):
         return False
 
-    image = await push_bootstrap_image(client, node, dry_run=False)
-    await create_node(client, node, image, dry_run=False)
+    image = await push_bootstrap_image(node, dry_run=False)
+    await create_node(node, image, dry_run=False)
     return True
 
 
-async def snapshot_node(client: typing.Any, node: FleetNode, *, dry_run: bool) -> None:
-    snapshot = getattr(client, "snapshot", None) if client is not None else None
-    if snapshot is None:
-        run_cli(["ix", "snapshot", "create", node.name], dry_run=dry_run)
-        return
-    step(f"snapshot {node.name}")
-    if not dry_run:
-        await maybe_await(snapshot(name=node.name))
+async def snapshot_node(node: FleetNode, *, dry_run: bool) -> None:
+    run_cli(["ix", "snapshot", "create", node.name], dry_run=dry_run)
 
 
-async def switch_node(client: typing.Any, node: FleetNode, *, dry_run: bool) -> None:
-    switch_system = getattr(client, "switch_system", None) if client is not None else None
-    if switch_system is None:
-        run_cli(
-            ["ix", "switch", node.name, node.switch.target, "--build-on", node.switch.buildOn],
-            dry_run=dry_run,
-        )
-        return
-    step(f"switch {node.name} -> {node.switch.target} ({node.switch.buildOn})")
-    if not dry_run:
-        await maybe_await(
-            switch_system(
-                name=node.name,
-                target=node.switch.target,
-                build_on=node.switch.buildOn,
-                region=node.region,
-                env=node.env,
-                l7_proxy_ports=node.l7ProxyPorts,
-                ipv4=node.ipv4,
-            )
-        )
+async def switch_node(node: FleetNode, *, dry_run: bool) -> None:
+    run_cli(
+        ["ix", "switch", node.name, node.switch.target, "--build-on", node.switch.buildOn],
+        dry_run=dry_run,
+    )
 
 
-async def replace_node(client: typing.Any, node: FleetNode, image: str, *, dry_run: bool) -> None:
-    replace = getattr(client, "replace", None) if client is not None else None
-    if replace is not None:
-        step(f"replace {node.name} from {image}")
-        if not dry_run:
-            await maybe_await(
-                replace(
-                    name=node.name,
-                    image=image,
-                    region=node.region,
-                    env=node.env,
-                    l7_proxy_ports=node.l7ProxyPorts,
-                    ipv4=node.ipv4,
-                )
-            )
-        return
-
-    if node.env or node.l7ProxyPorts:
-        raise RuntimeError(
-            f"node {node.name!r} needs typed ix_sdk replace support "
-            "(env/l7 ports are not representable through the current ix CLI fallback)"
-        )
-
+async def replace_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
     command = [
         "ix",
         "new",
@@ -319,42 +218,35 @@ async def replace_node(client: typing.Any, node: FleetNode, image: str, *, dry_r
         node.region,
         "--no-shell",
     ]
+    for name, value in sorted(node.env.items()):
+        command.extend(["--env", f"{name}={value}"])
+    for port in node.l7ProxyPorts:
+        command.extend(["--l7-proxy-port", str(port)])
     if node.ipv4:
         command.append("--ipv4")
     run_cli(command, dry_run=dry_run)
 
 
 async def cmd_diff(plan: FleetPlan, args: argparse.Namespace) -> None:
-    client = None if args.dry_run else import_ix_sdk()
-    diff = getattr(client, "diff_system", None) if client is not None else None
-    if diff is None:
-        for node in selected_nodes(plan, args.on):
-            print(f"{node.name}\twant system {node.system}")
-        return
-
-    rows = []
     for node in selected_nodes(plan, args.on):
-        rows.append(await maybe_await(diff(name=node.name, system=node.system)))
-    print(json.dumps(rows, indent=2, default=str))
+        print(f"{node.name}\twant {node.switch.target} ({node.switch.buildOn})")
 
 
 async def cmd_switch(plan: FleetPlan, args: argparse.Namespace) -> None:
-    client = None if args.dry_run else import_ix_sdk()
     for node in selected_nodes(plan, args.on):
-        created = await ensure_node(client, node, dry_run=args.dry_run)
+        created = await ensure_node(node, dry_run=args.dry_run)
         if not created and node.snapshot and not args.no_snapshot:
-            await snapshot_node(client, node, dry_run=args.dry_run)
+            await snapshot_node(node, dry_run=args.dry_run)
         if not created:
-            await switch_node(client, node, dry_run=args.dry_run)
+            await switch_node(node, dry_run=args.dry_run)
 
 
 async def cmd_replace(plan: FleetPlan, args: argparse.Namespace) -> None:
-    client = None if args.dry_run else import_ix_sdk()
     for node in selected_nodes(plan, args.on):
         image = node.bootstrapImage.destination
         if not args.skip_push:
-            image = await push_bootstrap_image(client, node, dry_run=args.dry_run)
-        await replace_node(client, node, image, dry_run=args.dry_run)
+            image = await push_bootstrap_image(node, dry_run=args.dry_run)
+        await replace_node(node, image, dry_run=args.dry_run)
 
 
 def parser() -> argparse.ArgumentParser:
