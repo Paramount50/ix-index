@@ -6,6 +6,10 @@
     let
       ix = ix-images;
       fleet = import ./default.nix { inherit ix; };
+      systems = [
+        "x86_64-linux"
+        "aarch64-darwin"
+      ];
     in
     {
       apps.x86_64-linux = {
@@ -25,8 +29,13 @@
         };
       };
 
-      packages.x86_64-linux = fleet.packages // {
-        inherit (fleet) command switch;
-      };
+      packages = builtins.listToAttrs (
+        map (system: {
+          name = system;
+          value = fleet.packages // {
+            inherit (fleet) command switch;
+          };
+        }) systems
+      );
     };
 }

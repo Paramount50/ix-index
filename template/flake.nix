@@ -7,8 +7,12 @@
 
   outputs =
     { ix-images, ... }:
-    {
-      packages.x86_64-linux.default = ix-images.lib.mkImage {
+    let
+      systems = [
+        "x86_64-linux"
+        "aarch64-darwin"
+      ];
+      image = ix-images.lib.mkImage {
         modules = [
           (
             { pkgs, ... }:
@@ -26,5 +30,13 @@
           )
         ];
       };
+    in
+    {
+      packages = builtins.listToAttrs (
+        map (system: {
+          name = system;
+          value.default = image;
+        }) systems
+      );
     };
 }

@@ -12,9 +12,7 @@ ix.mkMinecraftLoader {
   inherit config lib pkgs;
   name = "purpur";
   dropDir = "plugins";
-  urlFor =
-    cfg:
-    "https://api.purpurmc.org/v2/purpur/${cfg.version}/${toString cfg.build}/download";
+  urlFor = cfg: "https://api.purpurmc.org/v2/purpur/${cfg.version}/${toString cfg.build}/download";
   extraOptions = {
     version = lib.mkOption { type = lib.types.str; };
     build = lib.mkOption { type = lib.types.int; };

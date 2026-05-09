@@ -39,7 +39,7 @@
         # FHS layout pointing into the NixOS toplevel. dockerTools doesn't
         # ship `/init` or the standard /bin, /etc, /usr paths, so we stage
         # symlinks as a separate input and let dockerTools layer them in.
-        systemRoot = pkgs.runCommand "system-root" {} ''
+        systemRoot = pkgs.runCommand "system-root" { } ''
           mkdir -p $out
           ln -s ${toplevel}/init $out/init
           ln -s ${toplevel}/etc $out/etc
@@ -66,10 +66,8 @@
           config.Entrypoint = [ "${toplevel}/init" ];
         };
       in
-      pkgs.runCommand "${config.ix.image.name}-oci.tar"
-        { nativeBuildInputs = [ pkgs.python3 ]; }
-        ''
-          ${stream} | python3 ${./docker-to-oci.py} > "$out"
-        '';
+      pkgs.runCommand "${config.ix.image.name}-oci.tar" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+        ${stream} | python3 ${./docker-to-oci.py} > "$out"
+      '';
   };
 }

@@ -163,15 +163,21 @@
         "x86_64-linux"
         "aarch64-darwin"
       ];
+      imagePackages = (ix.discoverImages ./images) // {
+        inherit (ix.pkgs) tonbo-artifacts;
+      };
     in
     {
       lib = ix;
       modules = import ./modules;
       overlays.default = ix.overlay;
 
-      packages.${ix.system} = (ix.discoverImages ./images) // {
-        inherit (ix.pkgs) tonbo-artifacts;
-      };
+      packages = builtins.listToAttrs (
+        map (system: {
+          name = system;
+          value = imagePackages;
+        }) devSystems
+      );
       checks.${ix.system}.eval = import ./tests { inherit nixpkgs ix; };
       formatter = builtins.listToAttrs (
         map (system: {

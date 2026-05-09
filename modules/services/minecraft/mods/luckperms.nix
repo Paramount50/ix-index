@@ -2,7 +2,12 @@
 #
 # Activated when `services.minecraft.mods.luckperms` is set.
 # Optionally provisions MariaDB for permission storage when `mysql = true`.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   modCfg = config.services.minecraft.mods.luckperms or null;
   defaults = {
@@ -17,7 +22,12 @@ in
       package = lib.mkDefault pkgs.mariadb;
       ensureDatabases = [ "luckperms" ];
       ensureUsers = [
-        { name = "minecraft"; ensurePermissions = { "luckperms.*" = "ALL PRIVILEGES"; }; }
+        {
+          name = "minecraft";
+          ensurePermissions = {
+            "luckperms.*" = "ALL PRIVILEGES";
+          };
+        }
       ];
     };
 

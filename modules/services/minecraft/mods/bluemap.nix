@@ -3,7 +3,12 @@
 # Activated when `services.minecraft.mods.bluemap` is set.
 # Opens the web server port in the firewall. Optionally provisions MariaDB
 # for tile storage when `mysql = true`.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   modCfg = config.services.minecraft.mods.bluemap or null;
   defaults = {
@@ -26,7 +31,12 @@ in
       package = lib.mkDefault pkgs.mariadb;
       ensureDatabases = [ "bluemap" ];
       ensureUsers = [
-        { name = "minecraft"; ensurePermissions = { "bluemap.*" = "ALL PRIVILEGES"; }; }
+        {
+          name = "minecraft";
+          ensurePermissions = {
+            "bluemap.*" = "ALL PRIVILEGES";
+          };
+        }
       ];
     };
 

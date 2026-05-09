@@ -87,7 +87,8 @@ in
 
         # JIT
         jit = "on";
-      } // cfg.extraSettings;
+      }
+      // cfg.extraSettings;
     };
   };
 }

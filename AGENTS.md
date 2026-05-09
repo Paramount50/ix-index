@@ -42,7 +42,7 @@ nix/rules/                                 # ast-grep lint rules
 
 ## Adding an image
 
-Drop a NixOS module at `images/<category>/<name>/default.nix`. That's it: discovery picks it up on the next eval and exposes `packages.x86_64-linux.<name>`. No flake edits, no registry edits.
+Drop a NixOS module at `images/<category>/<name>/default.nix`. That's it: discovery picks it up on the next eval and exposes `packages.<host>.<name>` for the supported dev systems. The derivation still targets `x86_64-linux`. No flake edits, no registry edits.
 
 For a versioned image (multiple variants ship at once), add a `versions.nix` sibling:
 
@@ -212,7 +212,7 @@ Run `nix run nixpkgs#ast-grep -- scan` before committing. Hard rules:
 - `strictDeps = true` on every `mkDerivation`. `__structuredAttrs` is the nixpkgs default; do not set it explicitly.
 - No inline fetcher hashes for repo-managed artifacts. Prefer non-flake inputs in `flake.nix` so `flake.lock` owns artifact content hashes.
 - No fake hash helpers or placeholder hashes in tracked Nix files. Compute the real SRI hash first.
-- x86_64-linux only. `system` is a single string, not a `forAllSystems` fold.
+- Image target is x86_64-linux only. Host-visible flake package namespaces may include developer systems such as aarch64-darwin, but they should point at the same Linux image derivations rather than changing the image target.
 
 ## Issues
 
