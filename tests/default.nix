@@ -65,6 +65,10 @@ let
         deployment = {
           destination = "fleet-web:latest";
           ipv4 = true;
+          switch = {
+            target = "github:indexable-inc/images#web-system";
+            buildOn = "remote";
+          };
         };
         modules = [
           (
@@ -301,6 +305,14 @@ let
     {
       assertion = fleetPlan.web.system == "${fleet.nodes.web.system.build.toplevel}";
       message = "fleet plans should expose the NixOS system closure for switch";
+    }
+    {
+      assertion =
+        fleetPlan.web.switch == {
+          target = "github:indexable-inc/images#web-system";
+          buildOn = "remote";
+        };
+      message = "fleet plans should expose explicit switch target metadata";
     }
     {
       assertion = fleetPlan.web.region == "hil-1";

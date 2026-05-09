@@ -33,6 +33,13 @@ class BootstrapImage(BaseModel):
     source: str = Field(min_length=1)
 
 
+class SwitchSpec(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target: str = Field(min_length=1)
+    buildOn: typing.Literal["auto", "local", "remote"] = "auto"
+
+
 class FleetNode(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -40,6 +47,7 @@ class FleetNode(BaseModel):
     baseName: str = Field(min_length=1)
     replicaIndex: int | None = None
     system: str = Field(min_length=1)
+    switch: SwitchSpec
     bootstrapImage: BootstrapImage
     region: str = Field(min_length=1)
     ipv4: bool
@@ -177,14 +185,18 @@ async def snapshot_node(client: typing.Any, node: FleetNode, *, dry_run: bool) -
 async def switch_node(client: typing.Any, node: FleetNode, *, dry_run: bool) -> None:
     switch_system = getattr(client, "switch_system", None) if client is not None else None
     if switch_system is None:
-        run_cli(["ix", "switch", node.name, node.system], dry_run=dry_run)
+        run_cli(
+            ["ix", "switch", node.name, node.switch.target, "--build-on", node.switch.buildOn],
+            dry_run=dry_run,
+        )
         return
-    step(f"switch {node.name} -> {node.system}")
+    step(f"switch {node.name} -> {node.switch.target} ({node.switch.buildOn})")
     if not dry_run:
         await maybe_await(
             switch_system(
                 name=node.name,
-                system=node.system,
+                target=node.switch.target,
+                build_on=node.switch.buildOn,
                 region=node.region,
                 env=node.env,
                 l7_proxy_ports=node.l7ProxyPorts,
