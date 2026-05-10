@@ -23,6 +23,7 @@ let
       [ ];
 
   deploymentDefaults = {
+    bootstrapImage = "registry.ix.dev/ix/test-cluster-bootstrap:a00f95b4a00a07fa";
     region = "hil-1";
     ipv4 = false;
     snapshot = true;
@@ -126,7 +127,7 @@ let
       imageName = config.ix.image.name;
       imageTag = config.ix.image.tag;
       deploy = spec.deployment;
-      destination = deploy.destination or "${imageName}:${imageTag}";
+      replacementDestination = deploy.destination or "${imageName}:${imageTag}";
       switchTarget =
         deploy.switch.target or builtins.unsafeDiscardStringContext
           config.system.build.toplevel.drvPath;
@@ -142,13 +143,16 @@ let
       switch = {
         target = switchTarget;
         buildOn = switchBuildOn;
+        sourceInstallable = deploy.switch.sourceInstallable or ".#${name}-system";
+        overrideInputs = deploy.switch.overrideInputs or { };
       };
-      bootstrapImage = {
+      bootstrapImage = deploy.bootstrapImage;
+      replacementImage = {
         inherit
           imageName
           imageTag
-          destination
           ;
+        destination = replacementDestination;
         source = builtins.unsafeDiscardStringContext "${config.ix.build.ociImage}";
         sourceDrv = builtins.unsafeDiscardStringContext config.ix.build.ociImage.drvPath;
       };
@@ -193,4 +197,7 @@ in
   nodes = nodeConfigs;
   meta = nodeSpecs;
   packages = lib.mapAttrs (name: config: config.ix.build.ociImage) nodeConfigs;
+  systemPackages = lib.mapAttrs' (
+    name: config: lib.nameValuePair "${name}-system" config.system.build.toplevel
+  ) nodeConfigs;
 }

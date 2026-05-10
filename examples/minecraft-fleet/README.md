@@ -24,7 +24,7 @@ examples/minecraft-fleet/
 - `survival` expands into stable VM identities: `survival-0`, `survival-1`, `survival-2`.
 - Every VM automatically has two virtio-net devices: north-south for public ingress and east-west for the private mesh. Users do not define or attach these networks.
 
-The Velocity/Geyser/Floodgate modules shown here are the intended API shape, not a claim that those modules all exist in this repo today. The OCI image is only the bootstrap artifact; normal updates use `switch` to activate a new NixOS system closure in place.
+The Velocity/Geyser/Floodgate modules shown here are the intended API shape, not a claim that those modules all exist in this repo today. Missing VMs start from the shared ix NixOS bootstrap image; normal updates use `switch` to activate the desired NixOS system closure in place.
 
 ## Secrets
 

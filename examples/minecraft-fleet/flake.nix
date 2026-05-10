@@ -46,6 +46,7 @@
               fleet = fleetFor system;
             in
             fleet.packages
+            // fleet.systemPackages
             // {
               inherit (fleet) command switch;
             };

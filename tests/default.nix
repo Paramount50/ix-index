@@ -295,26 +295,41 @@ let
       message = "fleet plain attrset nodes should be treated as modules";
     }
     {
-      assertion = fleetPlan.web.bootstrapImage.destination == "fleet-web:latest";
-      message = "fleet wrapped-node deployment destination should flow into the generated plan";
+      assertion =
+        fleetPlan.web.bootstrapImage == "registry.ix.dev/ix/test-cluster-bootstrap:a00f95b4a00a07fa";
+      message = "fleet switches should create missing nodes from the shared NixOS bootstrap image";
+    }
+    {
+      assertion = fleetPlan.web.replacementImage.destination == "fleet-web:latest";
+      message = "fleet wrapped-node deployment destination should flow into the replacement image plan";
     }
     {
       assertion = fleetPlan.web.system == "${fleet.nodes.web.system.build.toplevel}";
       message = "fleet plans should expose the NixOS system closure for switch";
     }
     {
+      assertion = fleet.systemPackages.web-system == fleet.nodes.web.system.build.toplevel;
+      message = "fleet system package outputs should match default source switch installables";
+    }
+    {
+      assertion = fleet.packages.web == fleet.nodes.web.ix.build.ociImage;
+      message = "fleet replacement package outputs should keep node names";
+    }
+    {
       assertion =
         fleetPlan.web.switch == {
           target = builtins.unsafeDiscardStringContext fleet.nodes.web.system.build.toplevel.drvPath;
           buildOn = "remote";
+          sourceInstallable = ".#web-system";
+          overrideInputs = { };
         };
       message = "fleet plans should default to local eval and remote build switch metadata";
     }
     {
       assertion =
-        fleetPlan.web.bootstrapImage.sourceDrv
+        fleetPlan.web.replacementImage.sourceDrv
         == builtins.unsafeDiscardStringContext fleet.nodes.web.ix.build.ociImage.drvPath;
-      message = "fleet plans should expose bootstrap image derivations without forcing local image builds";
+      message = "fleet plans should expose replacement image derivations without forcing local image builds";
     }
     {
       assertion = fleetPlan.web.region == "hil-1";

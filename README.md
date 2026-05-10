@@ -14,11 +14,11 @@ Building on macOS still needs a Linux builder configured for the resulting `x86_
 
 ## Fleets
 
-Fleets are VM-level NixOS systems, not primarily OCI rollouts. The OCI image is only the bootstrap artifact for creating or intentionally replacing a VM; normal updates use `switch` to activate a new NixOS system closure in place.
+Fleets are VM-level NixOS systems, not primarily OCI rollouts. Missing VMs are created from a shared ix NixOS bootstrap image, then `switch` activates the desired system closure in place. Node-specific OCI archives are only for intentional VM replacement.
 
 See [examples/minecraft-fleet/README.md](examples/minecraft-fleet/README.md) for a multi-file hypothetical Minecraft network using Velocity, Geyser, Floodgate, and replicated Folia shards.
 
-Outputs `packages.<node>` (bootstrap OCI archives), `plan` (JSON), `command`, and `switch`.
+Outputs `packages.<node>` (replacement OCI archives), `packages.<node>-system` (NixOS systems), `plan` (JSON), `command`, and `switch`.
 
 ```nix
 apps.switch.program = "${fleet.switch}/bin/ix-fleet-switch";

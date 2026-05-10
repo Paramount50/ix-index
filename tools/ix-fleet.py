@@ -24,7 +24,7 @@ def empty_str_dict() -> dict[str, str]:
     return {}
 
 
-class BootstrapImage(BaseModel):
+class ReplacementImage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     imageName: str = Field(min_length=1)
@@ -39,6 +39,8 @@ class SwitchSpec(BaseModel):
 
     target: str = Field(min_length=1)
     buildOn: typing.Literal["auto", "local", "remote"] = "auto"
+    sourceInstallable: str = Field(min_length=1)
+    overrideInputs: dict[str, str] = Field(default_factory=empty_str_dict)
 
 
 class FleetNode(BaseModel):
@@ -49,7 +51,8 @@ class FleetNode(BaseModel):
     replicaIndex: int | None = None
     system: str = Field(min_length=1)
     switch: SwitchSpec
-    bootstrapImage: BootstrapImage
+    bootstrapImage: str = Field(min_length=1)
+    replacementImage: ReplacementImage
     region: str = Field(min_length=1)
     ipv4: bool
     snapshot: bool
@@ -142,8 +145,42 @@ def run_cli(command: list[str], *, dry_run: bool) -> str:
     return result.stdout
 
 
-async def push_bootstrap_image(node: FleetNode, *, dry_run: bool) -> str:
-    image = node.bootstrapImage
+async def wait_node_ready(node: FleetNode, *, dry_run: bool) -> None:
+    command = [
+        "ix",
+        "shell",
+        node.name,
+        "--",
+        "/run/current-system/sw/bin/bash",
+        "-lc",
+        (
+            "set -euo pipefail\n"
+            "export PATH=/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:$PATH\n"
+            "if command -v systemctl >/dev/null 2>&1; then\n"
+            "  systemctl start nix-daemon.socket >/dev/null 2>&1 || true\n"
+            "fi\n"
+            "nix --extra-experimental-features nix-command store info >/dev/null"
+        ),
+    ]
+    if dry_run:
+        step("+ wait until bootstrap is ready: " + " ".join(command))
+        return
+
+    step(f"waiting for {node.name} bootstrap")
+    deadline = asyncio.get_running_loop().time() + 180
+    last_error = ""
+    while asyncio.get_running_loop().time() < deadline:
+        result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if result.returncode == 0:
+            return
+        last_error = (result.stderr or result.stdout).strip()
+        await asyncio.sleep(2)
+
+    raise RuntimeError(f"{node.name} bootstrap did not become ready: {last_error}")
+
+
+async def push_replacement_image(node: FleetNode, *, dry_run: bool) -> str:
+    image = node.replacementImage
     source = image.source
     if not dry_run and not Path(source).exists():
         out = run_cli(["nix-store", "--realise", image.sourceDrv], dry_run=False)
@@ -156,12 +193,16 @@ async def push_bootstrap_image(node: FleetNode, *, dry_run: bool) -> str:
     return refs[-1] if refs else image.destination
 
 
-async def node_exists(node: FleetNode) -> bool:
+async def list_nodes() -> list[dict[str, typing.Any]]:
     out = run_cli(["ix", "ls", "--output", "json"], dry_run=False)
     rows = json.loads(out)
     if not isinstance(rows, list):
         raise TypeError("ix ls --output json must return a list")
-    return any(isinstance(row, dict) and row.get("name") == node.name for row in rows)
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def find_node(rows: list[dict[str, typing.Any]], name: str) -> dict[str, typing.Any] | None:
+    return next((row for row in rows if row.get("name") == name), None)
 
 
 async def create_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
@@ -186,14 +227,28 @@ async def create_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
 
 async def ensure_node(node: FleetNode, *, dry_run: bool) -> bool:
     if dry_run:
-        step(f"ensure {node.name} exists from {node.bootstrapImage.destination}")
-        return False
-    if await node_exists(node):
+        step(f"ensure {node.name} exists from {node.bootstrapImage}")
         return False
 
-    image = await push_bootstrap_image(node, dry_run=False)
-    await create_node(node, image, dry_run=False)
-    return True
+    existing = find_node(await list_nodes(), node.name)
+    if existing is None:
+        await create_node(node, node.bootstrapImage, dry_run=dry_run)
+        await wait_node_ready(node, dry_run=dry_run)
+        return True
+
+    if existing.get("status") == "failed":
+        run_cli(["ix", "rm", "--force", node.name], dry_run=dry_run)
+        await create_node(node, node.bootstrapImage, dry_run=dry_run)
+        await wait_node_ready(node, dry_run=dry_run)
+        return True
+
+    if existing.get("status") == "running":
+        await wait_node_ready(node, dry_run=dry_run)
+        return False
+
+    run_cli(["ix", "start", node.name], dry_run=dry_run)
+    await wait_node_ready(node, dry_run=dry_run)
+    return False
 
 
 async def snapshot_node(node: FleetNode, *, dry_run: bool) -> None:
@@ -205,6 +260,48 @@ async def switch_node(node: FleetNode, *, dry_run: bool) -> None:
         ["ix", "switch", node.name, node.switch.target, "--build-on", node.switch.buildOn],
         dry_run=dry_run,
     )
+
+
+def default_source_root(cwd: Path) -> Path:
+    try:
+        out = subprocess.check_output(
+            ["git", "-C", str(cwd), "rev-parse", "--show-toplevel"],
+            text=True,
+        )
+        return Path(out.strip()).resolve()
+    except (OSError, subprocess.CalledProcessError):
+        return cwd.resolve()
+
+
+def default_source_workdir(cwd: Path, source_root: Path) -> Path:
+    try:
+        return cwd.resolve().relative_to(source_root.resolve())
+    except ValueError:
+        return Path(".")
+
+
+async def switch_node_from_source(
+    node: FleetNode,
+    source_root: Path,
+    source_workdir: Path,
+    *,
+    dry_run: bool,
+) -> None:
+    command = [
+        "ix",
+        "switch",
+        node.name,
+        node.switch.sourceInstallable,
+        "--build-on",
+        "remote",
+        "--source",
+        str(source_root),
+        "--source-workdir",
+        str(source_workdir),
+    ]
+    for name, path in sorted(node.switch.overrideInputs.items()):
+        command.extend(["--override-input", f"{name}={path}"])
+    run_cli(command, dry_run=dry_run)
 
 
 async def replace_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
@@ -229,23 +326,35 @@ async def replace_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
 
 async def cmd_diff(plan: FleetPlan, args: argparse.Namespace) -> None:
     for node in selected_nodes(plan, args.on):
-        print(f"{node.name}\twant {node.switch.target} ({node.switch.buildOn})")
+        if node.switch.buildOn == "remote":
+            print(f"{node.name}\twant {node.switch.sourceInstallable} (remote source)")
+        else:
+            print(f"{node.name}\twant {node.switch.target} ({node.switch.buildOn})")
 
 
 async def cmd_switch(plan: FleetPlan, args: argparse.Namespace) -> None:
+    source_root = (args.source_root or default_source_root(Path.cwd())).resolve()
+    source_workdir = args.source_workdir or default_source_workdir(Path.cwd(), source_root)
     for node in selected_nodes(plan, args.on):
         created = await ensure_node(node, dry_run=args.dry_run)
         if not created and node.snapshot and not args.no_snapshot:
             await snapshot_node(node, dry_run=args.dry_run)
-        if not created:
+        if node.switch.buildOn == "remote":
+            await switch_node_from_source(
+                node,
+                source_root,
+                source_workdir,
+                dry_run=args.dry_run,
+            )
+        else:
             await switch_node(node, dry_run=args.dry_run)
 
 
 async def cmd_replace(plan: FleetPlan, args: argparse.Namespace) -> None:
     for node in selected_nodes(plan, args.on):
-        image = node.bootstrapImage.destination
+        image = node.replacementImage.destination
         if not args.skip_push:
-            image = await push_bootstrap_image(node, dry_run=args.dry_run)
+            image = await push_replacement_image(node, dry_run=args.dry_run)
         await replace_node(node, image, dry_run=args.dry_run)
 
 
@@ -275,6 +384,8 @@ def parser() -> argparse.ArgumentParser:
     switch = sub.add_parser("switch")
     add_common_options(switch, defaults=False)
     switch.add_argument("--no-snapshot", action="store_true")
+    switch.add_argument("--source-root", type=Path)
+    switch.add_argument("--source-workdir", type=Path)
     replace = sub.add_parser("replace")
     add_common_options(replace, defaults=False)
     replace.add_argument("--skip-push", action="store_true")
