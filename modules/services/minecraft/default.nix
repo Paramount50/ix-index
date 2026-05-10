@@ -78,6 +78,26 @@ let
   autoReloadEnabled = cfg.autoReload.enable && autoReloadDriver != "none";
   jvmReloadEnabled = autoReloadEnabled && autoReloadDriver == "jvm";
   plugmanReloadEnabled = autoReloadEnabled && autoReloadDriver == "plugman";
+  pluginConfigFiles = lib.optionalAttrs plugmanReloadEnabled {
+    "plugins/PlugManX/config.yml" = {
+      ignored-plugins = cfg.autoReload.plugman.ignoredPlugins;
+      notify-on-broken-command-removal = true;
+      auto-load = {
+        enabled = false;
+        check-every-seconds = 10;
+      };
+      auto-unload = {
+        enabled = false;
+        check-every-seconds = 10;
+      };
+      auto-reload = {
+        enabled = false;
+        check-every-seconds = 10;
+      };
+      showPaperWarning = true;
+      version = 3;
+    };
+  };
 
   managedJars =
     modJars
@@ -120,16 +140,7 @@ let
     ) cfg.configFiles
   );
 
-  serverFiles =
-    cfg.serverFiles
-    // lib.optionalAttrs plugmanReloadEnabled {
-      "server.properties" = (cfg.serverFiles."server.properties" or { }) // {
-        enable-rcon = true;
-        "rcon.port" = cfg.autoReload.rconPort;
-        "rcon.password" = cfg.autoReload.rconPassword;
-        broadcast-rcon-to-ops = false;
-      };
-    };
+  serverFiles = cfg.serverFiles // pluginConfigFiles;
 
   serverFileLinks = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (
@@ -156,10 +167,16 @@ let
     runtimeInputs = [
       pkgs.coreutils
       pkgs.findutils
+      pkgs.gnugrep
+      pkgs.gnused
     ];
     text = ''
       data_dir=${lib.escapeShellArg dataDir}
       drop_dir=${lib.escapeShellArg cfg.dropDir}
+      plugman_reload=${if plugmanReloadEnabled then "1" else "0"}
+      plugman_ignored_plugins=${lib.escapeShellArg (lib.concatStringsSep " " cfg.autoReload.plugman.ignoredPlugins)}
+      rcon_port=${toString cfg.autoReload.rconPort}
+      rcon_password_file=${lib.escapeShellArg cfg.autoReload.rconPasswordFile}
 
       sync_tree() {
         source_dir="$1"
@@ -168,7 +185,8 @@ let
 
         mkdir -p "$target_dir" "$(dirname "$manifest")"
         if [ -f "$manifest" ]; then
-          while IFS= read -r rel; do
+          while IFS= read -r line; do
+            rel="''${line%% *}"
             if [ -n "$rel" ]; then
               rm -f "$target_dir/$rel"
             fi
@@ -183,18 +201,170 @@ let
             find . \( -type f -o -type l \) -print
           ) | while IFS= read -r rel; do
             rel="''${rel#./}"
+            source_path="$source_dir/$rel"
             mkdir -p "$target_dir/$(dirname "$rel")"
-            ln -sfn "$source_dir/$rel" "$target_dir/$rel"
-            printf '%s\n' "$rel" >> "$tmp"
+            ln -sfn "$source_path" "$target_dir/$rel"
+            printf '%s %s\n' "$rel" "$(readlink -f "$source_path")" >> "$tmp"
           done
         fi
 
         mv "$tmp" "$manifest"
       }
 
+      managed_target_for() {
+        manifest="$1"
+        rel="$2"
+
+        if [ ! -f "$manifest" ]; then
+          return 1
+        fi
+
+        grep -F -- "$rel " "$manifest" | head -n1 | cut -d ' ' -f2-
+      }
+
+      plugin_name_for() {
+        basename "$1" .jar
+      }
+
+      plugin_name_from_config_path() {
+        rel="$1"
+        case "$rel" in
+          plugins/*/*)
+            rel="''${rel#plugins/}"
+            printf '%s\n' "''${rel%%/*}"
+            ;;
+        esac
+      }
+
+      is_ignored_plugin() {
+        case " $plugman_ignored_plugins " in
+          *" $1 "*) return 0 ;;
+          *) return 1 ;;
+        esac
+      }
+
+      plan_plugman_reload() {
+        dropin_manifest="$data_dir/.ix-managed-$drop_dir"
+        server_manifest="$data_dir/.ix-managed-server-files"
+        plan="$data_dir/.ix-managed-$drop_dir.reload-plan"
+        : > "$plan"
+
+        if [ -f "$dropin_manifest" ] && [ -d ${managedRoot}/managed-dropins ]; then
+          (
+            cd ${managedRoot}/managed-dropins
+            find . -maxdepth 1 \( -type f -o -type l \) -name '*.jar' -print
+          ) | while IFS= read -r rel; do
+            rel="''${rel#./}"
+            [ "$rel" = "PlugManX.jar" ] && continue
+            target="$(readlink -f "${managedRoot}/managed-dropins/$rel")"
+            old_target="$(managed_target_for "$dropin_manifest" "$rel" || true)"
+            plugin="$(plugin_name_for "$rel")"
+            is_ignored_plugin "$plugin" && continue
+
+            if [ -z "$old_target" ]; then
+              printf 'load %s\n' "$plugin" >> "$plan"
+            elif [ "$old_target" != "$target" ]; then
+              printf 'reload %s\n' "$plugin" >> "$plan"
+            fi
+          done
+
+          while IFS= read -r line; do
+            rel="''${line%% *}"
+            case "$rel" in
+              *.jar)
+                [ "$rel" = "PlugManX.jar" ] && continue
+                plugin="$(plugin_name_for "$rel")"
+                is_ignored_plugin "$plugin" && continue
+                if [ ! -e "${managedRoot}/managed-dropins/$rel" ]; then
+                  printf 'unload %s\n' "$plugin" >> "$plan"
+                fi
+                ;;
+            esac
+          done < "$dropin_manifest"
+        fi
+
+        if [ -f "$server_manifest" ] && [ -d ${managedRoot}/managed-server-files ]; then
+          (
+            cd ${managedRoot}/managed-server-files
+            find . \( -type f -o -type l \) -print
+          ) | while IFS= read -r rel; do
+            rel="''${rel#./}"
+            plugin="$(plugin_name_from_config_path "$rel" || true)"
+            [ -n "$plugin" ] || continue
+            is_ignored_plugin "$plugin" && continue
+            target="$(readlink -f "${managedRoot}/managed-server-files/$rel")"
+            old_target="$(managed_target_for "$server_manifest" "$rel" || true)"
+            if [ -z "$old_target" ] || [ "$old_target" != "$target" ]; then
+              printf 'reload %s\n' "$plugin" >> "$plan"
+            fi
+          done
+
+          while IFS= read -r line; do
+            rel="''${line%% *}"
+            plugin="$(plugin_name_from_config_path "$rel" || true)"
+            [ -n "$plugin" ] || continue
+            is_ignored_plugin "$plugin" && continue
+            if [ ! -e "${managedRoot}/managed-server-files/$rel" ]; then
+              printf 'reload %s\n' "$plugin" >> "$plan"
+            fi
+          done < "$server_manifest"
+        fi
+
+        sort -u "$plan" -o "$plan"
+      }
+
+      ensure_rcon_password() {
+        mkdir -p "$(dirname "$rcon_password_file")"
+        if [ ! -s "$rcon_password_file" ]; then
+          od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > "$rcon_password_file"
+          printf '\n' >> "$rcon_password_file"
+          chmod 0600 "$rcon_password_file"
+        fi
+      }
+
+      set_property() {
+        file="$1"
+        key="$2"
+        value="$3"
+        escaped_value="$(printf '%s\n' "$value" | sed 's/[\/&]/\\&/g')"
+
+        if grep -q "^$key=" "$file"; then
+          sed -i "s/^$key=.*/$key=$escaped_value/" "$file"
+        else
+          printf '%s=%s\n' "$key" "$value" >> "$file"
+        fi
+      }
+
+      configure_rcon() {
+        ensure_rcon_password
+        server_properties="$data_dir/server.properties"
+
+        if [ -L "$server_properties" ]; then
+          cp --remove-destination "$server_properties" "$server_properties.tmp"
+          mv "$server_properties.tmp" "$server_properties"
+        elif [ ! -e "$server_properties" ]; then
+          : > "$server_properties"
+        fi
+
+        chmod 0600 "$server_properties"
+        password="$(head -n1 "$rcon_password_file")"
+        set_property "$server_properties" "enable-rcon" "true"
+        set_property "$server_properties" "rcon.port" "$rcon_port"
+        set_property "$server_properties" "rcon.password" "$password"
+        set_property "$server_properties" "broadcast-rcon-to-ops" "false"
+      }
+
+      if [ "$plugman_reload" = "1" ]; then
+        plan_plugman_reload
+      fi
+
       sync_tree ${managedRoot}/managed-dropins "$data_dir/$drop_dir" "$data_dir/.ix-managed-$drop_dir"
       sync_tree ${managedRoot}/managed-config "$data_dir/config" "$data_dir/.ix-managed-config"
       sync_tree ${managedRoot}/managed-server-files "$data_dir" "$data_dir/.ix-managed-server-files"
+
+      if [ "$plugman_reload" = "1" ]; then
+        configure_rcon
+      fi
     '';
   };
 
@@ -206,8 +376,9 @@ let
     ];
     text = ''
       minecraft-sync-managed
+      driver=${lib.escapeShellArg autoReloadDriver}
 
-      case ${lib.escapeShellArg autoReloadDriver} in
+      case "$driver" in
         jvm)
           socket=${lib.escapeShellArg cfg.autoReload.socketPath}
           if [ ! -S "$socket" ]; then
@@ -222,11 +393,22 @@ let
             ${managedRoot}/managed-dropins
           ;;
         plugman)
-          exec minecraft-rcon \
-            --host 127.0.0.1 \
-            --port ${toString cfg.autoReload.rconPort} \
-            --password ${lib.escapeShellArg cfg.autoReload.rconPassword} \
-            plugman reload all
+          plan=${lib.escapeShellArg "${dataDir}/.ix-managed-${cfg.dropDir}.reload-plan"}
+          if [ ! -s "$plan" ]; then
+            exit 0
+          fi
+
+          failed=0
+          while read -r action plugin; do
+            [ -n "$action" ] || continue
+            minecraft-rcon \
+              --host 127.0.0.1 \
+              --port ${toString cfg.autoReload.rconPort} \
+              --password-file ${lib.escapeShellArg cfg.autoReload.rconPasswordFile} \
+              plugman "$action" "$plugin" || failed=1
+          done < "$plan"
+
+          exit "$failed"
           ;;
         none)
           exit 0
@@ -355,10 +537,27 @@ in
         description = "Local RCON port used to ask PlugManX to reload Bukkit-family plugins.";
       };
 
-      rconPassword = mkOption {
+      rconPasswordFile = mkOption {
         type = types.str;
-        default = "ix-auto-reload";
-        description = "RCON password used only for the local PlugManX reload command.";
+        default = "${dataDir}/.ix-rcon-password";
+        description = "State-local RCON password file used by the PlugManX reload command. Generated on first start when absent.";
+      };
+
+      plugman = {
+        ignoredPlugins = mkOption {
+          type = types.listOf types.str;
+          default = [
+            "PlugMan"
+            "PlugManX"
+            "PlugManBungee"
+            "ViaVersion"
+            "ViaBackwards"
+            "ViaRewind"
+            "ProtocolSupport"
+            "ProtocolLib"
+          ];
+          description = "Plugins PlugManX should never manage during enable, disable, restart, load, reload, or unload operations.";
+        };
       };
     };
 

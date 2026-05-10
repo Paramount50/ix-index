@@ -215,6 +215,14 @@ let
       message = "Paper minecraft should not start the JVM hot reload socket";
     }
     {
+      assertion = paperCfg.autoReload.rconPasswordFile == "/var/lib/minecraft/.ix-rcon-password";
+      message = "Paper minecraft should use a state-local RCON password file";
+    }
+    {
+      assertion = !(paperCfg.serverFiles."server.properties" ? "rcon.password");
+      message = "Paper minecraft should not put the RCON password in Nix-managed server.properties";
+    }
+    {
       assertion = paperConfig.networking.firewall.allowedTCPPorts == [ paperCfg.port ];
       message = "Paper minecraft should not expose the local RCON reload port through the firewall";
     }
@@ -425,6 +433,18 @@ let
   failures = map (test: test.message) (lib.filter (test: !test.assertion) assertions);
 in
 assert lib.assertMsg (failures == [ ]) (lib.concatStringsSep "\n" failures);
-pkgs.runCommand "ix-images-eval-tests" { } ''
+pkgs.runCommand "ix-images-eval-tests" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+  grep -q 'ignored-plugins' ${
+    paperConfig.environment.etc."minecraft/managed-server-files".source
+  }/plugins/PlugManX/config.yml
+  grep -q 'PlugManX' ${
+    paperConfig.environment.etc."minecraft/managed-server-files".source
+  }/plugins/PlugManX/config.yml
+  ! grep -R 'rcon.password' ${paperConfig.environment.etc."minecraft/managed-server-files".source}
+
+  grep -q -- '--password-file /var/lib/minecraft/.ix-rcon-password' ${paperServiceConfig.ExecReload}
+  grep -q 'plugman "$action" "$plugin"' ${paperServiceConfig.ExecReload}
+  ! grep -q 'reload all' ${paperServiceConfig.ExecReload}
+
   mkdir -p "$out"
 ''

@@ -34,9 +34,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Minimal Minecraft RCON client")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
-    parser.add_argument("--password", required=True)
+    password = parser.add_mutually_exclusive_group(required=True)
+    password.add_argument("--password")
+    password.add_argument("--password-file")
     parser.add_argument("command", nargs="+")
     args = parser.parse_args()
+
+    if args.password_file:
+        with open(args.password_file, encoding="utf-8") as password_file:
+            args.password = password_file.readline().rstrip("\n")
 
     command = " ".join(args.command)
     with socket.create_connection((args.host, args.port), timeout=10) as sock:
