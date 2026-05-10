@@ -11,6 +11,7 @@
 # under config/).
 {
   config,
+  ix,
   lib,
   pkgs,
   ...
@@ -25,6 +26,7 @@ let
   cfg = config.services.minecraft;
 
   dataDir = "/var/lib/minecraft";
+  managedRoot = "/etc/minecraft";
 
   modCatalogType = types.submodule {
     options = {
@@ -41,10 +43,57 @@ let
     let
       entry = cfg.modCatalog.${slug} or (throw "mod '${slug}' not in modCatalog");
     in
-    entry.src
+    {
+      name = "${slug}.jar";
+      path = entry.src;
+    }
   ) cfg.mods;
 
-  modLinks = lib.concatMapStrings (jar: "ln -sf ${jar} ${dataDir}/${cfg.dropDir}/\n") modJars;
+  loaderEnabled = {
+    fabric = config.services.minecraft.fabric.enable;
+    folia = config.services.minecraft.folia.enable;
+    paper = config.services.minecraft.paper.enable;
+    purpur = config.services.minecraft.purpur.enable;
+    spigot = config.services.minecraft.spigot.enable;
+    sponge = config.services.minecraft.sponge.enable;
+  };
+
+  bukkitLoaderEnabled = lib.any (name: loaderEnabled.${name}) [
+    "folia"
+    "paper"
+    "purpur"
+    "spigot"
+  ];
+
+  autoReloadDriver =
+    if cfg.autoReload.driver != "auto" then
+      cfg.autoReload.driver
+    else if loaderEnabled.fabric then
+      "jvm"
+    else if bukkitLoaderEnabled then
+      "plugman"
+    else
+      "none";
+
+  autoReloadEnabled = cfg.autoReload.enable && autoReloadDriver != "none";
+  jvmReloadEnabled = autoReloadEnabled && autoReloadDriver == "jvm";
+  plugmanReloadEnabled = autoReloadEnabled && autoReloadDriver == "plugman";
+
+  managedJars =
+    modJars
+    ++ lib.optionals plugmanReloadEnabled [
+      {
+        name = "PlugManX.jar";
+        path = ix.artifacts.minecraft.plugins.plugmanx;
+      }
+    ];
+
+  managedDropins = pkgs.runCommand "minecraft-managed-${cfg.dropDir}" { } (
+    ''
+      mkdir -p "$out"
+    ''
+    + lib.concatMapStringsSep "\n" (jar: ''ln -s ${jar.path} "$out/${jar.name}"'') managedJars
+  );
 
   # Infer serialization format from file extension.
   formatFor =
@@ -67,9 +116,20 @@ let
       let
         file = (formatFor path).generate (builtins.baseNameOf path) value;
       in
-      "mkdir -p ${dataDir}/config/${builtins.dirOf path}\nln -sf ${file} ${dataDir}/config/${path}"
+      "mkdir -p $out/${builtins.dirOf path}\nln -sf ${file} $out/${path}"
     ) cfg.configFiles
   );
+
+  serverFiles =
+    cfg.serverFiles
+    // lib.optionalAttrs plugmanReloadEnabled {
+      "server.properties" = (cfg.serverFiles."server.properties" or { }) // {
+        enable-rcon = true;
+        "rcon.port" = cfg.autoReload.rconPort;
+        "rcon.password" = cfg.autoReload.rconPassword;
+        broadcast-rcon-to-ops = false;
+      };
+    };
 
   serverFileLinks = lib.concatStringsSep "\n" (
     lib.mapAttrsToList (
@@ -77,15 +137,119 @@ let
       let
         file = (formatFor path).generate (builtins.baseNameOf path) value;
       in
-      "mkdir -p ${dataDir}/${builtins.dirOf path}\nln -sf ${file} ${dataDir}/${path}"
-    ) cfg.serverFiles
+      "mkdir -p $out/${builtins.dirOf path}\nln -sf ${file} $out/${path}"
+    ) serverFiles
   );
+
+  managedConfig = pkgs.runCommand "minecraft-managed-config" { } ''
+    mkdir -p "$out"
+    ${configLinks}
+  '';
+
+  managedServerFiles = pkgs.runCommand "minecraft-managed-server-files" { } ''
+    mkdir -p "$out"
+    ${serverFileLinks}
+  '';
+
+  syncManaged = pkgs.writeShellApplication {
+    name = "minecraft-sync-managed";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+    ];
+    text = ''
+      data_dir=${lib.escapeShellArg dataDir}
+      drop_dir=${lib.escapeShellArg cfg.dropDir}
+
+      sync_tree() {
+        source_dir="$1"
+        target_dir="$2"
+        manifest="$3"
+
+        mkdir -p "$target_dir" "$(dirname "$manifest")"
+        if [ -f "$manifest" ]; then
+          while IFS= read -r rel; do
+            if [ -n "$rel" ]; then
+              rm -f "$target_dir/$rel"
+            fi
+          done < "$manifest"
+        fi
+
+        tmp="$manifest.tmp"
+        : > "$tmp"
+        if [ -d "$source_dir" ]; then
+          (
+            cd "$source_dir"
+            find . \( -type f -o -type l \) -print
+          ) | while IFS= read -r rel; do
+            rel="''${rel#./}"
+            mkdir -p "$target_dir/$(dirname "$rel")"
+            ln -sfn "$source_dir/$rel" "$target_dir/$rel"
+            printf '%s\n' "$rel" >> "$tmp"
+          done
+        fi
+
+        mv "$tmp" "$manifest"
+      }
+
+      sync_tree ${managedRoot}/managed-dropins "$data_dir/$drop_dir" "$data_dir/.ix-managed-$drop_dir"
+      sync_tree ${managedRoot}/managed-config "$data_dir/config" "$data_dir/.ix-managed-config"
+      sync_tree ${managedRoot}/managed-server-files "$data_dir" "$data_dir/.ix-managed-server-files"
+    '';
+  };
+
+  reloadCommand = pkgs.writeShellApplication {
+    name = "minecraft-reload";
+    runtimeInputs = [
+      pkgs.minecraft-rcon
+      syncManaged
+    ];
+    text = ''
+      minecraft-sync-managed
+
+      case ${lib.escapeShellArg autoReloadDriver} in
+        jvm)
+          socket=${lib.escapeShellArg cfg.autoReload.socketPath}
+          if [ ! -S "$socket" ]; then
+            echo "minecraft hot reload socket is not ready at $socket; synced managed files only" >&2
+            exit 0
+          fi
+          exec ${cfg.javaPackage}/bin/java \
+            -cp ${pkgs.minecraft-hot-reload-agent}/share/minecraft-hot-reload-agent/minecraft-hot-reload-agent.jar \
+            dev.ix.minecraft.hotreload.HotReloadAgent \
+            "$socket" \
+            redefine-dir \
+            ${managedRoot}/managed-dropins
+          ;;
+        plugman)
+          exec minecraft-rcon \
+            --host 127.0.0.1 \
+            --port ${toString cfg.autoReload.rconPort} \
+            --password ${lib.escapeShellArg cfg.autoReload.rconPassword} \
+            plugman reload all
+          ;;
+        none)
+          exit 0
+          ;;
+        *)
+          echo "unsupported minecraft auto reload driver: ${autoReloadDriver}" >&2
+          exit 1
+          ;;
+      esac
+    '';
+  };
+
+  autoReloadJvmFlags = lib.optionals jvmReloadEnabled [
+    "-javaagent:${pkgs.minecraft-hot-reload-agent}/share/minecraft-hot-reload-agent/minecraft-hot-reload-agent.jar=socket=${cfg.autoReload.socketPath}"
+    "-XX:+AllowEnhancedClassRedefinition"
+  ];
 
   javaArgs = [
     "${cfg.javaPackage}/bin/java"
     "-XX:MaxRAMPercentage=${toString cfg.maxRAMPercentage}"
   ]
   ++ cfg.jvmFlags
+  ++ autoReloadJvmFlags
   ++ [
     "-jar"
     "${cfg.serverJar}"
@@ -161,6 +325,43 @@ in
       description = "JVM flags used after heap sizing and before -jar.";
     };
 
+    autoReload = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Reload managed mods/plugins during NixOS switch without restarting the Minecraft service when the active loader has a reload driver.";
+      };
+
+      driver = mkOption {
+        type = types.enum [
+          "auto"
+          "jvm"
+          "plugman"
+          "none"
+        ];
+        default = "auto";
+        description = "Reload driver. auto uses JVM class redefinition for Fabric and PlugManX for Bukkit-family loaders.";
+      };
+
+      socketPath = mkOption {
+        type = types.str;
+        default = "/run/minecraft-hot-reload/socket";
+        description = "Unix-domain socket used by the JVM class redefinition agent.";
+      };
+
+      rconPort = mkOption {
+        type = types.port;
+        default = 25575;
+        description = "Local RCON port used to ask PlugManX to reload Bukkit-family plugins.";
+      };
+
+      rconPassword = mkOption {
+        type = types.str;
+        default = "ix-auto-reload";
+        description = "RCON password used only for the local PlugManX reload command.";
+      };
+    };
+
     configFiles = mkOption {
       type = types.attrsOf types.attrs;
       default = { };
@@ -183,16 +384,30 @@ in
     services.minecraft.serverFiles."server.properties".server-port = lib.mkDefault cfg.port;
 
     networking.firewall.allowedTCPPorts = [ cfg.port ];
+    environment.etc."minecraft/managed-dropins".source = managedDropins;
+    environment.etc."minecraft/managed-config".source = managedConfig;
+    environment.etc."minecraft/managed-server-files".source = managedServerFiles;
 
     systemd.services.minecraft = {
       description = "Minecraft server";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
+      reloadTriggers = lib.optionals autoReloadEnabled [
+        managedDropins
+        managedConfig
+        managedServerFiles
+      ];
+      restartTriggers = lib.optionals (!autoReloadEnabled) [
+        managedDropins
+        managedConfig
+        managedServerFiles
+      ];
       serviceConfig = {
         Type = "simple";
         WorkingDirectory = dataDir;
         ExecStart = lib.escapeShellArgs javaArgs;
+        ExecReload = "${reloadCommand}/bin/minecraft-reload";
         Restart = "on-failure";
         StateDirectory = "minecraft";
 
@@ -220,13 +435,14 @@ in
         RestrictSUIDSGID = true;
         SystemCallArchitectures = "native";
         UMask = "0077";
+      }
+      // lib.optionalAttrs jvmReloadEnabled {
+        RuntimeDirectory = "minecraft-hot-reload";
       };
       preStart = ''
         mkdir -p ${dataDir}/${cfg.dropDir}
         echo "eula=true" > ${dataDir}/eula.txt
-        ${modLinks}
-        ${configLinks}
-        ${serverFileLinks}
+        ${syncManaged}/bin/minecraft-sync-managed
       '';
     };
   };

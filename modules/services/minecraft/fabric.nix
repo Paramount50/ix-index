@@ -25,26 +25,15 @@
     })
   ];
 
-  # Default the JVM to JetBrains Runtime (JBR) on Fabric. JBR is OpenJDK with
-  # DCEVM (Dynamic Code Evolution VM) integrated, gated by the JBR-only
-  # `-XX:+AllowEnhancedClassRedefinition` flag. With that flag plus a JDWP
-  # debug agent attached, the JVM can redefine almost any structural class
-  # change live: add/remove methods, add/remove fields, signature changes,
-  # supertype changes. Stock OpenJDK can only swap method bodies, which
-  # forces a full server restart for every other edit and is the main
-  # iteration tax on Fabric mod work. Fabric is the loader where this
-  # matters because mods are Java code (often Mixin-driven) that authors
-  # recompile and reload during development; Paper/Spigot/etc. ship plugins
-  # that don't benefit. Mixin authors additionally pass
-  # `-javaagent:<sponge-mixin.jar>` to hot-swap mixin bodies; see the Fabric
-  # docs link below.
+  # Default the JVM to JetBrains Runtime (JBR) on Fabric. The shared
+  # minecraft runtime enables its hot-reload Java agent and the JBR-only
+  # `-XX:+AllowEnhancedClassRedefinition` flag when autoReload selects the
+  # Fabric/JVM driver, so Fabric gets structural class redefinition for
+  # already-loaded mod classes without a full service restart.
   #
-  # We do NOT set `-XX:+AllowEnhancedClassRedefinition` in `jvmFlags` here:
-  # the flag is JBR-specific, so a future override of `javaPackage` back to
-  # Temurin/OpenJDK would crash the JVM at startup. Devs enable it in their
-  # own run config when iterating. JBR currently tracks Java 21, which
-  # Minecraft 1.21+ already requires; other loaders keep the Temurin 25
-  # default from `services.minecraft.javaPackage`.
+  # This still does not make Fabric dynamically load new mods or mutate
+  # frozen registries; it is a development reload path for code that is
+  # already present in the running JVM.
   #
   # Refs:
   #   https://docs.fabricmc.net/develop/getting-started/launching-the-game#hotswapping-classes
