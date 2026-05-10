@@ -124,6 +124,10 @@
       url = "https://cdn.modrinth.com/data/wnEe9KBa/versions/9f7J0dAp/vmp-fabric-mc26.1.2-0.2.0%2Bbeta.7.234-all.jar";
       flake = false;
     };
+    artifact-minecraft-plugin-plugmanx = {
+      url = "https://cdn.modrinth.com/data/yro4niHu/versions/hrMAp7Ww/PlugManX-3.0.4.jar";
+      flake = false;
+    };
 
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     llm-agents = {

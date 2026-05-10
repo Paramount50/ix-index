@@ -5,7 +5,7 @@
 let
   inherit (nixpkgs) lib;
   system = ix.system;
-  pkgs = nixpkgs.legacyPackages.${system};
+  pkgs = ix.pkgs;
 
   moduleList = lib.collect builtins.isPath (import ../modules);
   versions = import ../images/games/minecraft/versions.nix {
@@ -24,6 +24,7 @@ let
         inherit (ix) artifacts mkMinecraftLoader;
       };
       modules = [
+        { nixpkgs.overlays = ix.overlays; }
         ../lib/ix-platform.nix
         ../lib/ix-oci-layer.nix
       ]
@@ -37,7 +38,16 @@ let
   ];
 
   minecraftService = minecraftConfig.systemd.services.minecraft.serviceConfig;
+  minecraftUnit = minecraftConfig.systemd.services.minecraft;
   minecraftExec = minecraftService.ExecStart;
+
+  paperConfig = evalConfig [
+    ../images/games/minecraft
+    versions."1.21.11-paper"
+  ];
+  paperCfg = paperConfig.services.minecraft;
+  paperService = paperConfig.systemd.services.minecraft;
+  paperServiceConfig = paperService.serviceConfig;
 
   bedrockConfig = evalConfig [ ../images/games/minecraft-bedrock ];
   bedrockCfg = bedrockConfig.services.minecraft-bedrock;
@@ -149,8 +159,8 @@ let
       message = "default minecraft image should include the 26.1.2 Fabric server mod set";
     }
     {
-      assertion = minecraftConfig.services.minecraft.javaPackage == pkgs.temurin-jre-bin-25;
-      message = "minecraft should default to the latest Temurin JRE available in the pinned nixpkgs";
+      assertion = minecraftConfig.services.minecraft.javaPackage == pkgs.jetbrains.jdk-no-jcef;
+      message = "default Fabric minecraft should use JetBrains Runtime for enhanced class redefinition";
     }
     {
       assertion = lib.hasInfix "/bin/java" minecraftExec;
@@ -167,6 +177,46 @@ let
     {
       assertion = lib.hasInfix "-jar" minecraftExec && lib.hasInfix "nogui" minecraftExec;
       message = "minecraft ExecStart should launch the configured server jar in nogui mode";
+    }
+    {
+      assertion = lib.hasInfix "minecraft-hot-reload-agent.jar=socket=/run/minecraft-hot-reload/socket" minecraftExec;
+      message = "Fabric minecraft should start the hot reload Java agent";
+    }
+    {
+      assertion = lib.hasInfix "-XX:+AllowEnhancedClassRedefinition" minecraftExec;
+      message = "Fabric minecraft should enable JBR enhanced class redefinition";
+    }
+    {
+      assertion = minecraftService.RuntimeDirectory == "minecraft-hot-reload";
+      message = "Fabric minecraft should create a runtime directory for the hot reload socket";
+    }
+    {
+      assertion = builtins.length minecraftUnit.reloadTriggers == 3;
+      message = "minecraft managed files should trigger systemd reloads rather than unit restarts";
+    }
+    {
+      assertion = lib.hasInfix "minecraft-sync-managed" minecraftUnit.preStart;
+      message = "minecraft preStart should sync managed files from /etc";
+    }
+    {
+      assertion = !(lib.hasInfix "fabric-api" minecraftUnit.preStart);
+      message = "minecraft preStart should not embed managed mod store paths in the unit";
+    }
+    {
+      assertion = paperCfg.dropDir == "plugins";
+      message = "Paper minecraft should use the plugins drop directory";
+    }
+    {
+      assertion = builtins.length paperService.reloadTriggers == 3;
+      message = "Paper minecraft managed plugins should trigger systemd reloads";
+    }
+    {
+      assertion = !(paperServiceConfig ? RuntimeDirectory);
+      message = "Paper minecraft should not start the JVM hot reload socket";
+    }
+    {
+      assertion = paperConfig.networking.firewall.allowedTCPPorts == [ paperCfg.port ];
+      message = "Paper minecraft should not expose the local RCON reload port through the firewall";
     }
     {
       assertion = bedrockConfig.ix.image.name == "minecraft-bedrock";

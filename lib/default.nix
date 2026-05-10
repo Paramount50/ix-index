@@ -35,6 +35,8 @@ let
       codex = codex-cli-nix.packages.${final.stdenv.hostPlatform.system}.codex;
     };
 
+    minecraft-hot-reload-agent = final.callPackage ../nix/packages/minecraft-hot-reload-agent.nix { };
+    minecraft-rcon = final.callPackage ../nix/packages/minecraft-rcon.nix { };
     tonbo-artifacts = final.callPackage ../nix/packages/tonbo-artifacts.nix {
       src = artifactInputs.artifact-tonbo-artifacts;
     };
@@ -122,6 +124,9 @@ let
         "26.1.2-fabric" = artifactInputs.artifact-minecraft-server-26-1-2-fabric;
         "1.21.11-fabric" = artifactInputs.artifact-minecraft-server-1-21-11-fabric;
         "1.21.11-paper" = artifactInputs.artifact-minecraft-server-1-21-11-paper;
+      };
+      plugins = {
+        plugmanx = artifactInputs.artifact-minecraft-plugin-plugmanx;
       };
     };
   };

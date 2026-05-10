@@ -300,6 +300,18 @@
         "url": "https://cdn.modrinth.com/data/wnEe9KBa/versions/9f7J0dAp/vmp-fabric-mc26.1.2-0.2.0%2Bbeta.7.234-all.jar"
       }
     },
+    "artifact-minecraft-plugin-plugmanx": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-V7AW4/ITmcfFpVAFqFnmcv5PYku/NmBE5b7y1jAgsK8=",
+        "type": "file",
+        "url": "https://cdn.modrinth.com/data/yro4niHu/versions/hrMAp7Ww/PlugManX-3.0.4.jar"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://cdn.modrinth.com/data/yro4niHu/versions/hrMAp7Ww/PlugManX-3.0.4.jar"
+      }
+    },
     "artifact-minecraft-server-1-21-11-fabric": {
       "flake": false,
       "locked": {
@@ -586,6 +598,7 @@
         "artifact-minecraft-mod-terrain-diffusion": "artifact-minecraft-mod-terrain-diffusion",
         "artifact-minecraft-mod-terralith": "artifact-minecraft-mod-terralith",
         "artifact-minecraft-mod-vmp-fabric": "artifact-minecraft-mod-vmp-fabric",
+        "artifact-minecraft-plugin-plugmanx": "artifact-minecraft-plugin-plugmanx",
         "artifact-minecraft-server-1-21-11-fabric": "artifact-minecraft-server-1-21-11-fabric",
         "artifact-minecraft-server-1-21-11-paper": "artifact-minecraft-server-1-21-11-paper",
         "artifact-minecraft-server-26-1-2-fabric": "artifact-minecraft-server-26-1-2-fabric",
