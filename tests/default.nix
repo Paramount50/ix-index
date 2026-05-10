@@ -441,6 +441,12 @@ pkgs.runCommand "ix-images-eval-tests" { nativeBuildInputs = [ pkgs.gnugrep ]; }
     paperConfig.environment.etc."minecraft/managed-server-files".source
   }/plugins/PlugManX/config.yml
   ! grep -R 'rcon.password' ${paperConfig.environment.etc."minecraft/managed-server-files".source}
+  grep -q '^almanac$' ${
+    paperConfig.environment.etc."minecraft/managed-dropins".source
+  }/almanac.jar.plugin-name
+  grep -q '^PlugManX$' ${
+    paperConfig.environment.etc."minecraft/managed-dropins".source
+  }/PlugManX.jar.plugin-name
 
   grep -q -- '--password-file /var/lib/minecraft/.ix-rcon-password' ${paperServiceConfig.ExecReload}
   grep -q 'plugman "$action" "$plugin"' ${paperServiceConfig.ExecReload}

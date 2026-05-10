@@ -42,10 +42,12 @@ let
     slug: _:
     let
       entry = cfg.modCatalog.${slug} or (throw "mod '${slug}' not in modCatalog");
+      pluginName = cfg.autoReload.plugman.pluginNames.${slug} or slug;
     in
     {
       name = "${slug}.jar";
       path = entry.src;
+      inherit pluginName;
     }
   ) cfg.mods;
 
@@ -105,6 +107,7 @@ let
       {
         name = "PlugManX.jar";
         path = ix.artifacts.minecraft.plugins.plugmanx;
+        pluginName = "PlugManX";
       }
     ];
 
@@ -112,7 +115,10 @@ let
     ''
       mkdir -p "$out"
     ''
-    + lib.concatMapStringsSep "\n" (jar: ''ln -s ${jar.path} "$out/${jar.name}"'') managedJars
+    + lib.concatMapStringsSep "\n" (jar: ''
+      ln -s ${jar.path} "$out/${jar.name}"
+      printf '%s\n' ${lib.escapeShellArg jar.pluginName} > "$out/${jar.name}.plugin-name"
+    '') managedJars
   );
 
   # Infer serialization format from file extension.
@@ -201,6 +207,9 @@ let
             find . \( -type f -o -type l \) -print
           ) | while IFS= read -r rel; do
             rel="''${rel#./}"
+            case "$rel" in
+              *.plugin-name) continue ;;
+            esac
             source_path="$source_dir/$rel"
             mkdir -p "$target_dir/$(dirname "$rel")"
             ln -sfn "$source_path" "$target_dir/$rel"
@@ -223,7 +232,12 @@ let
       }
 
       plugin_name_for() {
-        basename "$1" .jar
+        metadata="${managedRoot}/managed-dropins/$1.plugin-name"
+        if [ -f "$metadata" ]; then
+          head -n1 "$metadata"
+        else
+          basename "$1" .jar
+        fi
       }
 
       plugin_name_from_config_path() {
@@ -252,7 +266,7 @@ let
         if [ -f "$dropin_manifest" ] && [ -d ${managedRoot}/managed-dropins ]; then
           (
             cd ${managedRoot}/managed-dropins
-            find . -maxdepth 1 \( -type f -o -type l \) -name '*.jar' -print
+            find . -maxdepth 1 \( -type f -o -type l \) -name '*.jar' ! -name '*.plugin-name' -print
           ) | while IFS= read -r rel; do
             rel="''${rel#./}"
             [ "$rel" = "PlugManX.jar" ] && continue
@@ -278,6 +292,8 @@ let
                 if [ ! -e "${managedRoot}/managed-dropins/$rel" ]; then
                   printf 'unload %s\n' "$plugin" >> "$plan"
                 fi
+                ;;
+              *.jar.plugin-name)
                 ;;
             esac
           done < "$dropin_manifest"
@@ -557,6 +573,12 @@ in
             "ProtocolLib"
           ];
           description = "Plugins PlugManX should never manage during enable, disable, restart, load, reload, or unload operations.";
+        };
+
+        pluginNames = mkOption {
+          type = types.attrsOf types.str;
+          default = { };
+          description = "Managed plugin slug to Bukkit plugin name mapping for PlugManX commands when the jar slug differs from the runtime plugin name.";
         };
       };
     };
