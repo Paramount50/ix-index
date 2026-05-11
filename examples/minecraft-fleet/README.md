@@ -7,11 +7,13 @@ examples/minecraft-fleet/
   flake.nix          # exposes runnable fleet commands
   default.nix        # defines the fleet graph
   nodes/
+    nix-builder.nix  # shared Nix builder and binary cache
     proxy.nix        # Velocity + Geyser + Floodgate edge node
     lobby.nix        # lobby node
     survival.nix     # replicated survival node group
   modules/
     folia.nix        # shared Folia backend shape
+    nix-builder-client.nix
 ```
 
 ## Topology
@@ -22,6 +24,7 @@ examples/minecraft-fleet/
 - Java players enter on TCP 25565. Bedrock players enter on UDP 19132.
 - Folia runs the lobby and survival shards. These backends expose 25565 only on east-west and must be reached through Velocity.
 - `survival` expands into stable VM identities: `survival-0`, `survival-1`, `survival-2`.
+- `nix-builder` is an east-west-only Nix build host. Minecraft nodes use it as both an HTTP binary cache and an SSH `ssh-ng` remote builder after their systems are activated.
 - Every VM automatically has two virtio-net devices: north-south for public ingress and east-west for the private mesh. Users do not define or attach these networks.
 
 The Velocity/Geyser/Floodgate modules shown here are the intended API shape, not a claim that those modules all exist in this repo today. Missing VMs start from the shared ix NixOS bootstrap image; normal updates use `switch` to activate the desired NixOS system closure in place.
@@ -44,6 +47,38 @@ services.minecraft.serverFiles."config/paper-global.yml".proxies.velocity.secret
 ```
 
 The exact `secrets` API is hypothetical here, but the invariant is real: generated once, shared with every node that references it, materialized at activation time, and rotated deliberately.
+
+The Nix builder needs the same kind of fleet-owned materialization:
+
+```nix
+secrets.nixBuilderCacheSecretKey.generate = true;
+secrets.nixBuilderClientKey.generate = true;
+```
+
+The cache signing key is mounted only on `nix-builder`. The SSH client key is mounted on the Minecraft nodes so their Nix daemons can offload builds over east-west SSH.
+
+## Nix Builder
+
+The builder VM publishes `nix-serve` on east-west port 5000. Other VMs add it to `nix.settings.extra-substituters`, so store paths already present on the builder can be fetched from the private mesh instead of rebuilt.
+
+Those same VMs also set:
+
+```nix
+nix.distributedBuilds = true;
+nix.buildMachines = [
+  {
+    hostName = nodes.nix-builder.config.ix.networking.eastWest.hostName;
+    protocol = "ssh-ng";
+    system = "x86_64-linux";
+    sshUser = "root";
+    sshKey = "/run/ix/secrets/nix-builder-client-key";
+  }
+];
+```
+
+That makes in-VM `nix build`, `nixos-rebuild`, or future hot-switch work use `nix-builder` for builds and then copy results back to the requesting VM.
+
+This does not currently make the initial `ix fleet switch` build each node's system on `nix-builder`. The fleet plan only has `deployment.switch.buildOn = "local" | "remote" | "auto"`; it has no field for "remote, but specifically this fleet VM". To support that, ix would need the switch command to accept a named builder or builder endpoint and provision credentials before the first switch.
 
 ## Network Exposure
 

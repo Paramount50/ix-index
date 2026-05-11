@@ -1,6 +1,7 @@
 {
   forwardingSecret,
   motd,
+  extraModules ? [ ],
   extraServerProperties ? { },
 }:
 {
@@ -38,5 +39,6 @@
         ix.networking.eastWest.firewall.allowedTCPPorts = [ 25565 ];
       }
     )
-  ];
+  ]
+  ++ extraModules;
 }

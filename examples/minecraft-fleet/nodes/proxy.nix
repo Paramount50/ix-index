@@ -1,11 +1,13 @@
 {
   forwardingSecret,
+  nixBuilderClientModule,
   survivalNodes,
 }:
 {
   tags = [ "edge" ];
   dependsOn = [
     "lobby"
+    "nix-builder"
     "survival"
   ];
   deployment = {
@@ -72,5 +74,6 @@
         };
       }
     )
+    nixBuilderClientModule
   ];
 }

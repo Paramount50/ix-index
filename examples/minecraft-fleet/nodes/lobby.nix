@@ -1,4 +1,12 @@
-{ forwardingSecret, motd }:
+{
+  forwardingSecret,
+  motd,
+  extraModules ? [ ],
+}:
 import ../modules/folia.nix {
-  inherit forwardingSecret motd;
+  inherit
+    extraModules
+    forwardingSecret
+    motd
+    ;
 }

@@ -418,6 +418,7 @@ let
       assertion =
         minecraftFleet.planValue.order == [
           "lobby"
+          "nix-builder"
           "proxy"
           "survival-0"
           "survival-1"
