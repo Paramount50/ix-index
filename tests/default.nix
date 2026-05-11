@@ -116,6 +116,7 @@ let
   ++ map (version: "minecraft_${version}") minecraftVersions
   ++ [
     "minestom"
+    "neovim-ci"
     "remote-desktop"
   ];
 
