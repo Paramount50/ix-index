@@ -41,10 +41,10 @@ The two Nix files split responsibilities: `flake.nix` is the executable wrapper 
 From this directory:
 
 ```bash
-nix run .#plan -- plan      # show the resolved fleet plan
-nix run .#plan -- diff      # compare desired systems with live ix state
+nix run .#plan              # show the resolved fleet plan
+nix run .#diff              # compare desired systems with live ix state
 nix run .#switch
-nix run .#replace -- replace
+nix run .#replace
 ```
 
 `switch` snapshots and switches nodes in dependency order. Use `replace` only when VM recreation is intended.

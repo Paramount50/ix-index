@@ -186,17 +186,35 @@ let
     runtimeInputs = [ python ];
     text = ''exec python3 ${../tools/ix-fleet.py} --plan ${plan} "$@"'';
   };
+  planCommand = pkgs.writeShellApplication {
+    name = "ix-fleet-plan";
+    runtimeInputs = [ python ];
+    text = ''exec python3 ${../tools/ix-fleet.py} --plan ${plan} plan "$@"'';
+  };
+  diff = pkgs.writeShellApplication {
+    name = "ix-fleet-diff";
+    runtimeInputs = [ python ];
+    text = ''exec python3 ${../tools/ix-fleet.py} --plan ${plan} diff "$@"'';
+  };
   switch = pkgs.writeShellApplication {
     name = "ix-fleet-switch";
     runtimeInputs = [ python ];
     text = ''exec python3 ${../tools/ix-fleet.py} --plan ${plan} switch "$@"'';
+  };
+  replace = pkgs.writeShellApplication {
+    name = "ix-fleet-replace";
+    runtimeInputs = [ python ];
+    text = ''exec python3 ${../tools/ix-fleet.py} --plan ${plan} replace "$@"'';
   };
 
 in
 {
   inherit
     command
+    diff
     plan
+    planCommand
+    replace
     switch
     ;
 

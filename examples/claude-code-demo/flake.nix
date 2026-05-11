@@ -28,12 +28,17 @@
 
             plan = {
               type = "app";
-              program = "${fleet.command}/bin/ix-fleet";
+              program = "${fleet.planCommand}/bin/ix-fleet-plan";
+            };
+
+            diff = {
+              type = "app";
+              program = "${fleet.diff}/bin/ix-fleet-diff";
             };
 
             replace = {
               type = "app";
-              program = "${fleet.command}/bin/ix-fleet";
+              program = "${fleet.replace}/bin/ix-fleet-replace";
             };
           };
         }
@@ -46,7 +51,15 @@
         in
         {
           name = system;
-          value = fleet.packages // fleet.systemPackages // { inherit (fleet) command switch; };
+          value = fleet.packages // fleet.systemPackages // {
+            inherit (fleet)
+              command
+              diff
+              planCommand
+              replace
+              switch
+              ;
+          };
         }
       );
     };
