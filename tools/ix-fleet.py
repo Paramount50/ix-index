@@ -256,6 +256,13 @@ async def snapshot_node(node: FleetNode, *, dry_run: bool) -> None:
 
 
 async def switch_node(node: FleetNode, *, dry_run: bool) -> None:
+    if node.switch.buildOn == "local":
+        # ix switch --build-on local expects the system out-path already in the
+        # local store. Realize the flake installable first so the path is valid.
+        run_cli(
+            ["nix", "build", "--no-link", "--print-out-paths", node.switch.sourceInstallable],
+            dry_run=dry_run,
+        )
     run_cli(
         ["ix", "switch", node.name, node.switch.target, "--build-on", node.switch.buildOn],
         dry_run=dry_run,
