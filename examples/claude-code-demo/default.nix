@@ -108,6 +108,7 @@ let
 
         let tmp = (^mktemp $"($out_dir)/stats.XXXXXX" | str trim)
         $stats | to json | save --force $tmp
+        ^chmod 0644 $tmp
         mv --force $tmp $"($out_dir)/stats.json"
       }
     '';

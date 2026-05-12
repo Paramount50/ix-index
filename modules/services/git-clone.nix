@@ -50,14 +50,19 @@ in
         Type = "oneshot";
         RemainAfterExit = true;
       };
-      path = [ pkgs.gitoxide ];
+      path = [
+        pkgs.coreutils
+        pkgs.gitoxide
+      ];
       script =
         let
           depthFlag = lib.optionalString cfg.shallow "--depth 1";
           refFlag = lib.optionalString (cfg.ref != null) "--ref ${lib.escapeShellArg cfg.ref}";
+          destParent = builtins.dirOf cfg.dest;
         in
         ''
           if [ ! -d "${cfg.dest}/.git" ]; then
+            mkdir -p ${lib.escapeShellArg destParent}
             gix clone ${depthFlag} ${refFlag} ${lib.escapeShellArg cfg.url} ${lib.escapeShellArg cfg.dest}
           fi
         '';
