@@ -4,6 +4,8 @@
 
 Commit and push after making changes by default.
 
+Contributor setup and local checks are in @CONTRIBUTING.md.
+
 When a commit actually fixes a tracked GitHub issue, include an auto-closing keyword in the commit body, for example `Fixes #123`, `Closes #123`, or `Resolves #123`. Use `Refs #123` only for related work, policy docs, investigation, or partial cleanup that should not close the issue.
 
 ## Overview
