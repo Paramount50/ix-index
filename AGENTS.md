@@ -206,6 +206,8 @@ Do not hide real source files inside Nix strings just to keep the file count sma
 
 At the same time, do not spray files around without a boundary. Group example-specific support code under a named subdirectory (for example, `claude-code-scoreboard-plugin/`) with a small `default.nix`, source files, and assets it needs.
 
+For self-contained example projects, filter at the project boundary instead of listing every source file. Prefer `lib.fileset.intersection (lib.fileset.gitTracked ./.) ./.` in the project-local `default.nix` so new tracked files under `src/`, `resources/`, Gradle metadata, or similar project-owned paths are included automatically while untracked build caches stay out of the store. Use explicit file lists only when the derivation intentionally consumes a small cross-cutting subset.
+
 ## Artifact inputs
 
 Fixed upstream artifacts belong in `flake.nix` as non-flake inputs. This keeps content hashes in `flake.lock`, so `nix flake update` is the one update path for nixpkgs, tooling flakes, server jars, mod jars, and other pinned downloads.

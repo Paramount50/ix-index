@@ -220,10 +220,14 @@
           name = system;
           value =
             let
+              pkgs = nixpkgs.legacyPackages.${system};
               claudeCodeDemo = claudeCodeDemoFor system;
               claudeCodeDemoImages = lib.mapAttrs' (
                 name: package: lib.nameValuePair "claude-code-demo-${name}-image" package
               ) claudeCodeDemo.packages;
+              minestomHelloServerJar = import ./images/dev/minestom/project {
+                inherit ix lib pkgs;
+              };
             in
             imagePackages
             // claudeCodeDemo.systemPackages
@@ -234,6 +238,7 @@
               claude-code-demo-plan = claudeCodeDemo.planCommand;
               claude-code-demo-replace = claudeCodeDemo.replace;
               claude-code-demo-switch = claudeCodeDemo.switch;
+              minestom-hello-server-jar = minestomHelloServerJar;
             };
         }) devSystems
       );
@@ -285,8 +290,8 @@
               packages = [
                 pkgs.ast-grep
                 pkgs.deadnix
+                pkgs.gradle_9
                 pkgs.jdk25
-                pkgs.maven
                 pkgs.nixfmt
                 pkgs.statix
               ]

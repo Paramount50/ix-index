@@ -136,6 +136,7 @@ let
   moduleList = lib.collect builtins.isPath (import ../modules);
 
   buildNpmSite = import ./build-npm-site.nix;
+  buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
 
   mkMinecraftLoader = import ./minecraft-loader.nix;
   mkMinecraftSyncManaged =
@@ -246,6 +247,7 @@ let
   ixSpecialArgs = {
     inherit
       artifacts
+      buildGradleFatJar
       buildNpmSite
       mkMinecraftLoader
       mkMinecraftSyncManaged
@@ -345,6 +347,7 @@ in
     mkFleetFor
     discoverImages
     artifacts
+    buildGradleFatJar
     buildNpmSite
     mkMinecraftLoader
     mkMinecraftSyncManaged
