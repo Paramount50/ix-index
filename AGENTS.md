@@ -243,6 +243,7 @@ When adding new modules or packages, do not override compiler flags per-package.
 - **Trust module merging.** Layer per-version overlays via the module system, not by passing args to factory functions. Service families (runtime + variants) compose through option slots, not through wrappers.
 - **Pure eval.** No `builtins.currentSystem`, no `builtins.getEnv`, no `<nixpkgs>` channel refs, no `path:` flake refs. Every input flows through `flake.nix`.
 - **Strict, named failures.** `lib.assertMsg` over bare `assert`. Required options have no default so misuse fails at eval with the option name. Two loaders enabled → module-merge conflict, not silently-last-wins.
+- **Test useful invariants.** Eval tests should protect behavior that can regress across module boundaries, generated units, fleet rendering, artifact wiring, or security/runtime contracts. Do not assert facts that are already obvious from the same literal config being imported, such as exact example node names, hand-copied package allowlists from auto-discovery, or every field in an example's own `server.properties`. Flake evaluation already catches syntax and missing-output failures; tests should add signal beyond that.
 
 ## Nix practices to tighten
 

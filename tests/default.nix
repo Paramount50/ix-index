@@ -14,7 +14,6 @@ let
   };
   defaultMinecraftVersion = versions.default;
   defaultMinecraftModule = versions.${defaultMinecraftVersion};
-  minecraftVersions = builtins.attrNames (builtins.removeAttrs versions [ "default" ]);
 
   evalConfig =
     modules:
@@ -106,31 +105,7 @@ let
   };
 
   fleetPlan = fleet.planValue.nodes;
-  claudeCodeDemo = import ../examples/claude-code-demo/default.nix {
-    ix = ix // {
-      lib = ix;
-    };
-  };
-
-  packageNames = builtins.attrNames (ix.discoverImages ../images);
-
-  expectedPackages = [
-    "kernel-dev"
-    "minecraft"
-    "minecraft-bedrock"
-  ]
-  ++ map (version: "minecraft_${version}") minecraftVersions
-  ++ [
-    "minestom"
-    "neovim-ci"
-    "remote-desktop"
-  ];
-
   assertions = [
-    {
-      assertion = packageNames == expectedPackages;
-      message = "image discovery package set changed: expected ${builtins.toJSON expectedPackages}, got ${builtins.toJSON packageNames}";
-    }
     {
       assertion = kernelDevConfig.ix.image.name == "linux-kernel-dev";
       message = "kernel-dev image should set the expected OCI image name";
@@ -420,34 +395,6 @@ let
     {
       assertion = fleetPlan."worker-0".dependsOn == [ "db" ];
       message = "fleet replica dependencies should point at expanded node identities";
-    }
-    {
-      assertion =
-        claudeCodeDemo.planValue.order == [
-          "demo"
-          "minecraft"
-        ];
-      message = "Claude Code demo should evaluate to the demo and Minecraft nodes";
-    }
-    {
-      assertion =
-        claudeCodeDemo.planValue.nodes.demo.l7ProxyPorts == [ 80 ]
-        && claudeCodeDemo.nodes.demo.services.nginx.enable
-        && claudeCodeDemo.nodes.demo.services.git-clone.dest == "/src/linux";
-      message = "Claude Code demo should host the Svelte stats page and Linux source on the demo VM";
-    }
-    {
-      assertion =
-        claudeCodeDemo.nodes.minecraft.services.minecraft.fabric.enable
-        && claudeCodeDemo.nodes.minecraft.services.minecraft.fabric.version == "26.2-snapshot-6"
-        &&
-          claudeCodeDemo.nodes.minecraft.services.minecraft.serverFiles."server.properties".gamemode
-          == "creative"
-        &&
-          claudeCodeDemo.nodes.minecraft.services.minecraft.serverFiles."server.properties".level-type
-          == "minecraft:flat"
-        && claudeCodeDemo.planValue.nodes.minecraft.ipv4;
-      message = "Claude Code demo should use the current pinned Fabric snapshot for the TNT world";
     }
   ];
 

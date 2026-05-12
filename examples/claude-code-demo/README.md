@@ -3,7 +3,7 @@
 Two VMs:
 
 - `linux`: a shellable ix VM with `btop`, Linux source in `/src/linux`, and a tiny Svelte status page on port 80.
-- `minecraft`: a Fabric server pinned to `26.2-snapshot-6`, creative mode, flat world, public Java port 25565.
+- `minecraft`: a Fabric server pinned to `26.2-snapshot-6`, creative mode, village seed, public Java port 25565.
 
 ## Run
 
@@ -45,7 +45,7 @@ Then use Minecraft:
 ix shell minecraft
 ```
 
-Join the server, take a snapshot, blow up the flat creative world with TNT, then switch or restore to show the stateful VM workflow. `switch` snapshots existing nodes before applying the new NixOS systems; `replace` is only for recreating VMs from OCI images.
+Join the server, take a snapshot, blow up the creative village world with TNT, then switch or restore to show the stateful VM workflow. `switch` snapshots existing nodes before applying the new NixOS systems; `replace` is only for recreating VMs from OCI images.
 
 ## Behind The Hood Slides
 
