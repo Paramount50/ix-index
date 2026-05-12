@@ -2,10 +2,9 @@
   "name": "claude-code-demo-site",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "bun@1.3.11",
   "type": "module",
   "scripts": {
-    "build": "bun run check && bun run lint && vite build",
+    "build": "npm run check && npm run lint && vite build",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "dev": "vite dev --host 127.0.0.1",
     "lint": "eslint ."
