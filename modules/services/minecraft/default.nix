@@ -352,6 +352,7 @@ in
       type = types.listOf types.str;
       default = [
         # Aikar's flags: https://mcflags.emc.gs
+        "-XX:+UnlockExperimentalVMOptions"
         "-XX:+UseG1GC"
         "-XX:+ParallelRefProcEnabled"
         "-XX:MaxGCPauseMillis=200"
