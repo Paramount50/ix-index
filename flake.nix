@@ -237,14 +237,14 @@
                 name: package: lib.nameValuePair "claude-code-demo-${name}-image" package
               ) claudeCodeDemo.packages;
               repoPackages = ix.packageSetFor pkgs;
-              claudeCodeDemoWebsiteUp = ix.writeNushellApplication pkgs {
-                name = "claude-code-demo-website-up";
+              claudeCodeDemoLinuxUp = ix.writeNushellApplication pkgs {
+                name = "claude-code-demo-linux-up";
                 runtimeInputs = [
                   claudeCodeDemo.up
                 ];
                 text = ''
                   def --wrapped main [...args] {
-                    exec ix-fleet-up --on demo ...$args
+                    exec ix-fleet-up --on linux ...$args
                   }
                 '';
               };
@@ -270,7 +270,7 @@
               claude-code-demo-replace = claudeCodeDemo.replace;
               claude-code-demo-switch = claudeCodeDemo.switch;
               claude-code-demo-up = claudeCodeDemo.up;
-              claude-code-demo-website-up = claudeCodeDemoWebsiteUp;
+              claude-code-demo-linux-up = claudeCodeDemoLinuxUp;
               claude-code-demo-minecraft-up = claudeCodeDemoMinecraftUp;
               minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
             };
@@ -391,14 +391,14 @@
                 '';
               };
               claudeCodeDemo = claudeCodeDemoFor system;
-              claudeCodeDemoWebsiteUp = ix.writeNushellApplication pkgs {
-                name = "claude-code-demo-website-up";
+              claudeCodeDemoLinuxUp = ix.writeNushellApplication pkgs {
+                name = "claude-code-demo-linux-up";
                 runtimeInputs = [
                   claudeCodeDemo.up
                 ];
                 text = ''
                   def --wrapped main [...args] {
-                    exec ix-fleet-up --on demo ...$args
+                    exec ix-fleet-up --on linux ...$args
                   }
                 '';
               };
@@ -463,10 +463,10 @@
                 meta.description = "Build and upload demo OCI images, then create or start VMs from them";
               };
 
-              claude-code-demo-website-up = {
+              claude-code-demo-linux-up = {
                 type = "app";
-                program = lib.getExe claudeCodeDemoWebsiteUp;
-                meta.description = "Build and upload the Claude Code demo website image, then create or start only the website VM";
+                program = lib.getExe claudeCodeDemoLinuxUp;
+                meta.description = "Build and upload the Claude Code demo Linux image, then create or start only the Linux VM";
               };
 
               claude-code-demo-minecraft-up = {

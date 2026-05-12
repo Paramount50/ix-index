@@ -163,7 +163,7 @@ let
     };
 
     nodes = {
-      demo = {
+      linux = {
         tags = [ "web" ];
         deployment.l7ProxyPorts = [ 80 ];
         modules = [
