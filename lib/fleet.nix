@@ -144,7 +144,7 @@ let
       inherit
         name
         ;
-      baseName = spec.baseName;
+      inherit (spec) baseName;
       replicaIndex = spec.replicaIndex or null;
       system = builtins.unsafeDiscardStringContext "${config.system.build.toplevel}";
       switch = {
@@ -154,7 +154,7 @@ let
         sourceInstallable = deploy.switch.sourceInstallable or ".#${name}-system";
         overrideInputs = deploy.switch.overrideInputs or { };
       };
-      bootstrapImage = deploy.bootstrapImage;
+      inherit (deploy) bootstrapImage;
       replacementImage = {
         inherit
           imageName
@@ -164,12 +164,12 @@ let
         source = builtins.unsafeDiscardStringContext "${config.ix.build.ociImage}";
         sourceDrv = builtins.unsafeDiscardStringContext config.ix.build.ociImage.drvPath;
       };
-      region = deploy.region;
-      ipv4 = deploy.ipv4;
-      snapshot = deploy.snapshot;
-      tags = spec.tags;
-      env = deploy.env;
-      l7ProxyPorts = deploy.l7ProxyPorts;
+      inherit (deploy) region;
+      inherit (deploy) ipv4;
+      inherit (deploy) snapshot;
+      inherit (spec) tags;
+      inherit (deploy) env;
+      inherit (deploy) l7ProxyPorts;
       dependsOn = lib.concatMap expandDependency spec.dependsOn;
     }
   ) nodeSpecs;
@@ -242,7 +242,7 @@ in
   inherit planValue;
   nodes = nodeConfigs;
   meta = nodeSpecs;
-  packages = lib.mapAttrs (name: config: config.ix.build.ociImage) nodeConfigs;
+  packages = lib.mapAttrs (_: config: config.ix.build.ociImage) nodeConfigs;
   systemPackages = lib.mapAttrs' (
     name: config: lib.nameValuePair "${name}-system" config.system.build.toplevel
   ) nodeConfigs;

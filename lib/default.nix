@@ -47,7 +47,7 @@ let
         builtins.toJSON {
           include = [ (builtins.toString src) ];
           inherit typeCheckingMode pythonPlatform;
-          pythonVersion = python.pythonVersion;
+          inherit (python) pythonVersion;
         }
       );
     in
@@ -114,8 +114,8 @@ let
   # repo-local packages used by images.
   overlay = final: prev: {
     llm-agents = prev.llm-agents // {
-      claude-code = claude-code-nix.packages.${final.stdenv.hostPlatform.system}.claude-code;
-      codex = codex-cli-nix.packages.${final.stdenv.hostPlatform.system}.codex;
+      inherit (claude-code-nix.packages.${final.stdenv.hostPlatform.system}) claude-code;
+      inherit (codex-cli-nix.packages.${final.stdenv.hostPlatform.system}) codex;
     };
 
     minecraft-hot-reload-agent = final.callPackage ../nix/packages/minecraft-hot-reload-agent.nix { };

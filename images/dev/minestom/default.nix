@@ -32,6 +32,6 @@ in
 
   services.minestom = {
     enable = true;
-    serverJar = serverJar;
+    inherit serverJar;
   };
 }

@@ -239,17 +239,20 @@ These are current repo habits that should not become defaults. When touching nea
 
 ## Nix style (ast-grep enforced)
 
-Run `nix run nixpkgs#ast-grep -- scan` before committing. Hard rules:
+Run `nix run .#lint` before committing. It runs `nixfmt`, `statix`, `deadnix`, and the repo's ast-grep rules. Hard rules:
 
 - No `with pkgs;` or `with lib;`. Use `inherit (pkgs) ...` or `lib.foo` directly.
 - No `rec { }`. Use `let ... in` or `final/prev` instead.
 - No `mkForce`. Resolve conflicts with priority composition or fix the module boundary.
 - No `lib.recursiveUpdate`. Build the attrset in one place or use `lib.mkMerge`.
+- No repeated parent keys in the same attrset. Group related assignments under one parent, e.g. `services.minecraft = { ...; };` or `environment.etc = { ...; };`, instead of several `services.minecraft.foo = ...;` lines in the same attrset.
+- Prefer `inherit (source) name;` for direct field copies when the local name is the same. Avoid `name = source.name;` unless the assignment is clearer because it transforms or documents a boundary.
 - No `builtins.currentSystem`, `builtins.getEnv`, `<nixpkgs>`, or `path:` flake refs.
 - No `(import ./foo.nix)` inside `imports = [ ... ]`. NixOS auto-imports paths.
 - No `..` paths inside `modules/`. Cross-cutting helpers come through `specialArgs.ix`.
 - No `writeShellApplication` or `writeShellScriptBin`. Use `ix.writeNushellApplication pkgs { ... }` for user-facing commands and orchestrators.
 - No bare `assert cond;`. Use `assert lib.assertMsg cond "why";`.
+- No unused bindings. Use `_` for intentionally unused lambda arguments, remove unused module args, and run `deadnix --fail --no-lambda-pattern-names .` through `nix run .#lint`.
 - `strictDeps = true` on every `mkDerivation`. `__structuredAttrs` is the nixpkgs default; do not set it explicitly.
 - No inline fetcher hashes for repo-managed artifacts. Prefer non-flake inputs in `flake.nix` so `flake.lock` owns artifact content hashes.
 - No fake hash helpers or placeholder hashes in tracked Nix files. Compute the real SRI hash first.
@@ -268,5 +271,5 @@ Use `mgrep search -c {natural language}` to search the codebase. Do not use suba
 ## Linting
 
 ```
-nix run nixpkgs#ast-grep -- scan
+nix run .#lint
 ```

@@ -163,6 +163,7 @@
     }:
     let
       inherit (nixpkgs) lib;
+      fs = lib.fileset;
       ix = import ./lib {
         inherit
           nixpkgs
@@ -178,6 +179,10 @@
       ];
       imagePackages = (ix.discoverImages ./images) // {
         inherit (ix.pkgs) tonbo-artifacts;
+      };
+      lintSource = fs.toSource {
+        root = ./.;
+        fileset = fs.gitTracked ./.;
       };
       claudeCodeDemoFor =
         hostSystem:
@@ -215,7 +220,20 @@
             };
         }) devSystems
       );
-      checks.${ix.system}.eval = import ./tests { inherit nixpkgs ix; };
+      checks.${ix.system} =
+        let
+          lint = self.apps.${ix.system}.lint.program;
+        in
+        {
+          eval = import ./tests { inherit nixpkgs ix; };
+          lint = ix.pkgs.runCommand "ix-images-lint" { nativeBuildInputs = [ ix.pkgs.coreutils ]; } ''
+            cp -R ${lintSource} source
+            chmod -R u+w source
+            cd source
+            ${lint}
+            mkdir -p "$out"
+          '';
+        };
       formatter = builtins.listToAttrs (
         map (system: {
           name = system;
@@ -239,9 +257,11 @@
             pkgs.mkShell {
               packages = [
                 pkgs.ast-grep
+                pkgs.deadnix
                 pkgs.jdk25
                 pkgs.maven
                 pkgs.nixfmt
+                pkgs.statix
               ];
 
               JAVA_HOME = pkgs.jdk25.home;
@@ -275,9 +295,42 @@
                   }
                 '';
               };
+              lint = ix.writeNushellApplication pkgs {
+                name = "lint";
+                runtimeInputs = [
+                  pkgs.ast-grep
+                  pkgs.deadnix
+                  pkgs.fd
+                  pkgs.nixfmt
+                  pkgs.statix
+                ];
+                text = ''
+                  def main [] {
+                    let nix_files = (fd --extension nix | lines)
+
+                    print "nixfmt"
+                    nixfmt --check ...$nix_files
+
+                    print "statix"
+                    statix check .
+
+                    print "deadnix"
+                    deadnix --fail --no-lambda-pattern-names .
+
+                    print "ast-grep"
+                    ast-grep scan --error .
+                  }
+                '';
+              };
               claudeCodeDemo = claudeCodeDemoFor system;
             in
             {
+              lint = {
+                type = "app";
+                program = lib.getExe lint;
+                meta.description = "Run all Nix formatting and lint checks";
+              };
+
               bench-filesystem = {
                 type = "app";
                 program = lib.getExe benchFilesystem;

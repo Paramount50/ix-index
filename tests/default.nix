@@ -4,8 +4,8 @@
 }:
 let
   inherit (nixpkgs) lib;
-  system = ix.system;
-  pkgs = ix.pkgs;
+  inherit (ix) system;
+  inherit (ix) pkgs;
 
   moduleList = lib.collect builtins.isPath (import ../modules);
   versions = import ../images/games/minecraft/versions.nix {
@@ -21,7 +21,13 @@ let
     (lib.nixosSystem {
       inherit system;
       specialArgs.ix = {
-        inherit (ix) artifacts mkMinecraftLoader;
+        inherit (ix)
+          artifacts
+          mkMinecraftLoader
+          mkMinecraftSyncManaged
+          writeNushellApplication
+          writePythonApplication
+          ;
       };
       modules = [
         { nixpkgs.overlays = ix.overlays; }
@@ -463,8 +469,8 @@ pkgs.runCommand "ix-images-eval-tests" { nativeBuildInputs = [ pkgs.gnugrep ]; }
     paperConfig.environment.etc."minecraft/managed-dropins".source
   }/PlugManX.jar.plugin-name
 
-  grep -q -- '--password-file /var/lib/minecraft/.ix-rcon-password' ${paperServiceConfig.ExecReload}
-  grep -q 'plugman "$action" "$plugin"' ${paperServiceConfig.ExecReload}
+  grep -q -- '--password-file "/var/lib/minecraft/.ix-rcon-password"' ${paperServiceConfig.ExecReload}
+  grep -q 'plugman $row.action $row.plugin' ${paperServiceConfig.ExecReload}
   ! grep -q 'reload all' ${paperServiceConfig.ExecReload}
 
   mkdir -p "$out"

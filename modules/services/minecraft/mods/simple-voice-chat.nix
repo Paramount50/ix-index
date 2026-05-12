@@ -14,7 +14,7 @@ in
   config = lib.mkIf (modCfg != null) {
     networking.firewall.allowedUDPPorts = [ merged.port ];
     services.minecraft.configFiles."voicechat/voicechat-server.properties" = {
-      port = merged.port;
+      inherit (merged) port;
     };
   };
 }

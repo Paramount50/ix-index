@@ -21,7 +21,7 @@ let
   };
 in
 {
-  options = loaderModule.options;
+  inherit (loaderModule) options;
 
   # Default the JVM to JetBrains Runtime (JBR) on Fabric. The shared
   # minecraft runtime enables its hot-reload Java agent and the JBR-only

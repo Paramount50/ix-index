@@ -33,8 +33,10 @@ in
   // extraOptions;
 
   config = lib.mkIf cfg.enable {
-    services.minecraft.enable = lib.mkDefault true;
-    services.minecraft.dropDir = lib.mkDefault dropDir;
-    services.minecraft.serverJar = cfg.src;
+    services.minecraft = {
+      enable = lib.mkDefault true;
+      dropDir = lib.mkDefault dropDir;
+      serverJar = cfg.src;
+    };
   };
 }

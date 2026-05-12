@@ -14,74 +14,78 @@
     lib.mkEnableOption "base CLI tools (editors, shells, network, files, debug, misc)";
 
   config = lib.mkIf config.ix.profiles.base.enable {
-    environment.systemPackages = builtins.attrValues {
-      # AI
-      # TODO: re-enable once binary cache is available. These come from custom
-      # flakes (claude-code-nix, codex-cli-nix) and build from source.
-      # inherit (pkgs.llm-agents) claude-code codex;
+    environment = {
+      systemPackages = builtins.attrValues {
+        # AI
+        # TODO: re-enable once binary cache is available. These come from custom
+        # flakes (claude-code-nix, codex-cli-nix) and build from source.
+        # inherit (pkgs.llm-agents) claude-code codex;
 
-      # editors
-      inherit (pkgs) neovim;
+        # editors
+        inherit (pkgs) neovim;
 
-      # shells
-      inherit (pkgs) nushell fish zsh;
+        # shells
+        inherit (pkgs) nushell fish zsh;
 
-      # net
-      inherit (pkgs)
-        curl
-        wget
-        openssh
-        iproute2
-        dnsutils
-        ;
+        # net
+        inherit (pkgs)
+          curl
+          wget
+          openssh
+          iproute2
+          dnsutils
+          ;
 
-      # files
-      inherit (pkgs)
-        ripgrep
-        fd
-        file
-        tree
-        unzip
-        less
-        jq
-        ;
+        # files
+        inherit (pkgs)
+          ripgrep
+          fd
+          file
+          tree
+          unzip
+          less
+          jq
+          ;
 
-      # remote workspaces
-      # TODO: re-enable tonbo-artifacts (custom Rust build, no cache hits).
-      inherit (pkgs) fuse3;
+        # remote workspaces
+        # TODO: re-enable tonbo-artifacts (custom Rust build, no cache hits).
+        inherit (pkgs) fuse3;
 
-      # debug
-      inherit (pkgs)
-        btop
-        htop
-        strace
-        lsof
-        gdb
-        procps
-        tcpdump
-        perf
-        ;
+        # debug
+        inherit (pkgs)
+          btop
+          htop
+          strace
+          lsof
+          gdb
+          procps
+          tcpdump
+          perf
+          ;
 
-      # misc
-      inherit (pkgs)
-        tmux
-        zellij
-        git
-        bat
-        eza
-        zoxide
-        fzf
-        delta
-        dust
-        duf
-        hyperfine
-        tokei
-        ;
+        # misc
+        inherit (pkgs)
+          tmux
+          zellij
+          git
+          bat
+          eza
+          zoxide
+          fzf
+          delta
+          dust
+          duf
+          hyperfine
+          tokei
+          ;
+      };
+      variables.EDITOR = "nvim";
     };
 
-    programs.bash.completion.enable = true;
-    programs.zsh.enable = true;
-    programs.fish.enable = true;
-    environment.variables.EDITOR = "nvim";
+    programs = {
+      bash.completion.enable = true;
+      zsh.enable = true;
+      fish.enable = true;
+    };
   };
 }

@@ -224,10 +224,10 @@ let
       managedRoot
       plugmanReloadEnabled
       ;
-    dropDir = cfg.dropDir;
-    ignoredPlugins = cfg.autoReload.plugman.ignoredPlugins;
-    rconPort = cfg.autoReload.rconPort;
-    rconPasswordFile = cfg.autoReload.rconPasswordFile;
+    inherit (cfg) dropDir;
+    inherit (cfg.autoReload.plugman) ignoredPlugins;
+    inherit (cfg.autoReload) rconPort;
+    inherit (cfg.autoReload) rconPasswordFile;
   };
 
   reloadCommand = ix.writeNushellApplication pkgs {
@@ -461,9 +461,11 @@ in
     services.minecraft.serverFiles."server.properties".server-port = lib.mkDefault cfg.port;
 
     networking.firewall.allowedTCPPorts = [ cfg.port ];
-    environment.etc."minecraft/managed-dropins".source = managedDropins;
-    environment.etc."minecraft/managed-config".source = managedConfig;
-    environment.etc."minecraft/managed-server-files".source = managedServerFiles;
+    environment.etc = {
+      "minecraft/managed-dropins".source = managedDropins;
+      "minecraft/managed-config".source = managedConfig;
+      "minecraft/managed-server-files".source = managedServerFiles;
+    };
 
     systemd.services.minecraft = {
       description = "Minecraft server";

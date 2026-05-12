@@ -26,7 +26,7 @@ let
   };
 in
 {
-  options = loaderModule.options;
+  inherit (loaderModule) options;
 
   config = lib.mkMerge [
     loaderModule.config

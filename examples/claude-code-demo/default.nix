@@ -3,15 +3,15 @@
   hostSystem ? ix.lib.system,
 }:
 let
-  pkgs = ix.lib.pkgs;
+  inherit (ix.lib) pkgs;
   inherit (pkgs) lib;
   fs = lib.fileset;
   demoSiteSrc = fs.toSource {
     root = ./site;
     fileset = fs.unions [
       ./site/index.html
+      ./site/bun.lock
       ./site/eslint.config.js
-      ./site/package-lock.json
       ./site/package.json
       ./site/tsconfig.json
       ./site/src/App.svelte
@@ -19,11 +19,57 @@ let
       ./site/vite.config.js
     ];
   };
-  demoSite = pkgs.buildNpmPackage {
+  demoSiteDeps = pkgs.stdenvNoCC.mkDerivation {
+    pname = "claude-code-demo-site-deps";
+    version = "0.1.0";
+    src = demoSiteSrc;
+    nativeBuildInputs = [
+      pkgs.bun
+      pkgs.nodejs
+    ];
+    # Fixed-output derivations cannot reference other store paths. The default
+    # fixup phase rewrites shebangs inside node_modules to store-path Bash.
+    dontFixup = true;
+
+    buildPhase = ''
+      runHook preBuild
+      export HOME="$TMPDIR/home"
+      export BUN_INSTALL_CACHE_DIR="$TMPDIR/bun-cache"
+      mkdir -p "$HOME" "$BUN_INSTALL_CACHE_DIR"
+      bun install --frozen-lockfile --backend copyfile
+      runHook postBuild
+    '';
+
+    installPhase = ''
+      runHook preInstall
+      mkdir -p "$out"
+      cp -R node_modules "$out/node_modules"
+      runHook postInstall
+    '';
+
+    outputHashAlgo = "sha256";
+    outputHashMode = "recursive";
+    outputHash = "sha256-PUayCvEbubpA3DTYBw5vjXVtD6fmvWKrDF/P5WIvdVc=";
+  };
+  demoSite = pkgs.stdenvNoCC.mkDerivation {
     pname = "claude-code-demo-site";
     version = "0.1.0";
     src = demoSiteSrc;
-    npmDepsHash = "sha256-mLn+1gDPmgi7Di5leHj9oYficS6yWex69iYnTMyBrO0=";
+    nativeBuildInputs = [ pkgs.bun ];
+
+    buildPhase = ''
+      runHook preBuild
+      export HOME="$TMPDIR/home"
+      export BUN_INSTALL_CACHE_DIR="$TMPDIR/bun-cache"
+      mkdir -p "$HOME" "$BUN_INSTALL_CACHE_DIR"
+      cp -R ${demoSiteDeps}/node_modules ./node_modules
+      chmod -R u+w node_modules
+      bun install --frozen-lockfile --offline --backend copyfile
+      ${lib.getExe pkgs.nodejs} node_modules/svelte-check/bin/svelte-check --tsconfig ./tsconfig.json
+      ${lib.getExe pkgs.nodejs} node_modules/eslint/bin/eslint.js .
+      ${lib.getExe pkgs.nodejs} node_modules/vite/bin/vite.js build
+      runHook postBuild
+    '';
 
     installPhase = ''
       runHook preInstall
@@ -170,87 +216,81 @@ in
       tags = [ "web" ];
       deployment.l7ProxyPorts = [ 80 ];
       modules = [
-        (
-          { ... }:
-          {
-            ix.image.tag = "claude-code-demo";
+        (_: {
+          ix.image.tag = "claude-code-demo";
 
-            environment.systemPackages = linuxBuildPackages ++ [
-              pkgs.btop
-              pkgs.curl
-            ];
+          environment.systemPackages = linuxBuildPackages ++ [
+            pkgs.btop
+            pkgs.curl
+          ];
 
-            services.git-clone = {
-              enable = true;
-              url = "https://github.com/torvalds/linux.git";
-              dest = "/src/linux";
+          services.git-clone = {
+            enable = true;
+            url = "https://github.com/torvalds/linux.git";
+            dest = "/src/linux";
+          };
+
+          systemd.services.claude-code-demo-stats = {
+            description = "Claude Code demo VM stats";
+            wantedBy = [ "multi-user.target" ];
+            serviceConfig = {
+              Type = "simple";
+              RuntimeDirectory = "claude-code-demo";
+              RuntimeDirectoryMode = "0755";
+              ExecStart = lib.getExe statsLoop;
             };
+          };
 
-            systemd.services.claude-code-demo-stats = {
-              description = "Claude Code demo VM stats";
-              wantedBy = [ "multi-user.target" ];
-              serviceConfig = {
-                Type = "simple";
-                RuntimeDirectory = "claude-code-demo";
-                RuntimeDirectoryMode = "0755";
-                ExecStart = lib.getExe statsLoop;
-              };
+          services.nginx = {
+            enable = true;
+            virtualHosts."claude-code-demo" = {
+              default = true;
+              root = "${demoSite}/share/claude-code-demo-site";
+              locations."/stats.json".extraConfig = "root /run/claude-code-demo;";
+              locations."/".extraConfig = "try_files $uri $uri/ /index.html;";
             };
+          };
 
-            services.nginx = {
-              enable = true;
-              virtualHosts."claude-code-demo" = {
-                default = true;
-                root = "${demoSite}/share/claude-code-demo-site";
-                locations."/stats.json".extraConfig = "root /run/claude-code-demo;";
-                locations."/".extraConfig = "try_files $uri $uri/ /index.html;";
-              };
-            };
-
-            networking.firewall.allowedTCPPorts = [ 80 ];
-          }
-        )
+          networking.firewall.allowedTCPPorts = [ 80 ];
+        })
       ];
     };
 
     minecraft = {
       deployment.ipv4 = true;
       modules = [
-        (
-          { ... }:
-          {
-            # Fleets default ix.image.name to the node name (`minecraft` here).
-            # Set a tag anyway so replacement images are named
-            # `minecraft:claude-code-demo` instead of the less-informative
-            # `minecraft:latest`.
-            ix.image.tag = "claude-code-demo";
+        (_: {
+          # Fleets default ix.image.name to the node name (`minecraft` here).
+          # Set a tag anyway so replacement images are named
+          # `minecraft:claude-code-demo` instead of the less-informative
+          # `minecraft:latest`.
+          ix.image.tag = "claude-code-demo";
 
-            services.minecraft = {
+          services.minecraft = {
+            enable = true;
+
+            fabric = {
               enable = true;
-
-              fabric = {
-                enable = true;
-                version = minecraftVersion;
-                loaderVersion = minecraftLoaderVersion;
-                installerVersion = minecraftInstallerVersion;
-                src = ix.lib.artifacts.minecraft.servers."26.2-snapshot-6-fabric";
-              };
-
-              serverFiles."server.properties" = {
-                motd = "Claude Code Demo TNT Lab";
-                max-players = 20;
-                online-mode = true;
-                gamemode = "creative";
-                force-gamemode = true;
-                level-type = "minecraft:flat";
-                spawn-protection = 0;
-                allow-flight = true;
-                view-distance = 10;
-                simulation-distance = 8;
-              };
+              version = minecraftVersion;
+              loaderVersion = minecraftLoaderVersion;
+              installerVersion = minecraftInstallerVersion;
+              src = ix.lib.artifacts.minecraft.servers."26.2-snapshot-6-fabric";
             };
-          }
-        )
+
+            serverFiles."server.properties" = {
+              motd = "Claude Code Demo TNT Lab";
+              max-players = 20;
+              online-mode = true;
+              gamemode = "creative";
+              force-gamemode = true;
+              level-type = "minecraft:flat";
+              spawn-protection = 0;
+              allow-flight = true;
+              view-distance = 10;
+              simulation-distance = 8;
+            };
+          };
+        })
       ];
     };
   };

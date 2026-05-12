@@ -122,19 +122,19 @@ in
     };
 
     settings = mkOption {
-      type = propertiesFormat.type;
+      inherit (propertiesFormat) type;
       default = { };
       description = "server.properties values for Bedrock Dedicated Server.";
     };
 
     allowlist = mkOption {
-      type = jsonFormat.type;
+      inherit (jsonFormat) type;
       default = [ ];
       description = "allowlist.json content.";
     };
 
     permissions = mkOption {
-      type = jsonFormat.type;
+      inherit (jsonFormat) type;
       default = [ ];
       description = "permissions.json content.";
     };

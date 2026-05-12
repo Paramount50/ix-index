@@ -21,30 +21,34 @@ in
   config = lib.mkIf (modCfg != null) {
     networking.firewall.allowedTCPPorts = [ merged.port ];
 
-    services.minecraft.configFiles."bluemap/webserver.conf" = {
-      port = merged.port;
-      ip = "0.0.0.0";
-    };
+    services = {
+      minecraft.configFiles = {
+        "bluemap/webserver.conf" = {
+          inherit (merged) port;
+          ip = "0.0.0.0";
+        };
 
-    services.mysql = lib.mkIf merged.mysql {
-      enable = true;
-      package = lib.mkDefault pkgs.mariadb;
-      ensureDatabases = [ "bluemap" ];
-      ensureUsers = [
-        {
-          name = "minecraft";
-          ensurePermissions = {
-            "bluemap.*" = "ALL PRIVILEGES";
+        "bluemap/storages/sql.conf" = lib.mkIf merged.mysql {
+          storage-type = "SQL";
+          connection-url = "jdbc:mysql://localhost:3306/bluemap";
+          connection-properties = {
+            user = "minecraft";
           };
-        }
-      ];
-    };
+        };
+      };
 
-    services.minecraft.configFiles."bluemap/storages/sql.conf" = lib.mkIf merged.mysql {
-      storage-type = "SQL";
-      connection-url = "jdbc:mysql://localhost:3306/bluemap";
-      connection-properties = {
-        user = "minecraft";
+      mysql = lib.mkIf merged.mysql {
+        enable = true;
+        package = lib.mkDefault pkgs.mariadb;
+        ensureDatabases = [ "bluemap" ];
+        ensureUsers = [
+          {
+            name = "minecraft";
+            ensurePermissions = {
+              "bluemap.*" = "ALL PRIVILEGES";
+            };
+          }
+        ];
       };
     };
   };

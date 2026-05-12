@@ -34,7 +34,7 @@
 
     ix.build.ociImage =
       let
-        toplevel = config.system.build.toplevel;
+        inherit (config.system.build) toplevel;
 
         # FHS layout pointing into the NixOS toplevel. dockerTools doesn't
         # ship `/init` or the standard /bin, /etc, /usr paths, so we stage
@@ -54,8 +54,8 @@
         '';
 
         stream = pkgs.dockerTools.streamLayeredImage {
-          name = config.ix.image.name;
-          tag = config.ix.image.tag;
+          inherit (config.ix.image) name;
+          inherit (config.ix.image) tag;
           # Below the 127-layer registry limit with headroom for systemRoot
           # plus a few user layers.
           maxLayers = 67;
