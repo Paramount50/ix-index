@@ -16,6 +16,13 @@ nix run .#claude-code-demo-up
 CLI, and creates or starts the VMs from those uploaded images. Use this while
 `ix switch` source switching is still unstable.
 
+To create or start only one VM:
+
+```bash
+nix run .#claude-code-demo-website-up
+nix run .#claude-code-demo-minecraft-up
+```
+
 ## Demo Flow
 
 Open the first VM shell and show the machine:

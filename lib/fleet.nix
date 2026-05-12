@@ -183,11 +183,18 @@ let
 
   plan = pkgs.writeText "ix-fleet-plan.json" (builtins.toJSON planValue);
   python = pkgs.python3.withPackages (ps: [ ps.pydantic ]);
+  userLocalBinPath = ''
+    let home = ($env.HOME? | default "")
+    if $home != "" {
+      $env.PATH = [$"($home)/.local/bin"] ++ $env.PATH
+    }
+  '';
   command = writeNushellApplication pkgs {
     name = "ix-fleet";
     runtimeInputs = [ python ];
     text = ''
       def --wrapped main [...args] {
+        ${userLocalBinPath}
         exec python3 ${ixFleetScript} --plan ${plan} ...$args
       }
     '';
@@ -197,6 +204,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def --wrapped main [...args] {
+        ${userLocalBinPath}
         exec python3 ${ixFleetScript} --plan ${plan} plan ...$args
       }
     '';
@@ -206,6 +214,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def --wrapped main [...args] {
+        ${userLocalBinPath}
         exec python3 ${ixFleetScript} --plan ${plan} diff ...$args
       }
     '';
@@ -215,6 +224,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def --wrapped main [...args] {
+        ${userLocalBinPath}
         exec python3 ${ixFleetScript} --plan ${plan} switch ...$args
       }
     '';
@@ -224,6 +234,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def --wrapped main [...args] {
+        ${userLocalBinPath}
         exec python3 ${ixFleetScript} --plan ${plan} replace ...$args
       }
     '';
@@ -233,6 +244,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def --wrapped main [...args] {
+        ${userLocalBinPath}
         exec python3 ${ixFleetScript} --plan ${plan} up ...$args
       }
     '';

@@ -237,6 +237,28 @@
                 name: package: lib.nameValuePair "claude-code-demo-${name}-image" package
               ) claudeCodeDemo.packages;
               repoPackages = ix.packageSetFor pkgs;
+              claudeCodeDemoWebsiteUp = ix.writeNushellApplication pkgs {
+                name = "claude-code-demo-website-up";
+                runtimeInputs = [
+                  claudeCodeDemo.up
+                ];
+                text = ''
+                  def --wrapped main [...args] {
+                    exec ix-fleet-up --on demo ...$args
+                  }
+                '';
+              };
+              claudeCodeDemoMinecraftUp = ix.writeNushellApplication pkgs {
+                name = "claude-code-demo-minecraft-up";
+                runtimeInputs = [
+                  claudeCodeDemo.up
+                ];
+                text = ''
+                  def --wrapped main [...args] {
+                    exec ix-fleet-up --on minecraft ...$args
+                  }
+                '';
+              };
             in
             imagePackages
             // claudeCodeDemo.systemPackages
@@ -248,6 +270,8 @@
               claude-code-demo-replace = claudeCodeDemo.replace;
               claude-code-demo-switch = claudeCodeDemo.switch;
               claude-code-demo-up = claudeCodeDemo.up;
+              claude-code-demo-website-up = claudeCodeDemoWebsiteUp;
+              claude-code-demo-minecraft-up = claudeCodeDemoMinecraftUp;
               minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
             };
         }) devSystems
@@ -367,6 +391,28 @@
                 '';
               };
               claudeCodeDemo = claudeCodeDemoFor system;
+              claudeCodeDemoWebsiteUp = ix.writeNushellApplication pkgs {
+                name = "claude-code-demo-website-up";
+                runtimeInputs = [
+                  claudeCodeDemo.up
+                ];
+                text = ''
+                  def --wrapped main [...args] {
+                    exec ix-fleet-up --on demo ...$args
+                  }
+                '';
+              };
+              claudeCodeDemoMinecraftUp = ix.writeNushellApplication pkgs {
+                name = "claude-code-demo-minecraft-up";
+                runtimeInputs = [
+                  claudeCodeDemo.up
+                ];
+                text = ''
+                  def --wrapped main [...args] {
+                    exec ix-fleet-up --on minecraft ...$args
+                  }
+                '';
+              };
             in
             {
               lint = {
@@ -415,6 +461,18 @@
                 type = "app";
                 program = lib.getExe claudeCodeDemo.up;
                 meta.description = "Build and upload demo OCI images, then create or start VMs from them";
+              };
+
+              claude-code-demo-website-up = {
+                type = "app";
+                program = lib.getExe claudeCodeDemoWebsiteUp;
+                meta.description = "Build and upload the Claude Code demo website image, then create or start only the website VM";
+              };
+
+              claude-code-demo-minecraft-up = {
+                type = "app";
+                program = lib.getExe claudeCodeDemoMinecraftUp;
+                meta.description = "Build and upload the Claude Code demo Minecraft image, then create or start only the Minecraft VM";
               };
 
               claude-code-demo-switch = {

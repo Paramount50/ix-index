@@ -151,99 +151,100 @@ let
   minecraftVersion = "26.2-snapshot-6";
   minecraftLoaderVersion = "0.19.2";
   minecraftInstallerVersion = "1.1.1";
-in
-(ix.lib.mkFleetFor hostSystem) {
-  deployment.switch = {
-    # Build the target NixOS system on ix infrastructure. The local machine only
-    # evaluates the plan and sends the derivation path to the switch command.
-    buildOn = "remote";
+  fleet = (ix.lib.mkFleetFor hostSystem) {
+    deployment.switch = {
+      # Build the target NixOS system on ix infrastructure. The local machine only
+      # evaluates the plan and sends the derivation path to the switch command.
+      buildOn = "remote";
 
-    # Keep remote switch evaluation on the same source tree that produced the
-    # local plan instead of whatever the example lock file last recorded.
-    overrideInputs.index = ".";
-  };
-
-  nodes = {
-    demo = {
-      tags = [ "web" ];
-      deployment.l7ProxyPorts = [ 80 ];
-      modules = [
-        (_: {
-          ix.image.tag = "claude-code-demo";
-
-          environment.systemPackages = linuxBuildPackages ++ [
-            pkgs.btop
-            pkgs.curl
-          ];
-
-          services.git-clone = {
-            enable = true;
-            url = "https://github.com/torvalds/linux.git";
-            dest = "/src/linux";
-          };
-
-          systemd.services.claude-code-demo-stats = {
-            description = "Claude Code demo VM stats";
-            wantedBy = [ "multi-user.target" ];
-            serviceConfig = {
-              Type = "simple";
-              RuntimeDirectory = "claude-code-demo";
-              RuntimeDirectoryMode = "0755";
-              ExecStart = lib.getExe statsLoop;
-            };
-          };
-
-          services.nginx = {
-            enable = true;
-            virtualHosts."claude-code-demo" = {
-              default = true;
-              root = "${demoSite}/share/claude-code-demo-site";
-              locations."/stats.json".extraConfig = "root /run/claude-code-demo;";
-              locations."/".extraConfig = "try_files $uri $uri/ /index.html;";
-            };
-          };
-
-          networking.firewall.allowedTCPPorts = [ 80 ];
-        })
-      ];
+      # Keep remote switch evaluation on the same source tree that produced the
+      # local plan instead of whatever the example lock file last recorded.
+      overrideInputs.index = ".";
     };
 
-    minecraft = {
-      deployment.ipv4 = true;
-      modules = [
-        (_: {
-          # Fleets default ix.image.name to the node name (`minecraft` here).
-          # Set a tag anyway so replacement images are named
-          # `minecraft:claude-code-demo` instead of the less-informative
-          # `minecraft:latest`.
-          ix.image.tag = "claude-code-demo";
+    nodes = {
+      demo = {
+        tags = [ "web" ];
+        deployment.l7ProxyPorts = [ 80 ];
+        modules = [
+          (_: {
+            ix.image.tag = "claude-code-demo";
 
-          services.minecraft = {
-            enable = true;
+            environment.systemPackages = linuxBuildPackages ++ [
+              pkgs.btop
+              pkgs.curl
+            ];
 
-            fabric = {
+            services.git-clone = {
               enable = true;
-              version = minecraftVersion;
-              loaderVersion = minecraftLoaderVersion;
-              installerVersion = minecraftInstallerVersion;
-              src = ix.lib.artifacts.minecraft.servers."26.2-snapshot-6-fabric";
+              url = "https://github.com/torvalds/linux.git";
+              dest = "/src/linux";
             };
 
-            serverFiles."server.properties" = {
-              motd = "Claude Code Demo TNT Lab";
-              max-players = 20;
-              online-mode = true;
-              gamemode = "creative";
-              force-gamemode = true;
-              level-type = "minecraft:flat";
-              spawn-protection = 0;
-              allow-flight = true;
-              view-distance = 10;
-              simulation-distance = 8;
+            systemd.services.claude-code-demo-stats = {
+              description = "Claude Code demo VM stats";
+              wantedBy = [ "multi-user.target" ];
+              serviceConfig = {
+                Type = "simple";
+                RuntimeDirectory = "claude-code-demo";
+                RuntimeDirectoryMode = "0755";
+                ExecStart = lib.getExe statsLoop;
+              };
             };
-          };
-        })
-      ];
+
+            services.nginx = {
+              enable = true;
+              virtualHosts."claude-code-demo" = {
+                default = true;
+                root = "${demoSite}/share/claude-code-demo-site";
+                locations."/stats.json".extraConfig = "root /run/claude-code-demo;";
+                locations."/".extraConfig = "try_files $uri $uri/ /index.html;";
+              };
+            };
+
+            networking.firewall.allowedTCPPorts = [ 80 ];
+          })
+        ];
+      };
+
+      minecraft = {
+        deployment.ipv4 = true;
+        modules = [
+          (_: {
+            # Fleets default ix.image.name to the node name (`minecraft` here).
+            # Set a tag anyway so replacement images are named
+            # `minecraft:claude-code-demo` instead of the less-informative
+            # `minecraft:latest`.
+            ix.image.tag = "claude-code-demo";
+
+            services.minecraft = {
+              enable = true;
+
+              fabric = {
+                enable = true;
+                version = minecraftVersion;
+                loaderVersion = minecraftLoaderVersion;
+                installerVersion = minecraftInstallerVersion;
+                src = ix.lib.artifacts.minecraft.servers."26.2-snapshot-6-fabric";
+              };
+
+              serverFiles."server.properties" = {
+                motd = "Claude Code Demo TNT Lab";
+                max-players = 20;
+                online-mode = true;
+                gamemode = "creative";
+                force-gamemode = true;
+                level-type = "minecraft:flat";
+                spawn-protection = 0;
+                allow-flight = true;
+                view-distance = 10;
+                simulation-distance = 8;
+              };
+            };
+          })
+        ];
+      };
     };
   };
-}
+in
+fleet
