@@ -3,6 +3,7 @@
   lib,
   pkgs,
   evalImageConfig,
+  ixFleetScript,
   writeNushellApplication,
 }:
 {
@@ -187,7 +188,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def main [...args] {
-        exec python3 ${../tools/ix-fleet.py} --plan ${plan} ...$args
+        exec python3 ${ixFleetScript} --plan ${plan} ...$args
       }
     '';
   };
@@ -196,7 +197,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def main [...args] {
-        exec python3 ${../tools/ix-fleet.py} --plan ${plan} plan ...$args
+        exec python3 ${ixFleetScript} --plan ${plan} plan ...$args
       }
     '';
   };
@@ -205,7 +206,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def main [...args] {
-        exec python3 ${../tools/ix-fleet.py} --plan ${plan} diff ...$args
+        exec python3 ${ixFleetScript} --plan ${plan} diff ...$args
       }
     '';
   };
@@ -214,7 +215,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def main [...args] {
-        exec python3 ${../tools/ix-fleet.py} --plan ${plan} switch ...$args
+        exec python3 ${ixFleetScript} --plan ${plan} switch ...$args
       }
     '';
   };
@@ -223,7 +224,7 @@ let
     runtimeInputs = [ python ];
     text = ''
       def main [...args] {
-        exec python3 ${../tools/ix-fleet.py} --plan ${plan} replace ...$args
+        exec python3 ${ixFleetScript} --plan ${plan} replace ...$args
       }
     '';
   };

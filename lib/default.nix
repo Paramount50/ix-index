@@ -144,6 +144,7 @@ let
     args:
     import ./minecraft-sync-managed.nix (
       {
+        src = paths.tools.minecraftSyncManaged;
         inherit writePythonApplication;
       }
       // args
@@ -297,6 +298,7 @@ let
         evalImageConfig
         writeNushellApplication
         ;
+      ixFleetScript = paths.tools.ixFleet;
       pkgs = nixpkgs.legacyPackages.${hostSystem};
     };
 

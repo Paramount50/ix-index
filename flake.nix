@@ -185,6 +185,8 @@
             tonboArtifacts = ./nix/packages/tonbo-artifacts.nix;
           };
           packages.minestom.servers.hello = ./packages/minestom/servers/hello;
+          tools.ixFleet = ./tools/ix-fleet.py;
+          tools.minecraftSyncManaged = ./nix/packages/minecraft-sync-managed.py;
         };
       };
       devSystems = [

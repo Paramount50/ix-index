@@ -1,6 +1,7 @@
 {
   pkgs,
   writePythonApplication,
+  src,
   dataDir,
   dropDir,
   managedRoot,
@@ -12,7 +13,7 @@
 
 writePythonApplication pkgs {
   name = "minecraft-sync-managed";
-  src = ../nix/packages/minecraft-sync-managed.py;
+  inherit src;
   args = [
     "--data-dir"
     dataDir
