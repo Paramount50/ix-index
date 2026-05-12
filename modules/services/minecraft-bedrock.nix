@@ -59,6 +59,8 @@ let
 
       runHook postInstall
     '';
+
+    meta.mainProgram = "bedrock_server";
   };
 
   cfg = config.services.minecraft-bedrock;
@@ -158,7 +160,7 @@ in
       serviceConfig = {
         Type = "simple";
         WorkingDirectory = dataDir;
-        ExecStart = "${cfg.package}/bin/bedrock_server";
+        ExecStart = lib.getExe cfg.package;
         Restart = "on-failure";
         StateDirectory = "minecraft-bedrock";
         KillSignal = "SIGINT";

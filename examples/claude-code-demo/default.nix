@@ -5,10 +5,25 @@
 }:
 let
   pkgs = ix.lib.pkgs;
+  inherit (pkgs) lib;
+  fs = lib.fileset;
+  demoSiteSrc = fs.toSource {
+    root = ./site;
+    fileset = fs.unions [
+      ./site/index.html
+      ./site/jsconfig.json
+      ./site/package-lock.json
+      ./site/package.json
+      ./site/src/App.svelte
+      ./site/src/main.js
+      ./site/src/style.css
+      ./site/vite.config.js
+    ];
+  };
   demoSite = pkgs.buildNpmPackage {
     pname = "claude-code-demo-site";
     version = "0.1.0";
-    src = ./site;
+    src = demoSiteSrc;
     npmDepsHash = "sha256-A4BvJKJGxDpfn65Es0bYT2k3Ugu57jbtQNOau2f3QtQ=";
 
     installPhase = ''
@@ -115,6 +130,21 @@ let
     '';
   };
 
+  statsLoop = pkgs.writeShellApplication {
+    name = "claude-code-demo-stats-loop";
+    runtimeInputs = [
+      pkgs.coreutils
+      writeStats
+    ];
+    text = ''
+      set -euo pipefail
+      while true; do
+        claude-code-demo-write-stats
+        sleep 1
+      done
+    '';
+  };
+
   linuxBuildPackages = [
     pkgs.bc
     pkgs.bison
@@ -178,13 +208,7 @@ in
                 Type = "simple";
                 RuntimeDirectory = "claude-code-demo";
                 RuntimeDirectoryMode = "0755";
-                ExecStart = pkgs.writeShellScript "claude-code-demo-stats-loop" ''
-                  set -euo pipefail
-                  while true; do
-                    ${writeStats}/bin/claude-code-demo-write-stats
-                    sleep 1
-                  done
-                '';
+                ExecStart = lib.getExe statsLoop;
               };
             };
 

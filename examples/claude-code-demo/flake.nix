@@ -15,6 +15,7 @@
     }:
     let
       ix = index;
+      inherit (index.lib.pkgs) lib;
       systems = [
         "x86_64-linux"
         "aarch64-darwin"
@@ -38,22 +39,22 @@
           value = {
             switch = {
               type = "app";
-              program = "${fleet.switch}/bin/ix-fleet-switch";
+              program = lib.getExe fleet.switch;
             };
 
             plan = {
               type = "app";
-              program = "${fleet.planCommand}/bin/ix-fleet-plan";
+              program = lib.getExe fleet.planCommand;
             };
 
             diff = {
               type = "app";
-              program = "${fleet.diff}/bin/ix-fleet-diff";
+              program = lib.getExe fleet.diff;
             };
 
             replace = {
               type = "app";
-              program = "${fleet.replace}/bin/ix-fleet-replace";
+              program = lib.getExe fleet.replace;
             };
           };
         }

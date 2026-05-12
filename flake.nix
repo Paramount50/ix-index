@@ -162,6 +162,7 @@
       ...
     }:
     let
+      inherit (nixpkgs) lib;
       ix = import ./lib {
         inherit
           nixpkgs
@@ -230,31 +231,29 @@
           value.update-mods =
             let
               pkgs = nixpkgs.legacyPackages.${system};
+              updateMods = pkgs.writeShellApplication {
+                name = "update-mods";
+                runtimeInputs = [ pkgs.python3 ];
+                text = ''exec python3 ${./tools/update-mods.py} "$@"'';
+              };
             in
             {
               type = "app";
-              program = "${
-                pkgs.writeShellApplication {
-                  name = "update-mods";
-                  runtimeInputs = [ pkgs.python3 ];
-                  text = ''exec python3 ${./tools/update-mods.py} "$@"'';
-                }
-              }/bin/update-mods";
+              program = lib.getExe updateMods;
             };
           value.ix-fleet =
             let
               pkgs = nixpkgs.legacyPackages.${system};
               python = pkgs.python3.withPackages (ps: [ ps.pydantic ]);
+              ixFleet = pkgs.writeShellApplication {
+                name = "ix-fleet";
+                runtimeInputs = [ python ];
+                text = ''exec python3 ${./tools/ix-fleet.py} "$@"'';
+              };
             in
             {
               type = "app";
-              program = "${
-                pkgs.writeShellApplication {
-                  name = "ix-fleet";
-                  runtimeInputs = [ python ];
-                  text = ''exec python3 ${./tools/ix-fleet.py} "$@"'';
-                }
-              }/bin/ix-fleet";
+              program = lib.getExe ixFleet;
             };
         }) devSystems
       );

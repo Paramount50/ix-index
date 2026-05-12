@@ -43,6 +43,12 @@ let
     };
   };
 
+  formatValueType = (pkgs.formats.json { }).type;
+
+  modConfigType = types.submodule {
+    freeformType = formatValueType;
+  };
+
   pluginType = types.submodule {
     options = {
       src = mkOption {
@@ -121,6 +127,7 @@ let
   autoReloadEnabled = cfg.autoReload.enable && autoReloadDriver != "none";
   jvmReloadEnabled = autoReloadEnabled && autoReloadDriver == "jvm";
   plugmanReloadEnabled = autoReloadEnabled && autoReloadDriver == "plugman";
+  java = lib.getExe' cfg.javaPackage "java";
   pluginConfigFiles = lib.optionalAttrs plugmanReloadEnabled {
     "plugins/PlugManX/config.yml" = {
       ignored-plugins = cfg.autoReload.plugman.ignoredPlugins;
@@ -443,7 +450,7 @@ let
             echo "minecraft hot reload socket is not ready at $socket; synced managed files only" >&2
             exit 0
           fi
-          exec ${cfg.javaPackage}/bin/java \
+          exec ${java} \
             -cp ${pkgs.minecraft-hot-reload-agent}/share/minecraft-hot-reload-agent/minecraft-hot-reload-agent.jar \
             dev.ix.minecraft.hotreload.HotReloadAgent \
             "$socket" \
@@ -485,7 +492,7 @@ let
   ];
 
   javaArgs = [
-    "${cfg.javaPackage}/bin/java"
+    java
     "-XX:MaxRAMPercentage=${toString cfg.maxRAMPercentage}"
   ]
   ++ cfg.jvmFlags
@@ -518,7 +525,7 @@ in
     };
 
     mods = mkOption {
-      type = types.attrsOf types.attrs;
+      type = types.attrsOf modConfigType;
       default = { };
       description = "Mods to install, keyed by Modrinth slug. Empty {} includes the jar with defaults. Attrsets with fields configure the mod (mod modules read these and generate config files).";
     };
@@ -638,13 +645,13 @@ in
     };
 
     configFiles = mkOption {
-      type = types.attrsOf types.attrs;
+      type = types.attrsOf formatValueType;
       default = { };
       description = "Config files to place under config/. Keys are relative paths (format inferred from extension: .toml, .json, .yaml, .yml, .properties). Values are Nix attrsets.";
     };
 
     serverFiles = mkOption {
-      type = types.attrsOf types.anything;
+      type = types.attrsOf formatValueType;
       default = { };
       description = "Files to place relative to the server root. Keys are paths (server.properties, bukkit.yml, etc.). Format inferred from extension.";
     };
@@ -682,7 +689,7 @@ in
         Type = "simple";
         WorkingDirectory = dataDir;
         ExecStart = lib.escapeShellArgs javaArgs;
-        ExecReload = "${reloadCommand}/bin/minecraft-reload";
+        ExecReload = lib.getExe reloadCommand;
         Restart = "on-failure";
         StateDirectory = "minecraft";
 
@@ -717,7 +724,7 @@ in
       preStart = ''
         mkdir -p ${dataDir}/${cfg.dropDir}
         echo "eula=true" > ${dataDir}/eula.txt
-        ${syncManaged}/bin/minecraft-sync-managed
+        ${lib.getExe syncManaged}
       '';
     };
   };

@@ -1,28 +1,42 @@
 { lib, ... }:
+let
+  inherit (lib) mkEnableOption mkOption types;
+in
 {
   options.services.velocity = {
-    enable = lib.mkEnableOption "Velocity proxy";
-    bind = lib.mkOption {
-      type = lib.types.str;
+    enable = mkEnableOption "Velocity proxy";
+    bind = mkOption {
+      type = types.str;
       default = "0.0.0.0:25565";
     };
-    onlineMode = lib.mkOption {
-      type = lib.types.bool;
+    onlineMode = mkOption {
+      type = types.bool;
       default = true;
     };
     forwarding = {
-      mode = lib.mkOption {
-        type = lib.types.str;
+      mode = mkOption {
+        type = types.enum [
+          "none"
+          "legacy"
+          "bungeeguard"
+          "modern"
+        ];
         default = "modern";
       };
-      secret = lib.mkOption { type = lib.types.anything; };
+      secret = mkOption {
+        type = types.oneOf [
+          types.str
+          types.path
+        ];
+        description = "Velocity player-info forwarding secret, either inline or as a file path.";
+      };
     };
-    servers = lib.mkOption {
-      type = lib.types.attrsOf lib.types.str;
+    servers = mkOption {
+      type = types.attrsOf types.str;
       default = { };
     };
-    try = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
+    try = mkOption {
+      type = types.listOf types.str;
       default = [ ];
     };
   };

@@ -4,10 +4,20 @@
   stdenv,
 }:
 
+let
+  fs = lib.fileset;
+  src = fs.toSource {
+    root = ./minecraft-hot-reload-agent;
+    fileset = fs.unions [
+      ./minecraft-hot-reload-agent/MANIFEST.MF
+      ./minecraft-hot-reload-agent/src/dev/ix/minecraft/hotreload/HotReloadAgent.java
+    ];
+  };
+in
 stdenv.mkDerivation {
   pname = "minecraft-hot-reload-agent";
   version = "0.1.0";
-  src = ./minecraft-hot-reload-agent;
+  inherit src;
 
   strictDeps = true;
   nativeBuildInputs = [ jdk25 ];

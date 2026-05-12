@@ -18,9 +18,10 @@ let
   cfg = config.services.minestom;
 
   dataDir = "/var/lib/minestom";
+  java = lib.getExe' cfg.javaPackage "java";
 
   javaArgs = [
-    "${cfg.javaPackage}/bin/java"
+    java
     "-XX:MaxRAMPercentage=${toString cfg.maxRAMPercentage}"
   ]
   ++ cfg.jvmFlags
