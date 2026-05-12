@@ -219,6 +219,15 @@ When adding new modules or packages, do not override compiler flags per-package.
 - **Pure eval.** No `builtins.currentSystem`, no `builtins.getEnv`, no `<nixpkgs>` channel refs, no `path:` flake refs. Every input flows through `flake.nix`.
 - **Strict, named failures.** `lib.assertMsg` over bare `assert`. Required options have no default so misuse fails at eval with the option name. Two loaders enabled → module-merge conflict, not silently-last-wins.
 
+## Nix practices to tighten
+
+These are current repo habits that should not become defaults. When touching nearby code, improve the pattern in the same change. If the cleanup is wider than the task, file a narrow issue.
+
+- **Typed module interfaces.** Avoid `types.attrs`, `types.attrsOf types.attrs`, and `types.anything` for domain data. Use `types.submodule`, `attrsOf (submodule ...)`, `types.enum`, `types.oneOf`, `types.nullOr`, or a `pkgs.formats.*.type` that matches the file being generated. Keep broad attrs only at true foreign-format boundaries, and name that boundary in the option description.
+- **Filtered local sources.** Do not default to broad `src = ./project` or `src = ./site` inputs. Use `lib.fileset.toSource` with the smallest useful file set, usually `lib.fileset.intersection (lib.fileset.gitTracked ./.) (lib.fileset.unions [ ... ])`, or `lib.sources.cleanSourceWith` when a predicate is clearer. This avoids copying irrelevant files or secrets into the store and prevents rebuilds from unrelated local changes.
+- **Executable paths.** Prefer `lib.getExe pkg` when the package's `meta.mainProgram` is correct, and `lib.getExe' pkg "program"` when the executable name is intentionally explicit. Add `meta.mainProgram` to repo packages that install a primary binary. Avoid scattering `"${pkg}/bin/foo"` through systemd units, apps, tests, and scripts unless there is no package value to pass around.
+- **Shell applications.** Use `writeShellApplication` with `runtimeInputs` for generated commands that call other programs, so runtime dependencies are explicit and the script gets syntax and shellcheck validation. Reserve `writeShellScript` for tiny inline glue with no external command dependencies.
+
 ## Nix style (ast-grep enforced)
 
 Run `nix run nixpkgs#ast-grep -- scan` before committing. Hard rules:
