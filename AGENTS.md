@@ -172,6 +172,12 @@ This is the only way modules in this repo reach helpers in `lib/`. **Never** use
 - Public option names should describe the user's domain, not the storage mechanism. Prefer `services.minecraft.plugins` for Bukkit-family plugins and `services.minecraft.mods` for Fabric/NeoForge/Sponge mods; avoid vague plumbing names such as `extraJars` or `dropins` unless the storage mechanism is itself the concept.
 - Cross-module helpers come from `specialArgs.ix`. No `..` paths.
 
+## Path boundaries
+
+Relative-up paths (`../`, `../../`, etc.) are usually an anti-pattern in tracked Nix code. They couple a file to a caller's current location instead of to the repo API boundary. Prefer named package sets, flake inputs, module options, or helpers exposed through `specialArgs.ix`. If a file needs something outside its directory tree, first ask which boundary should own that dependency and expose it there.
+
+Relative paths to children or siblings inside the same package/module directory are fine. Relative-up paths are acceptable only when they are local, standard for the tool or ecosystem, and not reaching across a repo layer. The smell is climbing upward to reach across layers such as `images/` -> `packages/`, `modules/` -> `lib/`, or examples -> repo internals.
+
 ## Plugin conventions
 
 Bukkit-family loaders (Paper, Folia, Purpur, Spigot) use `services.minecraft.plugins`. Empty `{}` resolves a pinned plugin by slug from `pluginCatalog`; an attrset with `src` installs a local or private plugin jar. Loader modules can contribute a catalog of common upstream plugins, so examples should not inline shared plugin URLs.
@@ -185,6 +191,7 @@ Fabric/NeoForge/Sponge-style artifacts stay in `services.minecraft.mods`. Keep m
 - Images stay version-agnostic when they have a `versions.nix`. The base file is what every variant shares; per-version data lives in the overlay.
 - Use a single `services.<name>` block per service. Nest sub-options inside attrsets instead of writing scattered dotted assignments. Prefer `services.minecraft = { plugins = { luckperms = { }; claude-code-scoreboard = { ... }; }; };` over separate `services.minecraft.plugins.luckperms = { };` lines in examples.
 - Options that are redundant with their namespace should be shortened. `services.minecraft.folia.version`, not `services.minecraft.folia.minecraftVersion`.
+- Images should consume repo-local packages through `ix.packages`, not by importing `../../..` paths into `packages/`. Keep source-path ownership in the package set, following nixpkgs' `callPackage`/package-set style: modules and images choose package values, while package definitions own their filesystem layout.
 
 ## Example conventions
 

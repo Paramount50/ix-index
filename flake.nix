@@ -225,9 +225,7 @@
               claudeCodeDemoImages = lib.mapAttrs' (
                 name: package: lib.nameValuePair "claude-code-demo-${name}-image" package
               ) claudeCodeDemo.packages;
-              minestomHelloServerJar = import ./packages/minestom/servers/hello {
-                inherit ix lib pkgs;
-              };
+              repoPackages = ix.packageSetFor pkgs;
             in
             imagePackages
             // claudeCodeDemo.systemPackages
@@ -238,7 +236,7 @@
               claude-code-demo-plan = claudeCodeDemo.planCommand;
               claude-code-demo-replace = claudeCodeDemo.replace;
               claude-code-demo-switch = claudeCodeDemo.switch;
-              minestom-hello-server-jar = minestomHelloServerJar;
+              minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
             };
         }) devSystems
       );

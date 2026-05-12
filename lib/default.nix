@@ -242,6 +242,20 @@ let
     };
   };
 
+  packageSetFor =
+    pkgs:
+    let
+      ixForPackages = ixSpecialArgs // {
+        inherit pkgs;
+      };
+    in
+    {
+      minestom.helloServerJar = import ../packages/minestom/servers/hello {
+        ix = ixForPackages;
+        inherit lib pkgs;
+      };
+    };
+
   # Helpers exposed to every module via specialArgs. Keep this surface small
   # and stable: anything here is part of the cross-module contract.
   ixSpecialArgs = {
@@ -254,6 +268,7 @@ let
       writeNushellApplication
       writePythonApplication
       ;
+    packages = packageSetFor pkgs;
   };
 
   evalImageConfig =
@@ -351,6 +366,7 @@ in
     buildNpmSite
     mkMinecraftLoader
     mkMinecraftSyncManaged
+    packageSetFor
     writeNushellApplication
     writePythonApplication
     ;
