@@ -1,3 +1,5 @@
 result
 .direnv
 .gradle
+build
+target

@@ -204,9 +204,9 @@ Web examples should use ordinary frontend project structure too. Prefer TypeScri
 
 Do not hide real source files inside Nix strings just to keep the file count small. If an example needs Java, scripts, config templates, or assets, put them in ordinary files with normal paths and keep the Nix derivation as the build recipe. Inline generated files are acceptable only for tiny machine-owned glue where reading a separate file would be worse.
 
-At the same time, do not spray files around without a boundary. Group example-specific support code under a named subdirectory (for example, `claude-code-scoreboard-plugin/`) with a small `default.nix`, source files, and assets it needs.
+At the same time, do not spray files around without a boundary. Group support code under a named subdirectory with a small `default.nix`, source files, and assets it needs. Reusable server code, plugins, and other composable artifacts belong under `packages/<family>/...`; image directories should compose those artifacts, not own unrelated build projects.
 
-For self-contained example projects, filter at the project boundary instead of listing every source file. Prefer `lib.fileset.intersection (lib.fileset.gitTracked ./.) ./.` in the project-local `default.nix` so new tracked files under `src/`, `resources/`, Gradle metadata, or similar project-owned paths are included automatically while untracked build caches stay out of the store. Use explicit file lists only when the derivation intentionally consumes a small cross-cutting subset.
+For self-contained support projects, filter at the project boundary instead of listing every source file. Prefer `lib.fileset.intersection (lib.fileset.gitTracked ./.) ./.` in the project-local `default.nix` so new tracked files under `src/`, `resources/`, Gradle metadata, or similar project-owned paths are included automatically while untracked build caches stay out of the store. Use explicit file lists only when the derivation intentionally consumes a small cross-cutting subset.
 
 ## Artifact inputs
 

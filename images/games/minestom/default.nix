@@ -6,7 +6,7 @@
   ...
 }:
 let
-  serverJar = import ./project {
+  serverJar = import ../../../packages/minestom/servers/hello {
     inherit ix lib pkgs;
   };
 in

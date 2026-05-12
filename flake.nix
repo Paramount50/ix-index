@@ -225,7 +225,7 @@
               claudeCodeDemoImages = lib.mapAttrs' (
                 name: package: lib.nameValuePair "claude-code-demo-${name}-image" package
               ) claudeCodeDemo.packages;
-              minestomHelloServerJar = import ./images/dev/minestom/project {
+              minestomHelloServerJar = import ./packages/minestom/servers/hello {
                 inherit ix lib pkgs;
               };
             in
