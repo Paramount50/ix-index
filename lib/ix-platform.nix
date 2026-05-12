@@ -40,24 +40,17 @@
     };
 
     boot.isContainer = true;
-    # ix wires VM networking and ingress outside the guest. The stock NixOS
-    # DHCP/firewall units expect kernel packet-filtering and BPF/ARP support
-    # that ix images do not need and may not expose, which delays boot.
+    # ix provisions the guest address, route, and DNS before systemd reaches
+    # normal service startup. Leaving NixOS DHCP enabled makes dhcpcd wait for a
+    # lease that will never arrive, which keeps network-online.target pending
+    # and blocks services such as minecraft.
+    # Port exposure is controlled by ix VM/L7 networking, not by an in-guest
+    # nftables firewall. The current guest kernel does not provide nft support,
+    # so the default NixOS firewall unit fails during boot.
     networking = {
       useDHCP = false;
       firewall.enable = false;
     };
     system.stateVersion = "25.05";
-
-    # ix provisions the guest address, route, and DNS before systemd reaches
-    # normal service startup. Leaving NixOS DHCP enabled makes dhcpcd wait for a
-    # lease that will never arrive, which keeps network-online.target pending
-    # and blocks services such as minecraft.
-    networking.useDHCP = false;
-
-    # Port exposure is controlled by ix VM/L7 networking, not by an in-guest
-    # nftables firewall. The current guest kernel does not provide nft support,
-    # so the default NixOS firewall unit fails during boot.
-    networking.firewall.enable = false;
   };
 }
