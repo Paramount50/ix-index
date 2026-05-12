@@ -177,6 +177,15 @@
           codex-cli-nix
           ;
         artifactInputs = inputs;
+        paths = {
+          modules = ./modules;
+          nixPackages = {
+            minecraftHotReloadAgent = ./nix/packages/minecraft-hot-reload-agent.nix;
+            minecraftRcon = ./nix/packages/minecraft-rcon.nix;
+            tonboArtifacts = ./nix/packages/tonbo-artifacts.nix;
+          };
+          packages.minestom.servers.hello = ./packages/minestom/servers/hello;
+        };
       };
       devSystems = [
         "x86_64-linux"

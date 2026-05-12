@@ -3,7 +3,7 @@
 # `mkImage` builds one self-contained OCI archive from a list of NixOS
 # modules. Each image is independent: ix does not stack images at runtime, it
 # runs one. `./ix-base.nix` is the implicit base layer (container marker, OCI
-# packaging, base profile enabled by default). The `../modules` registry is
+# packaging, base profile enabled by default). The module registry is
 # pulled in so option declarations are available to every image, but each
 # module is gated on its own `enable` flag and stays inert unless the image
 # turns it on.
@@ -22,6 +22,7 @@
   claude-code-nix,
   codex-cli-nix,
   artifactInputs,
+  paths,
 }:
 let
   inherit (nixpkgs) lib;
@@ -118,11 +119,11 @@ let
       inherit (codex-cli-nix.packages.${final.stdenv.hostPlatform.system}) codex;
     };
 
-    minecraft-hot-reload-agent = final.callPackage ../nix/packages/minecraft-hot-reload-agent.nix { };
-    minecraft-rcon = final.callPackage ../nix/packages/minecraft-rcon.nix {
+    minecraft-hot-reload-agent = final.callPackage paths.nixPackages.minecraftHotReloadAgent { };
+    minecraft-rcon = final.callPackage paths.nixPackages.minecraftRcon {
       writePythonApplication = writePythonApplication final;
     };
-    tonbo-artifacts = final.callPackage ../nix/packages/tonbo-artifacts.nix {
+    tonbo-artifacts = final.callPackage paths.nixPackages.tonboArtifacts {
       src = artifactInputs.artifact-tonbo-artifacts;
     };
   };
@@ -133,7 +134,7 @@ let
   pkgs = import nixpkgs { inherit system overlays; };
 
   # The module registry. collect picks all leaf paths from the nested attrset.
-  moduleList = lib.collect builtins.isPath (import ../modules);
+  moduleList = lib.collect builtins.isPath (import paths.modules);
 
   buildNpmSite = import ./build-npm-site.nix;
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
@@ -250,9 +251,8 @@ let
       };
     in
     {
-      minestom.helloServerJar = import ../packages/minestom/servers/hello {
+      minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
         ix = ixForPackages;
-        inherit lib pkgs;
       };
     };
 
