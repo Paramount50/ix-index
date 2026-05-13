@@ -3,7 +3,7 @@
 Two VMs:
 
 - `linux`: a shellable ix VM with `btop`, Linux source in `/src/linux`, and a tiny Svelte status page on port 80.
-- `minecraft`: a Fabric server pinned to `26.2-snapshot-6`, creative mode, village seed, public Java port 25565.
+- `minecraft`: a Fabric server pinned to `1.21.11`, creative mode, village seed, public Java port 25565. Ships the [spark](https://modrinth.com/mod/spark) profiler so `/spark profiler` works from the server console.
 
 ## Run
 
@@ -80,6 +80,6 @@ Join the server, take a snapshot, blow up the creative village world with TNT, t
 3. Linux VM: `ix shell linux` opens the build box with Linux source already cloned, live stats served by nginx, and enough CPU/memory/disk to make the machine feel real.
 4. Web view: open the Linux VM web URL first and show the idle VM costing very little per second.
 5. Dynamic pricing: start the kernel build, then return to the web view to show CPU and memory usage rising and cost per second increasing with actual resource usage.
-6. Minecraft VM: `ix shell minecraft` shows the second VM is managed by the same fleet, but runs a different workload: a Fabric server with a pinned snapshot jar and declarative `server.properties`.
+6. Minecraft VM: `ix shell minecraft` shows the second VM is managed by the same fleet, but runs a different workload: a Fabric 1.21.11 server with a pinned server jar, the spark profiler mod, and declarative `server.properties`.
 7. Stateful moment: snapshot, break the world with TNT, then switch or restore. The point is that normal updates preserve VM state; replacement images are only for explicit recreation.
 8. Wrap: the same source tree defines both machines, their packages, service config, exposed ports, and rollout behavior.

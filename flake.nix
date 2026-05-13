@@ -22,6 +22,7 @@
         tests = ./tests;
         bench.filesystem = ./bench/filesystem;
         examples.claudeCodeDemo = ./examples/claude-code-demo;
+        minecraftMods = ./images/games/minecraft/mods;
         packages = {
           minecraftHotReloadAgent = ./packages/minecraft-hot-reload-agent;
           minecraftRcon = ./packages/minecraft-rcon;

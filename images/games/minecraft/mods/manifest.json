@@ -7,6 +7,7 @@
   "versions": {
     "1.21.11": [
       "fabric-api",
+      "spark",
       {
         "slug": "terrain-diffusion",
         "url": "https://github.com/xandergos/terrain-diffusion-mc/releases/download/v2.1.0/terrain-diffusion-mc-2.1.0-cpu%2B1.21.11.jar",

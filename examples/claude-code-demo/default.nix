@@ -249,9 +249,6 @@ let
     pkgs.zlib
   ];
 
-  minecraftVersion = "26.2-snapshot-6";
-  minecraftLoaderVersion = "0.19.2";
-  minecraftInstallerVersion = "1.1.1";
   fleet = (ix.lib.mkFleetFor hostSystem) {
     # TODO: re-enable source switch settings when the demo uses switch again.
     # For now it publishes raw replacement OCI images and replaces VMs from
@@ -327,11 +324,20 @@ let
 
               fabric = {
                 enable = true;
-                version = minecraftVersion;
-                loaderVersion = minecraftLoaderVersion;
-                installerVersion = minecraftInstallerVersion;
-                src = ix.lib.artifacts.minecraft.servers."26.2-snapshot-6-fabric";
+                version = "1.21.11";
+                loaderVersion = "0.19.2";
+                installerVersion = "1.1.1";
+                src = ix.lib.artifacts.minecraft.servers."1.21.11-fabric";
               };
+
+              # spark is the in-server profiler. Run `/spark profiler` from the
+              # console (or as op) to capture CPU samples during the demo. The
+              # 1.21.11 catalog is owned by the library; bumps go through
+              # `nix run .#update-mods` rather than touching this file.
+              mods = {
+                spark = { };
+              };
+              modCatalog = ix.lib.artifacts.minecraft.modCatalogs."1.21.11";
 
               serverFiles."server.properties" = {
                 motd = "Claude Code Demo";
