@@ -62,6 +62,21 @@ template/                                  # `nix flake init` starter
 nix/rules/                                 # ast-grep lint rules
 ```
 
+## Flake.nix style
+
+`flake.nix` is the repo's handle. It should read like a manifest: a small inputs block and an `outputs` body that is mostly delegation. All logic lives in `./lib/` or behind discovery (`ix.discoverImages`). The goal is that someone landing on `flake.nix` cold can answer "what does this flake expose?" by skimming, not by parsing.
+
+Do not put inside `flake.nix`:
+
+- Fetched-artifact URLs. They are data, not flake-graph participants; keep URL + SRI hash beside the catalog entry and call `pkgs.fetchurl` at use.
+- App wrapper definitions (`writeNushellApplication { ... }` for `lint`, `update-mods`, `ix-fleet`, demo wrappers, etc.). Define them in a dedicated module under `./lib/` and reference them from `outputs` by name.
+- Per-system `let`-bindings that compose many helpers. Push the composition into a single `mkOutputs system` function in `./lib/` and call it from `lib.genAttrs devSystems`.
+- Example or demo wiring (`claudeCodeDemoFor`, per-VM wrappers, etc.). Move into the example's own `default.nix` and import it once.
+
+Target: `flake.nix` fits comfortably in a single screen and its body would look almost unsurprising as JSON. The cost of an inline helper today is the year-from-now untangle. Pay the structure cost up front.
+
+Flake outputs stay on the standard schema: `packages`, `apps`, `checks`, `formatter`, `devShells`, `templates`, `overlays`, `nixosModules`, `lib`. Use `nixosModules` (plural, namespaced) for module exports. Do not add a flat top-level `modules` key: it is non-standard, not validated by `nix flake check`, and may not be discovered by downstream tooling.
+
 ## Adding an image
 
 Drop a NixOS module at `images/<category>/<name>/default.nix`. That's it: discovery picks it up on the next eval and exposes `packages.<host>.<name>` for the supported dev systems. The derivation still targets `x86_64-linux`. No flake edits, no registry edits.
@@ -118,7 +133,7 @@ services.minecraft.mods = {
 };
 ```
 
-The `modCatalog` option maps slugs to locked artifact sources. Set by the image base (from `common.json`) and version overlays (from `<version>.json`), then enriched through `ix.artifacts.attachArtifactSources`. The runtime resolves every key in `mods` to a flake-locked store path.
+The `modCatalog` option maps slugs to locked artifact sources. Set by the image base (from `common.json`) and version overlays (from `<version>.json`), then enriched through `ix.artifacts.attachArtifactSources`, which wraps each catalog entry's `{ url, hash }` in a `pkgs.fetchurl` derivation. The runtime resolves every key in `mods` to that derivation's store path.
 
 ### Mod modules
 
@@ -227,13 +242,11 @@ For self-contained support projects, filter at the project boundary instead of l
 
 ## Artifact inputs
 
-Fixed upstream artifacts belong in `flake.nix` as non-flake inputs. This keeps content hashes in `flake.lock`, so `nix flake update` is the one update path for nixpkgs, tooling flakes, server jars, mod jars, and other pinned downloads.
+Fetched artifacts (mod jars, server jars, plugins) belong at the point of use, not as flake inputs. Use `pkgs.fetchurl { url = ...; hash = ...; }` with an inline SRI hash kept beside the URL in the per-image catalog (`images/games/minecraft/mods/*.json` or the image's own data file). The `flake.nix` inputs list is reserved for things that genuinely participate in the flake graph: `nixpkgs` and tooling flakes that expose `lib`, `overlays`, or `packages`. A static URL is not a flake input. It is data, and data lives next to the code that reads it.
 
-Do not add inline fetcher hashes for tracked repo artifacts. Add or update the artifact URL in the flake inputs, wire the resulting input through `ix.artifacts`, and let the lock file record the `narHash`. `images/games/minecraft/mods/*.json` stores URLs only; `ix.artifacts.attachArtifactSources` attaches the corresponding locked source path at evaluation time.
+Earlier versions of this repo tracked every mod jar as a non-flake `inputs.artifact-*` URL so that `flake.lock` would own each `narHash`. That made `flake.nix` unreadable and centralized nothing useful: each entry still had to be edited individually, and the lock file became a churn-heavy diff for every routine mod bump. Prefer URL + SRI hash next to the catalog entry; the update tooling (`nix run .#update-mods`) regenerates both fields together.
 
-Exception: the Minecraft Bedrock server zip currently stays as `pkgs.fetchurl` with an inline SRI hash because Mojang's endpoint requires `curlOptsList` (`--http1.1` and a browser user-agent). Flake URL inputs cannot express those fetch options.
-
-Tracked Nix files must not contain `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSha512`, or placeholder hashes such as `sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`. If an artifact cannot be represented as a flake input, compute the real SRI hash outside tracked files first and explain why the exception is necessary.
+Tracked Nix files must not contain `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSha512`, or placeholder hashes such as `sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`. Compute the real SRI hash before committing (e.g. `nix store prefetch-file --json <url> | jq -r .hash`) and store it with the URL.
 
 ## Target platform
 
@@ -266,6 +279,8 @@ These are current repo habits that should not become defaults. When touching nea
 - **Shell applications.** Use `ix.writeNushellApplication pkgs { ... }` for generated commands that call other programs, so runtime dependencies are explicit and Nu syntax is checked during the build. Do not use `writeShellApplication` or `writeShellScriptBin` in tracked Nix files. Tiny `writeShellScript` glue is acceptable only when the output is not a user-facing command.
 - **Nushell wrappers.** Keep wrappers real Nu, not Bash hidden inside a Nu string. Use `def main [...args]`, structured values, lists with `...$args`, and `builtins.toJSON` for Nix-to-Nu literals. The wrapper helper must prepend declared runtime inputs while preserving the ambient `PATH`; fleet/app wrappers may need commands supplied by the caller, such as a freshly patched `ix` binary.
 - **Scripts.** Prefer Nushell (`.nu`) over Bash for new non-trivial repo scripts, especially when the script parses JSON, builds structured output, or has enough branching that shell quoting becomes load-bearing. Package these scripts with `ix.writeNushellApplication pkgs { ... }` so runtime dependencies are explicit and Nu syntax is checked during the build. Bash is fine for tiny POSIX-style wrappers.
+- **devShells.** Default to no devShell. Every package is already a shell: `nix develop nixpkgs#hello` enters `pkgs.hello`'s build environment, and `nix develop .#<package>` does the same for repo packages. `nix run .#lint` covers the lint case without a shell. Only add a `devShells.default` when there is real setup that no per-package environment provides (e.g. a shellHook that wires up `direnv` or seeds env vars). Accumulating a junk drawer of dev tools in `mkShell.packages` is the smell to avoid.
+- **Pre-commit.** Do not depend on the `cachix/git-hooks.nix` framework when a one-line hook does the job. Use `.githooks/pre-commit` (chmod +x) that runs `nix flake check` or `nix run .#lint`, and have `.envrc` set `GIT_CONFIG_COUNT=1 / GIT_CONFIG_KEY_0=core.hooksPath / GIT_CONFIG_VALUE_0=./.githooks`. The lint app is the single source of truth; flake checks reuse it.
 
 ## Nix style (ast-grep enforced)
 
@@ -284,8 +299,9 @@ Run `nix run .#lint` before committing. It runs `nixfmt`, `statix`, `deadnix`, a
 - No bare `assert cond;`. Use `assert lib.assertMsg cond "why";`.
 - No unused bindings. Use `_` for intentionally unused lambda arguments, remove unused module args, and run `deadnix --fail --no-lambda-pattern-names .` through `nix run .#lint`.
 - `strictDeps = true` on every `mkDerivation`. `__structuredAttrs` is the nixpkgs default; do not set it explicitly.
-- No inline fetcher hashes for repo-managed artifacts. Prefer non-flake inputs in `flake.nix` so `flake.lock` owns artifact content hashes.
+- No artifact URLs in `flake.nix` inputs. Fetched assets (jars, plugins, server tarballs) go through `pkgs.fetchurl` at point of use with the URL and SRI hash held next to the catalog entry. Flake inputs are for flake-graph participants only (`nixpkgs`, tooling flakes).
 - No fake hash helpers or placeholder hashes in tracked Nix files. Compute the real SRI hash first.
+- No flat top-level `modules` flake output. Use `nixosModules.<name>` (standard schema) for module exports.
 - Image target is x86_64-linux only. Host-visible flake package namespaces may include developer systems such as aarch64-darwin, but they should point at the same Linux image derivations rather than changing the image target.
 
 ## Issues
@@ -305,3 +321,5 @@ Use `mgrep search -c {natural language}` to search the codebase. Do not use suba
 ```
 nix run .#lint
 ```
+
+The repo wires `.githooks/pre-commit` to the same lint app via `.envrc`'s `core.hooksPath` override, so `direnv allow` is enough to get the pre-commit run on every `git commit`. CI runs `nix flake check`, which has a single `lint` check that calls the same derivation. There is no separate pre-commit framework to install.
