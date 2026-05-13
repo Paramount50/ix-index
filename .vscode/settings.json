@@ -1,3 +1,55 @@
 {
-  "java.configuration.updateBuildConfiguration": "automatic"
+  "java.configuration.updateBuildConfiguration": "automatic",
+  "direnv.restart.automatic": true,
+  "files.associations": {
+    "*.nu": "nushell",
+    "common.json": "jsonc",
+    "*-mods.json": "jsonc"
+  },
+  "python.languageServer": "None",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "basedpyright.analysis.typeCheckingMode": "standard",
+  "nix.serverSettings": {
+    "nixd": {
+      "formatting": { "command": ["nixfmt"] },
+      "options": {
+        "nix-darwin": {
+          "expr": "(builtins.getFlake \"/Users/andrewgazelka/.config/nix\").darwinConfigurations.hydra.options"
+        },
+        "home-manager": {
+          "expr": "(builtins.getFlake \"/Users/andrewgazelka/.config/nix\").darwinConfigurations.hydra.options.home-manager.users.type.getSubOptions []"
+        },
+        "nixpkgs": {
+          "expr": "import (builtins.getFlake \"/Users/andrewgazelka/Projects/indexable-inc/index\").inputs.nixpkgs { system = \"x86_64-linux\"; }"
+        },
+        "ix-image": {
+          "expr": "let f = builtins.getFlake \"/Users/andrewgazelka/Projects/indexable-inc/index\"; pkgs = f.inputs.nixpkgs.legacyPackages.x86_64-linux; in (pkgs.lib.evalModules { specialArgs.ix = f.lib; modules = (builtins.attrValues f.nixosModules) ++ [ { _module.check = false; nixpkgs.hostPlatform = \"x86_64-linux\"; } ]; }).options"
+        }
+      }
+    }
+  },
+  "search.exclude": {
+    "**/.direnv": true,
+    "**/result": true,
+    "**/result-*": true,
+    "**/node_modules": true,
+    "**/target": true,
+    "**/.gradle": true,
+    "**/build": true
+  },
+  "files.watcherExclude": {
+    "**/.direnv/**": true,
+    "**/result": true,
+    "**/result-*": true,
+    "**/target/**": true,
+    "**/.gradle/**": true,
+    "**/build/**": true
+  }
 }

@@ -1,8 +1,14 @@
 {
   "recommendations": [
-    "vscjava.vscode-java-pack",
     "jnoortheen.nix-ide",
     "mkhl.direnv",
-    "svelte.svelte-vscode"
+    "thenuprojectcontributors.vscode-nushell-lang",
+    "tamasfe.even-better-toml",
+    "redhat.vscode-yaml",
+    "charliermarsh.ruff",
+    "detachhead.basedpyright",
+    "svelte.svelte-vscode",
+    "vscjava.vscode-java-pack",
+    "usernamehw.errorlens"
   ]
 }
