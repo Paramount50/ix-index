@@ -146,14 +146,20 @@ let
 
   attachArtifactSources = lib.mapAttrs (_: entry: entry // { src = mkArtifact entry; });
 
-  paperServer1_21_11 = mkArtifact {
-    url = "https://api.papermc.io/v2/projects/paper/versions/1.21.11/builds/69/downloads/paper-1.21.11-69.jar";
-    hash = "sha256-zzdPKvnXHfzHU0Pze3IqerywkcV0ExuV47E8b8LLj64=";
+  paperServers = {
+    "1.21.11" = {
+      build = 69;
+      src = mkArtifact {
+        url = "https://api.papermc.io/v2/projects/paper/versions/1.21.11/builds/69/downloads/paper-1.21.11-69.jar";
+        hash = "sha256-zzdPKvnXHfzHU0Pze3IqerywkcV0ExuV47E8b8LLj64=";
+      };
+    };
   };
 
   artifacts = {
     inherit attachArtifactSources;
     minecraft = {
+      inherit paperServers;
       paperPluginCatalog = attachArtifactSources {
         luckperms = {
           url = "https://cdn.modrinth.com/data/Vebnzrzj/versions/OrIs0S6b/LuckPerms-Bukkit-5.5.17.jar";
@@ -181,12 +187,8 @@ let
           };
         }
         // {
-          "1.21.11-paper" = paperServer1_21_11;
+          "1.21.11-paper" = paperServers."1.21.11".src;
         };
-      paperServers."1.21.11" = {
-        build = 69;
-        src = paperServer1_21_11;
-      };
       plugins.plugmanx = mkArtifact {
         url = "https://cdn.modrinth.com/data/yro4niHu/versions/hrMAp7Ww/PlugManX-3.0.4.jar";
         hash = "sha256-LLb7Ddfm9YZ7ypv6PwN1HW2J1rlJ6LbTdAUHtVrmqcA=";
