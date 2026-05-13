@@ -34,12 +34,11 @@ let
 
   mergeDeployments =
     parts:
-    let
-      merged = lib.foldl' (acc: part: acc // part) { } parts;
-      env = lib.foldl' (acc: part: acc // (part.env or { })) { } parts;
+    lib.mergeAttrsList parts
+    // {
+      env = lib.mergeAttrsList (map (part: part.env or { }) parts);
       l7ProxyPorts = lib.unique (lib.concatMap (part: part.l7ProxyPorts or [ ]) parts);
-    in
-    merged // { inherit env l7ProxyPorts; };
+    };
 
   isWrappedNode = value: builtins.isAttrs value && (value ? module || value ? modules);
 
@@ -88,9 +87,7 @@ let
       );
 
   rawNodeSpecs = lib.mapAttrs normalizeNode nodes;
-  nodeSpecs = lib.foldl' (acc: name: acc // expandReplicas name rawNodeSpecs.${name}) { } (
-    builtins.attrNames rawNodeSpecs
-  );
+  nodeSpecs = lib.mergeAttrsList (lib.mapAttrsToList expandReplicas rawNodeSpecs);
   expandDependency =
     dep:
     if builtins.hasAttr dep rawNodeSpecs then

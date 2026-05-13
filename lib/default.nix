@@ -297,12 +297,11 @@ let
 
   discoverImages =
     root:
-    lib.foldl' (
-      acc: cat:
-      lib.foldl' (acc': name: acc' // imagePackages name (root + "/${cat}/${name}")) acc (
-        subdirs (root + "/${cat}")
-      )
-    ) { } (subdirs root);
+    lib.mergeAttrsList (
+      lib.concatMap (
+        cat: map (name: imagePackages name (root + "/${cat}/${name}")) (subdirs (root + "/${cat}"))
+      ) (subdirs root)
+    );
 in
 {
   inherit
