@@ -189,80 +189,40 @@ let
       $env.PATH = [$"($home)/.local/bin"] ++ $env.PATH
     }
   '';
-  command = writeNushellApplication pkgs {
-    name = "ix-fleet";
-    runtimeInputs = [ python ];
-    text = ''
-      def --wrapped main [...args] {
-        ${userLocalBinPath}
-        exec python3 ${ixFleetScript} --plan ${plan} ...$args
-      }
-    '';
-  };
-  planCommand = writeNushellApplication pkgs {
-    name = "ix-fleet-plan";
-    runtimeInputs = [ python ];
-    text = ''
-      def --wrapped main [...args] {
-        ${userLocalBinPath}
-        exec python3 ${ixFleetScript} --plan ${plan} plan ...$args
-      }
-    '';
-  };
-  diff = writeNushellApplication pkgs {
-    name = "ix-fleet-diff";
-    runtimeInputs = [ python ];
-    text = ''
-      def --wrapped main [...args] {
-        ${userLocalBinPath}
-        exec python3 ${ixFleetScript} --plan ${plan} diff ...$args
-      }
-    '';
-  };
-  switch = writeNushellApplication pkgs {
-    name = "ix-fleet-switch";
-    runtimeInputs = [ python ];
-    text = ''
-      def --wrapped main [...args] {
-        ${userLocalBinPath}
-        exec python3 ${ixFleetScript} --plan ${plan} switch ...$args
-      }
-    '';
-  };
-  replace = writeNushellApplication pkgs {
-    name = "ix-fleet-replace";
-    runtimeInputs = [ python ];
-    text = ''
-      def --wrapped main [...args] {
-        ${userLocalBinPath}
-        exec python3 ${ixFleetScript} --plan ${plan} replace ...$args
-      }
-    '';
-  };
-  up = writeNushellApplication pkgs {
-    name = "ix-fleet-up";
-    runtimeInputs = [ python ];
-    text = ''
-      def --wrapped main [...args] {
-        ${userLocalBinPath}
-        exec python3 ${ixFleetScript} --plan ${plan} up ...$args
-      }
-    '';
-  };
+  # Wraps `ix-fleet [sub]` with a stable PATH that includes ~/.local/bin so
+  # users see their installed `ix` binary, not whatever nix happens to find.
+  mkFleetCmd =
+    sub:
+    writeNushellApplication pkgs {
+      name = if sub == null then "ix-fleet" else "ix-fleet-${sub}";
+      runtimeInputs = [ python ];
+      text = ''
+        def --wrapped main [...args] {
+          ${userLocalBinPath}
+          exec python3 ${ixFleetScript} --plan ${plan} ${lib.optionalString (sub != null) "${sub} "}...$args
+        }
+      '';
+    };
+
+  subcommands = lib.genAttrs [
+    "diff"
+    "replace"
+    "switch"
+    "up"
+  ] mkFleetCmd;
 
 in
 {
-  inherit
-    command
+  inherit (subcommands)
     diff
-    plan
-    planCommand
     replace
     switch
     up
     ;
+  command = mkFleetCmd null;
+  planCommand = mkFleetCmd "plan";
 
-  inherit planValue;
+  inherit plan planValue;
   nodes = nodeConfigs;
   meta = nodeSpecs;
   packages = lib.mapAttrs (_: config: config.ix.build.ociImage) nodeConfigs;

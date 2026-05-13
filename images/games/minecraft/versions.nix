@@ -82,10 +82,10 @@ let
       services.minecraft = {
         mods = lib.genAttrs mods (_: { });
         modCatalog = artifacts.attachArtifactSources (catalogFor version);
-      };
-      services.minecraft.${loader} = loaderCfg // {
-        enable = true;
-        src = artifacts.minecraft.servers.${tag};
+        ${loader} = loaderCfg // {
+          enable = true;
+          src = artifacts.minecraft.servers.${tag};
+        };
       };
     };
 in

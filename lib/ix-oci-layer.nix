@@ -14,14 +14,16 @@
 }:
 {
   options.ix = {
-    image.name = lib.mkOption {
-      type = lib.types.str;
-      description = "Image name (the OCI repository).";
-    };
-    image.tag = lib.mkOption {
-      type = lib.types.str;
-      default = "latest";
-      description = "Image tag.";
+    image = {
+      name = lib.mkOption {
+        type = lib.types.str;
+        description = "Image name (the OCI repository).";
+      };
+      tag = lib.mkOption {
+        type = lib.types.str;
+        default = "latest";
+        description = "Image tag.";
+      };
     };
     build.ociImage = lib.mkOption {
       type = lib.types.package;
@@ -29,10 +31,10 @@
     };
   };
 
-  config = {
-    ix.profiles.base.enable = lib.mkDefault true;
+  config.ix = {
+    profiles.base.enable = lib.mkDefault true;
 
-    ix.build.ociImage =
+    build.ociImage =
       let
         inherit (config.system.build) toplevel;
 
@@ -53,14 +55,11 @@
         '';
 
         stream = pkgs.dockerTools.streamLayeredImage {
-          inherit (config.ix.image) name;
-          inherit (config.ix.image) tag;
+          inherit (config.ix.image) name tag;
           # Below the 127-layer registry limit with headroom for systemRoot
           # plus a few user layers.
           maxLayers = 67;
-          contents = [
-            systemRoot
-          ];
+          contents = [ systemRoot ];
           config.Entrypoint = [ "${toplevel}/init" ];
         };
       in
