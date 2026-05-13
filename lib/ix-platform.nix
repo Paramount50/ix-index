@@ -40,16 +40,25 @@
     };
 
     boot.isContainer = true;
-    # ix provisions the guest address, route, and DNS before systemd reaches
-    # normal service startup. Leaving NixOS DHCP enabled makes dhcpcd wait for a
-    # lease that will never arrive, which keeps network-online.target pending
-    # and blocks services such as minecraft.
-    # Port exposure is controlled by ix VM/L7 networking, not by an in-guest
-    # nftables firewall. The current guest kernel does not provide nft support,
-    # so the default NixOS firewall unit fails during boot.
     networking = {
+      # ix provisions the guest address, route, and DNS before systemd reaches
+      # normal service startup. Leaving NixOS DHCP enabled makes dhcpcd wait
+      # for a lease that will never arrive, which keeps network-online.target
+      # pending and blocks services such as minecraft.
       useDHCP = false;
-      firewall.enable = false;
+
+      # In-guest firewall is the NixOS nftables backend, enforcing each
+      # module's `services.*.openFirewall` and `networking.firewall.allowed*`
+      # declarations. ix VMs are `boot.isContainer = true` and share the
+      # host's linux-ix kernel (CONFIG_NF_TABLES); nft rules run in this
+      # container's own net namespace.
+      #
+      # This is defense in depth, not the trust boundary. Per-VM
+      # north-south ingress filtering is being built on the ix host against
+      # the VM's public /128 and the `ix.networking.northSouth` options
+      # below; the image declares ports, ix enforces. See
+      # https://github.com/indexable-inc/index/issues/41.
+      firewall.enable = true;
     };
     system.stateVersion = "25.05";
   };
