@@ -6,7 +6,9 @@
 # either supplied explicitly as `src` or by a loader-specific default.
 #
 # Reached from modules via `specialArgs.ix.mkMinecraftLoader`. Loader files
-# call it and return the resulting module attrset directly.
+# call it and return the resulting module attrset directly. Loaders that need
+# to contribute more to `config` pass an `extraConfig cfg` hook; it merges into
+# the gated config so the loader file stays a single expression.
 {
   config,
   lib,
@@ -14,6 +16,7 @@
   dropDir ? "mods",
   extraOptions ? { },
   srcDefault ? null,
+  extraConfig ? _: { },
 }:
 let
   cfg = config.services.minecraft.${name};
@@ -32,11 +35,16 @@ in
   }
   // extraOptions;
 
-  config = lib.mkIf cfg.enable {
-    services.minecraft = {
-      enable = lib.mkDefault true;
-      dropDir = lib.mkDefault dropDir;
-      serverJar = cfg.src;
-    };
-  };
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
+      {
+        services.minecraft = {
+          enable = lib.mkDefault true;
+          dropDir = lib.mkDefault dropDir;
+          serverJar = cfg.src;
+        };
+      }
+      (extraConfig cfg)
+    ]
+  );
 }
