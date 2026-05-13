@@ -112,8 +112,8 @@ let
   # Flake-output-only packages live in `packageSetFor` instead so they don't
   # leak into the nixpkgs namespace inside images.
   overlay = final: _prev: {
-    minecraft-hot-reload-agent = final.callPackage paths.nixPackages.minecraftHotReloadAgent { };
-    minecraft-rcon = final.callPackage paths.nixPackages.minecraftRcon {
+    minecraft-hot-reload-agent = final.callPackage paths.packages.minecraftHotReloadAgent { };
+    minecraft-rcon = final.callPackage paths.packages.minecraftRcon {
       writePythonApplication = writePythonApplication final;
     };
   };
@@ -133,7 +133,7 @@ let
     args:
     import ./minecraft-sync-managed.nix (
       {
-        src = paths.tools.minecraftSyncManaged;
+        src = paths.packages.minecraftSyncManaged + "/minecraft-sync-managed.py";
         inherit writePythonApplication;
       }
       // args
@@ -207,7 +207,7 @@ let
       minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
         ix = ixForPackages;
       };
-      tonbo-artifacts = pkgs.callPackage paths.nixPackages.tonboArtifacts { };
+      tonbo-artifacts = pkgs.callPackage paths.packages.tonboArtifacts { };
     };
 
   # Helpers exposed to every module via specialArgs. Keep this surface small

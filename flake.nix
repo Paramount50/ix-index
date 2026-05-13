@@ -22,15 +22,15 @@
         tests = ./tests;
         bench.filesystem = ./bench/filesystem;
         examples.claudeCodeDemo = ./examples/claude-code-demo;
-        nixPackages = {
-          minecraftHotReloadAgent = ./nix/packages/minecraft-hot-reload-agent.nix;
-          minecraftRcon = ./nix/packages/minecraft-rcon.nix;
-          tonboArtifacts = ./nix/packages/tonbo-artifacts.nix;
+        packages = {
+          minecraftHotReloadAgent = ./packages/minecraft-hot-reload-agent;
+          minecraftRcon = ./packages/minecraft-rcon;
+          minecraftSyncManaged = ./packages/minecraft-sync-managed;
+          minestom.servers.hello = ./packages/minestom/servers/hello;
+          tonboArtifacts = ./packages/tonbo-artifacts;
         };
-        packages.minestom.servers.hello = ./packages/minestom/servers/hello;
         tools = {
           ixFleet = ./tools/ix-fleet.py;
-          minecraftSyncManaged = ./nix/packages/minecraft-sync-managed.py;
           updateMods = ./tools/update-mods.py;
         };
       };
