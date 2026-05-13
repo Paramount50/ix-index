@@ -4,6 +4,7 @@
 # `services.minecraft` loader family.
 {
   config,
+  ix,
   lib,
   pkgs,
   ...
@@ -157,7 +158,7 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
+      serviceConfig = ix.systemdHardening // {
         Type = "simple";
         WorkingDirectory = dataDir;
         ExecStart = lib.getExe cfg.package;
@@ -165,31 +166,6 @@ in
         StateDirectory = "minecraft-bedrock";
         KillSignal = "SIGINT";
         TimeoutStopSec = 30;
-
-        CapabilityBoundingSet = [ "" ];
-        DeviceAllow = [ "" ];
-        LockPersonality = true;
-        PrivateDevices = true;
-        PrivateTmp = true;
-        PrivateUsers = true;
-        ProtectClock = true;
-        ProtectControlGroups = true;
-        ProtectHome = true;
-        ProtectHostname = true;
-        ProtectKernelLogs = true;
-        ProtectKernelModules = true;
-        ProtectKernelTunables = true;
-        ProtectProc = "invisible";
-        RestrictAddressFamilies = [
-          "AF_INET"
-          "AF_INET6"
-          "AF_UNIX"
-        ];
-        RestrictNamespaces = true;
-        RestrictRealtime = true;
-        RestrictSUIDSGID = true;
-        SystemCallArchitectures = "native";
-        UMask = "0077";
       };
       preStart = ''
         mkdir -p ${dataDir}/worlds

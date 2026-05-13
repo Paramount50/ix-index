@@ -4,6 +4,7 @@
 # mods, or EULA: Minestom is a from-scratch server library.
 {
   config,
+  ix,
   lib,
   pkgs,
   ...
@@ -68,37 +69,12 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
+      serviceConfig = ix.systemdHardening // {
         Type = "simple";
         WorkingDirectory = dataDir;
         ExecStart = lib.escapeShellArgs javaArgs;
         Restart = "on-failure";
         StateDirectory = "minestom";
-
-        CapabilityBoundingSet = [ "" ];
-        DeviceAllow = [ "" ];
-        LockPersonality = true;
-        PrivateDevices = true;
-        PrivateTmp = true;
-        PrivateUsers = true;
-        ProtectClock = true;
-        ProtectControlGroups = true;
-        ProtectHome = true;
-        ProtectHostname = true;
-        ProtectKernelLogs = true;
-        ProtectKernelModules = true;
-        ProtectKernelTunables = true;
-        ProtectProc = "invisible";
-        RestrictAddressFamilies = [
-          "AF_INET"
-          "AF_INET6"
-          "AF_UNIX"
-        ];
-        RestrictNamespaces = true;
-        RestrictRealtime = true;
-        RestrictSUIDSGID = true;
-        SystemCallArchitectures = "native";
-        UMask = "0077";
       };
     };
   };

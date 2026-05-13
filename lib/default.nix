@@ -126,6 +126,8 @@ let
   buildNpmSite = import ./build-npm-site.nix;
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
 
+  systemdHardening = import ./systemd-hardening.nix;
+
   mkMinecraftLoader = import ./minecraft-loader.nix;
   mkMinecraftSyncManaged =
     args:
@@ -215,6 +217,7 @@ let
       buildNpmSite
       mkMinecraftLoader
       mkMinecraftSyncManaged
+      systemdHardening
       writeNushellApplication
       writePythonApplication
       ;
@@ -318,6 +321,7 @@ in
     mkMinecraftLoader
     mkMinecraftSyncManaged
     packageSetFor
+    systemdHardening
     writeNushellApplication
     writePythonApplication
     ;
