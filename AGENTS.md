@@ -61,7 +61,7 @@ images/
   <category>/<name>/default.nix            # NixOS module
   <category>/<name>/versions.nix           # optional: per-version overlay modules
 template/                                  # `nix flake init` starter
-nix/rules/                                 # ast-grep lint rules
+nix-rules/                                 # ast-grep lint rules
 ```
 
 ## Flake.nix style
