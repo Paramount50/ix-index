@@ -1,4 +1,4 @@
-_: {
+{
   deployment.ipv4 = true;
   modules = [
     (_: {
