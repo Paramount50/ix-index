@@ -30,7 +30,7 @@ Apply the same rule to generated files, managed paths, and fixtures. Prefer `min
 
 Use blank lines as paragraph breaks inside function bodies. Each paragraph should be one logical step: set up, act, then validate or return. Keep tightly coupled statements together.
 
-For snippets in docs, comments, examples, or task descriptions that readers may see without IDE inlay hints, include explicit types on important bindings and use real repo APIs rather than invented simplified ones. In source files, use inference where it reads cleanly.
+For snippets in docs, comments, presets, or task descriptions that readers may see without IDE inlay hints, include explicit types on important bindings and use real repo APIs rather than invented simplified ones. In source files, use inference where it reads cleanly.
 
 ## Debugging VMs
 
@@ -112,7 +112,7 @@ Do not put inside `flake.nix`:
 - Fetched-artifact URLs. They are data, not flake-graph participants; keep URL + SRI hash beside the catalog entry and call `pkgs.fetchurl` at use.
 - App wrapper definitions (`writeNushellApplication { ... }` for `lint`, `update-mods`, `ix-fleet`, demo wrappers, etc.). Define them in a dedicated module under `./lib/` and reference them from `outputs` by name.
 - Per-system `let`-bindings that compose many helpers. Push the composition into a single `mkOutputs system` function in `./lib/` and call it from `lib.genAttrs devSystems`.
-- Example or demo wiring (`claudeCodeDemoFor`, per-VM wrappers, etc.). Move into the example's own `default.nix` and import it once.
+- Image preset or demo wiring (`claudeCodeDemoFor`, per-VM wrappers, etc.). Move into the preset's own `default.nix` and import it once.
 
 Target: `flake.nix` fits comfortably in a single screen and its body would look almost unsurprising as JSON. The cost of an inline helper today is the year-from-now untangle. Pay the structure cost up front.
 
@@ -261,50 +261,50 @@ mkImage = args: (evalImageConfig args).ix.build.ociImage;
 
 Relative-up paths (`../`, `../../`, etc.) are usually an anti-pattern in tracked Nix code. They couple a file to a caller's current location instead of to the repo API boundary. Prefer named package sets, flake inputs, module options, or helpers exposed through `specialArgs.ix`. If a file needs something outside its directory tree, first ask which boundary should own that dependency and expose it there.
 
-Relative paths to children or siblings inside the same package/module directory are fine. Relative-up paths are acceptable only when they are local, standard for the tool or ecosystem, and not reaching across a repo layer. The smell is climbing upward to reach across layers such as `images/` -> `packages/`, `modules/` -> `lib/`, or examples -> repo internals.
+Relative paths to children or siblings inside the same package/module directory are fine. Relative-up paths are acceptable only when they are local, standard for the tool or ecosystem, and not reaching across a repo layer. The smell is climbing upward to reach across layers such as `images/` -> `packages/`, `modules/` -> `lib/`, or presets -> repo internals.
 
 ## Plugin conventions
 
-Bukkit-family loaders (Paper, Folia, Purpur, Spigot) use `services.minecraft.plugins`. Empty `{}` resolves a pinned plugin by slug from `pluginCatalog`; an attrset with `src` installs a local or private plugin jar. The repo's plugin and mod catalogs (`ix.lib.artifacts.minecraft.*`, the per-version JSON catalogs under `images/games/minecraft/mods/`) are the shared surface that examples and images consume. Examples must not inline plugin or mod URLs and hashes; see the "Examples never own artifact data" rule under Example conventions.
+Bukkit-family loaders (Paper, Folia, Purpur, Spigot) use `services.minecraft.plugins`. Empty `{}` resolves a pinned plugin by slug from `pluginCatalog`; an attrset with `src` installs a local or private plugin jar. The repo's plugin and mod catalogs (`ix.lib.artifacts.minecraft.*`, the per-version JSON catalogs under `images/games/minecraft/mods/`) are the shared surface that presets and images consume. Presets must not inline plugin or mod URLs and hashes; see the "Presets never own artifact data" rule under Image preset conventions.
 
-Fabric/NeoForge/Sponge-style artifacts stay in `services.minecraft.mods`. Keep mod and plugin catalogs near the image/module artifact plumbing, not in example fleets. Example fleets should read like intent: choose a server, select catalog plugins/mods by slug, and show local/private artifacts only when that is the point of the example.
+Fabric/NeoForge/Sponge-style artifacts stay in `services.minecraft.mods`. Keep mod and plugin catalogs near the image/module artifact plumbing, not in preset fleets. Preset fleets should read like intent: choose a server, select catalog plugins/mods by slug, and show local/private artifacts only when that is the point of the preset.
 
 ## Image conventions
 
 - Images set `ix.image.name`. They may set `ix.image.tag` (defaults to `latest`, or comes from `versions.nix`).
 - Images compose by enabling services and adding packages. They do not declare options. They do not `imports` anything.
 - Images stay version-agnostic when they have a `versions.nix`. The base file is what every variant shares; per-version data lives in the overlay.
-- Use a single `services.<name>` block per service. Nest sub-options inside attrsets instead of writing scattered dotted assignments. Prefer `services.minecraft = { plugins = { luckperms = { }; claude-code-scoreboard = { ... }; }; };` over separate `services.minecraft.plugins.luckperms = { };` lines in examples.
+- Use a single `services.<name>` block per service. Nest sub-options inside attrsets instead of writing scattered dotted assignments. Prefer `services.minecraft = { plugins = { luckperms = { }; claude-code-scoreboard = { ... }; }; };` over separate `services.minecraft.plugins.luckperms = { };` lines in presets.
 - Options that are redundant with their namespace should be shortened. `services.minecraft.folia.version`, not `services.minecraft.folia.minecraftVersion`.
 - Images should consume repo-local packages through `ix.packages`, not by importing `../../..` paths into `packages/`. Keep source-path ownership in the package set, following nixpkgs' `callPackage`/package-set style: modules and images choose package values, while package definitions own their filesystem layout.
 
 ## DRY user-facing options
 
-Every fact a user states in `config` should appear once. Apply this strictly when designing or extending a module, library, or helper: if a typical example sets `services.foo.version = "1.2.3"` and then also writes `services.foo.src = artifacts.foo."1.2.3"` and `services.foo.modCatalog = catalogs."1.2.3"`, the API is wrong. Restructure so the version drives the derived defaults and the example only mentions `1.2.3` once.
+Every fact a user states in `config` should appear once. Apply this strictly when designing or extending a module, library, or helper: if a typical preset sets `services.foo.version = "1.2.3"` and then also writes `services.foo.src = artifacts.foo."1.2.3"` and `services.foo.modCatalog = catalogs."1.2.3"`, the API is wrong. Restructure so the version drives the derived defaults and the preset only mentions `1.2.3` once.
 
 Three failure modes that justify a restructure:
 
 - **Duplicated identifiers.** The same string appears in two or more option assignments in a typical config. Declare one canonical option (the version, hostname, slug, region) and have the rest default off it. Cross-option defaults (option B reads option A) are how you express derivation; use `defaultText` so the manual still shows the intent.
-- **Per-call-site defaults.** Every caller writes the same `src = artifacts.foo.X;` line. Move the default onto the option (`default = artifacts.foo.X;`) so callers only override the exception. The library is where reachable defaults live; the example chooses among them by name.
-- **Cargo-cult options.** A module declares `services.foo.bar.flavor` but no `config` block ever reads it. Delete the option. Forcing examples to set a value that nothing consumes is worse than not having the option, because it tricks readers into thinking the value matters.
+- **Per-call-site defaults.** Every caller writes the same `src = artifacts.foo.X;` line. Move the default onto the option (`default = artifacts.foo.X;`) so callers only override the exception. The library is where reachable defaults live; the preset chooses among them by name.
+- **Cargo-cult options.** A module declares `services.foo.bar.flavor` but no `config` block ever reads it. Delete the option. Forcing presets to set a value that nothing consumes is worse than not having the option, because it tricks readers into thinking the value matters.
 
-Examples are the API's specification. Write the example first; if a single intent ("use Fabric 1.21.11") takes more than one line, the option set is too wide. A verbose example is a bug in the module's API, not in the example. The "Examples never own artifact data" rule below is the library-side complement: keep artifact data in `ix.lib.*` so examples can stay this short.
+Presets are the API's specification. Write the preset first; if a single intent ("use Paper 1.21.11") takes more than one line, the option set is too wide. A verbose preset is a bug in the module's API, not in the preset. The "Presets never own artifact data" rule below is the library-side complement: keep artifact data in `ix.lib.*` so presets can stay this short.
 
 The repo has no external consumers, so renaming or collapsing options is free. Pay the migration cost (callers, tests, docs) in the same change.
 
-## Example conventions
+## Image preset conventions
 
-Examples are teaching material, not just tests. Add short comments for ix-specific ideas that a first-time reader will not infer from Nix alone: `deployment.switch.overrideInputs`, remote switch builds, fleet defaults, hot-reload behavior, and why an image name or tag is set.
+Image presets live under `images/presets/`. They are teaching material, not just tests: each preset should be a runnable image or fleet shape that composes the repo's normal modules, packages, and artifact catalogs by name. Add short comments for ix-specific ideas that a first-time reader will not infer from Nix alone: `deployment.switch.overrideInputs`, remote switch builds, fleet defaults, hot-reload behavior, and why an image name or tag is set.
 
-### Examples never own artifact data
+### Presets never own artifact data
 
-Examples must not inline URLs, hashes, or pinned version strings for fetched artifacts. Mod jars, plugin jars, server jars, datasets, JDKs, and source-fetched packages all live in the repo's library surface (`ix.lib.artifacts.*`, `ix.packages`, module options, generated catalogs under `images/`), and examples consume them by name. If an example needs an artifact the library does not expose yet, extend the library first: add the slug to the relevant catalog and regenerate it with `nix run .#update-mods`, add a new entry to `ix.lib.artifacts`, or grow the relevant module option. Then point the example at the named surface. Examples are consumer tests for whether the library is sufficiently specified. A missing entry is a gap in the repo; fix it in the library so every consumer benefits.
+Presets must not inline URLs, hashes, or pinned version strings for fetched artifacts. Mod jars, plugin jars, server jars, datasets, JDKs, and source-fetched packages all live in the repo's library surface (`ix.lib.artifacts.*`, `ix.packages`, module options, generated catalogs under `images/`), and presets consume them by name. If a preset needs an artifact the library does not expose yet, extend the library first: add the slug to the relevant catalog and regenerate it with `nix run .#update-mods`, add a new entry to `ix.lib.artifacts`, or grow the relevant module option. Then point the preset at the named surface. Presets are consumer tests for whether the library is sufficiently specified. A missing entry is a gap in the repo; fix it in the library so every consumer benefits.
 
-In-repo examples that exercise this repo's library, modules, fleets, or pinned artifacts should be exposed from the root `flake.nix` as `apps`/`packages` and share the root `flake.lock`. Keep the actual fleet or image value in the example's `default.nix` so tests and root outputs can import it. Do not add a nested example `flake.lock` that pins this same repo; it will drift from the API under test.
+In-repo presets that exercise this repo's library, modules, fleets, or pinned artifacts should be exposed from the root `flake.nix` as `apps`/`packages` and share the root `flake.lock`. Keep the actual fleet or image value in the preset's `default.nix` so tests and root outputs can import it. Do not add a nested preset `flake.lock` that pins this same repo; it will drift from the API under test.
 
-Use a standalone example flake only when the example is intentionally a downstream consumer or template. In that case its inputs should look like a real external user's inputs (`github:indexable-inc/index`, registry refs, etc.), not `path:../..` or `git+file:../..` backedges into the parent checkout. Do not add example-local artifact inputs when the root flake already exposes the locked artifact through `ix.lib.artifacts`.
+Use a standalone template flake only when the template is intentionally a downstream consumer. In that case its inputs should look like a real external user's inputs (`github:indexable-inc/index`, registry refs, etc.), not `path:../..` or `git+file:../..` backedges into the parent checkout. Do not add template-local artifact inputs when the root flake already exposes the locked artifact through `ix.lib.artifacts`.
 
-In fleet examples, `ix.image.name` usually defaults to the node name. Set it only when the replacement image should be named differently. Set `ix.image.tag` when the default `latest` would make plans or registry destinations ambiguous.
+In fleet presets, `ix.image.name` usually defaults to the node name. Set it only when the replacement image should be named differently. Set `ix.image.tag` when the default `latest` would make plans or registry destinations ambiguous.
 
 Comments should explain why a line exists, not restate Nix syntax. Prefer comments that answer "why is this needed in an ix fleet?" over comments that paraphrase the option name.
 
@@ -314,11 +314,11 @@ When reasoning about build performance, assume package dependencies are already 
 
 To measure build time, prefer `time -p nix build .#<attr> --rebuild --print-out-paths --no-link` for the derivation under investigation. Use `--log-format internal-json -v` when you need structured Nix events, and `-L` when builder logs matter. For image assembly specifically, compare cached top-level rebuilds so dependency fetching and unrelated invalidations do not hide the packaging cost.
 
-Use the ecosystem's normal project shape before inventing local scaffolding. Java examples should be Maven or Gradle projects with a `pom.xml`/build file, `src/main/java`, and resources; build them from Nix with `maven.buildMavenPackage` or the corresponding standard builder. Do not generate source files from Nix heredocs, vendor fake API stubs, or hand-roll classpaths when a normal build tool dependency is available.
+Use the ecosystem's normal project shape before inventing local scaffolding. Java support projects should be Maven or Gradle projects with a `pom.xml`/build file, `src/main/java`, and resources; build them from Nix with `maven.buildMavenPackage` or the corresponding standard builder. Do not generate source files from Nix heredocs, vendor fake API stubs, or hand-roll classpaths when a normal build tool dependency is available.
 
-Web examples should use ordinary frontend project structure too. Prefer TypeScript over JavaScript, split real UI into components/modules once a single file stops being clearer, and keep strict typechecking and ESLint in the default build path. For Svelte/Vite examples, `npm run build` should run `svelte-check`, ESLint, and the production bundle so `buildNpmPackage` enforces the same checks as local development. Use SvelteKit only when the example needs routes, server-side loading, endpoint handlers, or an app runtime; static status pages can stay Svelte/Vite.
+Web support projects should use ordinary frontend project structure too. Prefer TypeScript over JavaScript, split real UI into components/modules once a single file stops being clearer, and keep strict typechecking and ESLint in the default build path. For Svelte/Vite projects, `npm run build` should run `svelte-check`, ESLint, and the production bundle so `buildNpmPackage` enforces the same checks as local development. Use SvelteKit only when the project needs routes, server-side loading, endpoint handlers, or an app runtime; static status pages can stay Svelte/Vite.
 
-Do not hide real source files inside Nix strings just to keep the file count small. If an example needs Java, scripts, config templates, or assets, put them in ordinary files with normal paths and keep the Nix derivation as the build recipe. Inline generated files are acceptable only for tiny machine-owned glue where reading a separate file would be worse.
+Do not hide real source files inside Nix strings just to keep the file count small. If a preset needs Java, scripts, config templates, or assets, put them in ordinary files with normal paths and keep the Nix derivation as the build recipe. Inline generated files are acceptable only for tiny machine-owned glue where reading a separate file would be worse.
 
 At the same time, do not spray files around without a boundary. Group support code under a named subdirectory with a small `default.nix`, source files, and assets it needs. Reusable server code, plugins, and other composable artifacts belong under `packages/<family>/...`; image directories should compose those artifacts, not own unrelated build projects.
 
@@ -352,7 +352,7 @@ When adding new modules or packages, do not override compiler flags per-package.
 - **Trust module merging.** Layer per-version overlays via the module system, not by passing args to factory functions. Service families (runtime + variants) compose through option slots, not through wrappers.
 - **Pure eval.** No `builtins.currentSystem`, no `builtins.getEnv`, no `<nixpkgs>` channel refs, no `path:` flake refs. Every input flows through `flake.nix`.
 - **Strict, named failures.** `lib.assertMsg` over bare `assert`. Required options have no default so misuse fails at eval with the option name. Two loaders enabled → module-merge conflict, not silently-last-wins.
-- **Test useful invariants.** Eval tests should protect behavior that can regress across module boundaries, generated units, fleet rendering, artifact wiring, or security/runtime contracts. Do not assert facts that are already obvious from the same literal config being imported, such as exact example node names, hand-copied package allowlists from auto-discovery, or every field in an example's own `server.properties`. Flake evaluation already catches syntax and missing-output failures; tests should add signal beyond that.
+- **Test useful invariants.** Eval tests should protect behavior that can regress across module boundaries, generated units, fleet rendering, artifact wiring, or security/runtime contracts. Do not assert facts that are already obvious from the same literal config being imported, such as exact preset node names, hand-copied package allowlists from auto-discovery, or every field in a preset's own `server.properties`. Flake evaluation already catches syntax and missing-output failures; tests should add signal beyond that.
 
 ## Nix practices to tighten
 

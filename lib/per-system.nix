@@ -1,7 +1,7 @@
 # Per-system flake outputs (packages / apps / checks / formatter).
 #
 # Kept out of flake.nix so the flake top-level can read as a manifest of
-# inputs and output categories. All composition logic for apps, demo
+# inputs and output categories. All composition logic for apps, image preset
 # wrappers, and lint plumbing lives here.
 {
   system,
@@ -65,7 +65,7 @@ let
 
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };
 
-  claudeCodeDemo = import paths.examples.claudeCodeDemo {
+  claudeCodeDemo = import paths.imagePresets.claudeCodeDemo {
     ix = {
       lib = ix;
     };

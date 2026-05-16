@@ -5,7 +5,7 @@
 # TODO: re-enable source switch settings when the demo uses switch again.
 # For now it publishes raw replacement OCI images and replaces VMs from
 # those images, so source-switch derivation inputs should stay out of the
-# example wiring.
+# preset wiring.
 # deployment.switch = {
 #   buildOn = "remote";
 #   overrideInputs.index = ".";

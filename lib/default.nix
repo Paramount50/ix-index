@@ -203,7 +203,7 @@ let
 
     The bare-JSON catalog (slug -> `{ url, hash }`) is enriched into
     `{ url, hash, src }` so callers can pass it straight to
-    `services.minecraft.modCatalog`. Examples and images consume
+    `services.minecraft.modCatalog`. Presets and images consume
     `modCatalogs.<gameVersion>` by name; to add a mod, edit the manifest
     and run `nix run .#update-mods` and do not inline URLs anywhere
     downstream.
@@ -227,8 +227,8 @@ let
     lib.genAttrs gameVersions catalogFor;
 
   /**
-    Pinned artifact catalogs surfaced to images and examples by name.
-    Examples must consume entries through this set (or one of the module
+    Pinned artifact catalogs surfaced to images and presets by name.
+    Presets must consume entries through this set (or one of the module
     options it seeds) rather than inlining URLs and hashes.
   */
   artifacts = {

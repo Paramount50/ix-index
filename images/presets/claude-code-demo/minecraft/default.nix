@@ -5,14 +5,12 @@
       services.minecraft = {
         enable = true;
         version = "1.21.11";
-        fabric.enable = true;
+        paper.enable = true;
         rcon.enable = true;
 
-        # spark is the in-server profiler. Run `/spark profiler` from the
-        # console (or as op) to capture CPU samples during the demo.
-        # The 1.21.11 catalog is owned by the library; bumps go through
-        # `nix run .#update-mods`.
-        mods.spark = { };
+        plugins = {
+          luckperms = { };
+        };
 
         serverFiles."server.properties" = {
           motd = "Claude Code Demo";
