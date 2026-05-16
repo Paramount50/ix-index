@@ -141,6 +141,7 @@ let
     minecraft-rcon = final.callPackage paths.packages.minecraftRcon {
       writePythonApplication = writePythonApplication final;
     };
+    oci-image-builder = final.callPackage paths.packages.ociImageBuilder { };
   };
   overlays = [ overlay ];
 
@@ -290,6 +291,7 @@ let
       minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
         ix = ixForPackages;
       };
+      oci-image-builder = pkgs.callPackage paths.packages.ociImageBuilder { };
       tonbo-artifacts = pkgs.callPackage paths.packages.tonboArtifacts { };
     };
 

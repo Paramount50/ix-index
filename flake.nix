@@ -28,6 +28,7 @@
           minecraftRcon = ./packages/minecraft-rcon;
           minecraftSyncManaged = ./packages/minecraft-sync-managed;
           minestom.servers.hello = ./packages/minestom/servers/hello;
+          ociImageBuilder = ./packages/oci-image-builder;
           tonboArtifacts = ./packages/tonbo-artifacts;
         };
         tools = {

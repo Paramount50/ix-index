@@ -26,7 +26,7 @@ Pre-built OCI images for ix VMs, plus composable NixOS modules. All images targe
 
 ## How it works
 
-Every image is an independent NixOS system closure: `boot.isContainer = true`, systemd as PID 1, no kernel, no bootloader. `lib.mkImage` runs `nixpkgs.lib.nixosSystem` over the platform config (`lib/ix-platform.nix`), OCI packaging (`lib/ix-oci-layer.nix`), the module registry (`modules/`), and any caller modules, then packages the toplevel into an OCI archive via `dockerTools.streamLayeredImage` plus a small docker-archive-to-OCI converter (`lib/docker-to-oci.py`).
+Every image is an independent NixOS system closure: `boot.isContainer = true`, systemd as PID 1, no kernel, no bootloader. `lib.mkImage` runs `nixpkgs.lib.nixosSystem` over the platform config (`lib/ix-platform.nix`), OCI packaging (`lib/ix-oci-layer.nix`), the module registry (`modules/`), and any caller modules, then packages the toplevel into an OCI archive via the nixpkgs layer planner plus the repo's direct OCI archive builder (`lib/build-oci-image.sh`).
 
 Images are not stacked at runtime. ix runs one image. Layering is purely a build-time concern: the closure is split into ~67 OCI layers so the registry stores each shared store path once and clients only pay for deltas. Single-layer would force every image to ship a private copy of the multi-hundred-MB base closure.
 
@@ -68,7 +68,7 @@ lib/
   ix-platform.nix                          # target platform: EPYC Gen 5 (znver5), container mode
   ix-oci-layer.nix                         # OCI packaging, base profile
   minecraft-loader.nix                     # helper used by loader modules
-  docker-to-oci.py                         # docker-archive -> OCI archive transcoder
+  build-oci-image.sh                       # direct OCI archive builder
 modules/
   default.nix                              # canonical module registry (attrset)
   profiles/base.nix                        # CLI tools, on by default
@@ -285,6 +285,12 @@ Use a standalone example flake only when the example is intentionally a downstre
 In fleet examples, `ix.image.name` usually defaults to the node name. Set it only when the replacement image should be named differently. Set `ix.image.tag` when the default `latest` would make plans or registry destinations ambiguous.
 
 Comments should explain why a line exists, not restate Nix syntax. Prefer comments that answer "why is this needed in an ix fleet?" over comments that paraphrase the option name.
+
+Prefer Rust for repo-owned tools that parse structured data, stream archives, move large byte ranges, implement nontrivial CLIs, or sit in build/runtime hot paths. Shell is fine for small orchestration around existing programs, and Python is fine for low-volume scripts or ecosystem-heavy tasks, but performance-sensitive builders should generally be compiled Rust packages with normal source files and Nix packaging.
+
+When reasoning about build performance, assume package dependencies are already cached unless the question is specifically about bootstrap or cold-cache behavior. Treat Rust crates, Python dependencies, and other toolchain inputs like nixpkgs does: they are expected to be prebuilt/substituted in normal use, so benchmark the repo-owned derivation or image assembly path after dependencies are present.
+
+To measure build time, prefer `time -p nix build .#<attr> --rebuild --print-out-paths --no-link` for the derivation under investigation. Use `--log-format internal-json -v` when you need structured Nix events, and `-L` when builder logs matter. For image assembly specifically, compare cached top-level rebuilds so dependency fetching and unrelated invalidations do not hide the packaging cost.
 
 Use the ecosystem's normal project shape before inventing local scaffolding. Java examples should be Maven or Gradle projects with a `pom.xml`/build file, `src/main/java`, and resources; build them from Nix with `maven.buildMavenPackage` or the corresponding standard builder. Do not generate source files from Nix heredocs, vendor fake API stubs, or hand-roll classpaths when a normal build tool dependency is available.
 

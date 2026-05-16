@@ -114,6 +114,7 @@ in
       claude-code-demo-up = claudeCodeDemo.up;
       claude-code-demo-linux-up = claudeCodeDemoLinuxUp;
       claude-code-demo-minecraft-up = claudeCodeDemoMinecraftUp;
+      inherit (repoPackages) oci-image-builder;
       minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
     }
     // lib.optionalAttrs (system == ix.system) {

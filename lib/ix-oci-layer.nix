@@ -4,8 +4,8 @@
 # registry deduplicates shared store paths across images. A `systemRoot`
 # layer adds FHS entries (/bin, /etc, /usr, ...) needed at boot.
 #
-# nixpkgs only ships a docker-archive streamer, so we transcode to OCI on
-# the fly via `docker-to-oci.py`.
+# nixpkgs' layer planner is reused, but the final archive is streamed as OCI
+# directly so large images do not pay for a Docker archive transcode pass.
 {
   config,
   pkgs,
@@ -63,8 +63,16 @@
           config.Entrypoint = [ "${toplevel}/init" ];
         };
       in
-      pkgs.runCommand "${config.ix.image.name}-oci.tar" { nativeBuildInputs = [ pkgs.python3 ]; } ''
-        ${stream} | python3 ${./docker-to-oci.py} > "$out"
-      '';
+      pkgs.runCommand "${config.ix.image.name}-oci.tar"
+        {
+          nativeBuildInputs = [
+            pkgs.coreutils
+            pkgs.gnutar
+            pkgs.oci-image-builder
+          ];
+        }
+        ''
+          oci-image-builder ${stream.passthru.conf} "$out"
+        '';
   };
 }
