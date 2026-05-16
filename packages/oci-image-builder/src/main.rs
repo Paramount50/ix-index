@@ -33,7 +33,7 @@ struct Layer {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let args = env::args().collect::<Vec<_>>();
+    let args: Vec<_> = env::args().collect();
     if args.len() != 3 {
         return Err(format!("usage: {} <conf.json> <out.tar>", args[0]).into());
     }
@@ -163,27 +163,29 @@ fn write_metadata(
     mtime: &str,
     out_path: &Path,
 ) -> Result<(), Box<dyn Error>> {
+    let diff_ids: Vec<_> = layers
+        .iter()
+        .map(|layer| format!("sha256:{}", layer.checksum))
+        .collect();
+    let history: Vec<_> = layers
+        .iter()
+        .map(|layer| {
+            serde_json::json!({
+                "created": created,
+                "comment": format!("store paths: {}", serde_json::to_string(&layer.paths).unwrap()),
+            })
+        })
+        .collect();
     let image_config = serde_json::json!({
         "created": created,
         "architecture": conf.architecture,
         "os": "linux",
         "config": conf.config,
         "rootfs": {
-            "diff_ids": layers
-                .iter()
-                .map(|layer| format!("sha256:{}", layer.checksum))
-                .collect::<Vec<_>>(),
+            "diff_ids": diff_ids,
             "type": "layers",
         },
-        "history": layers
-            .iter()
-            .map(|layer| {
-                serde_json::json!({
-                    "created": created,
-                    "comment": format!("store paths: {}", serde_json::to_string(&layer.paths).unwrap()),
-                })
-            })
-            .collect::<Vec<_>>(),
+        "history": history,
     });
     let image_config = serde_json::to_vec_pretty(&image_config)?;
     let config_checksum = sha256_bytes(&image_config);
@@ -193,6 +195,16 @@ fn write_metadata(
         image_config,
     )?;
 
+    let manifest_layers: Vec<_> = layers
+        .iter()
+        .map(|layer| {
+            serde_json::json!({
+                "mediaType": "application/vnd.oci.image.layer.v1.tar",
+                "digest": format!("sha256:{}", layer.checksum),
+                "size": layer.size,
+            })
+        })
+        .collect();
     let manifest = serde_json::json!({
         "schemaVersion": 2,
         "mediaType": "application/vnd.oci.image.manifest.v1+json",
@@ -201,16 +213,7 @@ fn write_metadata(
             "digest": format!("sha256:{config_checksum}"),
             "size": config_size,
         },
-        "layers": layers
-            .iter()
-            .map(|layer| {
-                serde_json::json!({
-                    "mediaType": "application/vnd.oci.image.layer.v1.tar",
-                    "digest": format!("sha256:{}", layer.checksum),
-                    "size": layer.size,
-                })
-            })
-            .collect::<Vec<_>>(),
+        "layers": manifest_layers,
     });
     let manifest = serde_json::to_vec_pretty(&manifest)?;
     let manifest_checksum = sha256_bytes(&manifest);
