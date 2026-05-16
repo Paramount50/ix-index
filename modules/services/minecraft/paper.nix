@@ -11,7 +11,7 @@ ix.mkMinecraftLoader {
   inherit ix config lib;
   name = "paper";
   dropDir = "plugins";
-  extraConfig = _: {
+  configFragment = _: {
     services.minecraft.pluginCatalog = ix.artifacts.minecraft.paperPluginCatalog;
   };
 }

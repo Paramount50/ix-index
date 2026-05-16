@@ -10,8 +10,8 @@
 
   Reached from modules via `specialArgs.ix.mkMinecraftLoader`. Loader
   files call it and return the resulting module attrset directly.
-  Loaders that need to contribute more to `config` pass an
-  `extraConfig cfg` hook; it merges into the gated config so the loader
+  Loaders that need to contribute more to `config` pass a
+  `configFragment cfg` hook; it merges into the gated config so the loader
   file stays a single expression.
 */
 {
@@ -21,13 +21,13 @@
   name,
   dropDir ? "mods",
   extraOptions ? { },
-  extraConfig ? _: { },
+  configFragment ? _: { },
 }:
 let
   cfg = config.services.minecraft.${name};
-  mcCfg = config.services.minecraft;
+  minecraftCfg = config.services.minecraft;
   inherit (ix.artifacts.minecraft) servers;
-  versionKey = if mcCfg.version == null then null else "${mcCfg.version}-${name}";
+  versionKey = if minecraftCfg.version == null then null else "${minecraftCfg.version}-${name}";
   defaultSrc =
     if versionKey != null && servers ? ${versionKey} then
       servers.${versionKey}
@@ -55,7 +55,7 @@ in
           serverJar = cfg.src;
         };
       }
-      (extraConfig cfg)
+      (configFragment cfg)
     ]
   );
 }

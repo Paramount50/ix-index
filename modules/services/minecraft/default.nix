@@ -195,16 +195,6 @@ let
       }
     ];
 
-  managedDropins = pkgs.runCommand "minecraft-managed-${cfg.dropDir}" { } (
-    ''
-      mkdir -p "$out"
-    ''
-    + lib.concatMapStringsSep "\n" (jar: ''
-      ln -s ${jar.path} "$out/${jar.name}"
-      printf '%s\n' ${lib.escapeShellArg jar.pluginName} > "$out/${jar.name}.plugin-name"
-    '') managedJars
-  );
-
   # Infer serialization format from file extension.
   formatFor =
     path:
@@ -239,14 +229,30 @@ let
       )}
     '';
 
-  managedConfig = mkManaged "config" cfg.configFiles;
-  managedServerFiles = mkManaged "server-files" serverFiles;
-
-  managedRoots = [
-    managedDropins
-    managedConfig
-    managedServerFiles
-  ];
+  managed =
+    let
+      dropins = pkgs.runCommand "minecraft-managed-${cfg.dropDir}" { } (
+        ''
+          mkdir -p "$out"
+        ''
+        + lib.concatMapStringsSep "\n" (jar: ''
+          ln -s ${jar.path} "$out/${jar.name}"
+          printf '%s\n' ${lib.escapeShellArg jar.pluginName} > "$out/${jar.name}.plugin-name"
+        '') managedJars
+      );
+      configFiles = mkManaged "config" cfg.configFiles;
+      serverRootFiles = mkManaged "server-files" serverFiles;
+    in
+    {
+      inherit dropins;
+      config = configFiles;
+      serverFiles = serverRootFiles;
+      roots = [
+        dropins
+        configFiles
+        serverRootFiles
+      ];
+    };
 
   syncManaged = ix.mkMinecraftSyncManaged {
     inherit
@@ -550,9 +556,9 @@ in
     ]
     ++ lib.optionals cfg.rcon.openFirewall [ rconPort ];
     environment.etc = {
-      "minecraft/managed-dropins".source = managedDropins;
-      "minecraft/managed-config".source = managedConfig;
-      "minecraft/managed-server-files".source = managedServerFiles;
+      "minecraft/managed-dropins".source = managed.dropins;
+      "minecraft/managed-config".source = managed.config;
+      "minecraft/managed-server-files".source = managed.serverFiles;
     };
 
     systemd.services.minecraft = {
@@ -560,8 +566,8 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
-      reloadTriggers = lib.optionals autoReloadEnabled managedRoots;
-      restartTriggers = lib.optionals (!autoReloadEnabled) managedRoots;
+      reloadTriggers = lib.optionals autoReloadEnabled managed.roots;
+      restartTriggers = lib.optionals (!autoReloadEnabled) managed.roots;
       serviceConfig =
         ix.systemdHardening
         // {

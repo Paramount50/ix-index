@@ -16,7 +16,7 @@ ix.mkMinecraftLoader {
   # Fabric uses the shared Temurin JVM default. Hot reload can redefine ordinary
   # classes through the Java agent, but it does not dynamically load new mods or
   # mutate frozen registries.
-  extraConfig = _: {
+  configFragment = _: {
     services.minecraft.javaPackage = lib.mkDefault pkgs.temurin-jre-bin-25;
   };
 }
