@@ -19,6 +19,24 @@
         "pluginName": "Vault"
       },
       {
+        "slug": "essentialsx",
+        "pluginName": "Essentials",
+        "version": "2.22.0-20260512.224021-100",
+        "url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsX/2.22.0-SNAPSHOT/EssentialsX-2.22.0-20260512.224021-100.jar"
+      },
+      {
+        "slug": "essentialsx-spawn",
+        "pluginName": "EssentialsSpawn",
+        "version": "2.22.0-20260512.224021-100",
+        "url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsXSpawn/2.22.0-SNAPSHOT/EssentialsXSpawn-2.22.0-20260512.224021-100.jar"
+      },
+      {
+        "slug": "coreprotect",
+        "pluginName": "CoreProtect",
+        "version": "23.2",
+        "url": "https://cdn.modrinth.com/data/Lu3KuzdV/versions/6W2ad1iI/CoreProtect-CE-23.2.jar"
+      },
+      {
         "slug": "eternaleconomy",
         "pluginName": "EternalEconomy"
       },

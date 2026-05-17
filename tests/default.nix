@@ -648,6 +648,9 @@ let
             "placeholderapi"
             "luckperms"
             "vaultunlocked"
+            "essentialsx"
+            "essentialsx-spawn"
+            "coreprotect"
             "eternaleconomy"
             "quickshop-hikari"
             "tradepost"
@@ -1351,6 +1354,9 @@ let
     factions-server = ''
       grep -q '^QuickShop-Hikari$' ${factionsExample.managed.dropins}/quickshop-hikari.jar.plugin-name
       grep -q '^Vault$' ${factionsExample.managed.dropins}/vaultunlocked.jar.plugin-name
+      grep -q '^Essentials$' ${factionsExample.managed.dropins}/essentialsx.jar.plugin-name
+      grep -q '^EssentialsSpawn$' ${factionsExample.managed.dropins}/essentialsx-spawn.jar.plugin-name
+      grep -q '^CoreProtect$' ${factionsExample.managed.dropins}/coreprotect.jar.plugin-name
       grep -q '^EternalEconomy$' ${factionsExample.managed.dropins}/eternaleconomy.jar.plugin-name
       grep -q '^CombatLog$' ${factionsExample.managed.dropins}/combatlogplugin.jar.plugin-name
       grep -q '^BlueMap$' ${factionsExample.managed.dropins}/bluemap.jar.plugin-name

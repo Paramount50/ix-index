@@ -7,6 +7,8 @@ spawn/claim policy once the world exists.
 It uses Paper `26.1.2` with a generated Paper plugin catalog entry for:
 
 - PvPIndex Factions, TeamsAPI, PlaceholderAPI, and LuckPerms
+- EssentialsX and EssentialsX Spawn for player/admin command basics
+- CoreProtect for block, container, and rollback auditing
 - VaultUnlocked, EternalEconomy, QuickShop-Hikari, and TradePost for money,
   chest shops, and an auction-house style market
 - WorldEdit and WorldGuard for spawn/admin regions and claim-adjacent tooling

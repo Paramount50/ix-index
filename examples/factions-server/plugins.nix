@@ -6,8 +6,11 @@
     "LuckPerms"
     "PlaceholderAPI"
     "TeamsAPI"
+    "Essentials"
+    "EssentialsSpawn"
     "WorldEdit"
     "WorldGuard"
+    "CoreProtect"
     "EternalEconomy"
     "QuickShop-Hikari"
     "TradePost"
@@ -22,6 +25,9 @@
     teams-api = { };
     placeholderapi = { };
     vaultunlocked = { };
+    essentialsx = { };
+    essentialsx-spawn = { };
+    coreprotect = { };
     eternaleconomy = { };
     quickshop-hikari = { };
     tradepost = { };

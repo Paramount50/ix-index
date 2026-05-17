@@ -742,7 +742,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2024-08-22T10:51:21.965135Z",
-          "downloads": 180707,
+          "downloads": 180719,
           "file": {
             "filename": "AuthMe-5.7.0-FORK-Universal.jar",
             "hashes": {
@@ -864,14 +864,14 @@
       "description": "A lightweight, customizable automatic tree chopping plugin for Paper/Folia servers.",
       "donation_urls": [
         {
-          "id": "ko-fi",
-          "platform": "Ko-fi",
-          "url": "https://ko-fi.com/maoyue"
-        },
-        {
           "id": "paypal",
           "platform": "Paypal",
           "url": "https://paypal.me/Maoyue914"
+        },
+        {
+          "id": "ko-fi",
+          "platform": "Ko-fi",
+          "url": "https://ko-fi.com/maoyue"
         }
       ],
       "downloads": 83617,
@@ -1252,11 +1252,6 @@
       "discord_url": "https://discord.com/invite/rePyFESDbk",
       "donation_urls": [
         {
-          "id": "bmac",
-          "platform": "Bmac",
-          "url": "https://buymeacoffee.com/toxicity188"
-        },
-        {
           "id": "paypal",
           "platform": "Paypal",
           "url": "https://www.paypal.com/paypalme/toxicity188?country.x=KR&locale.x=en_US"
@@ -1265,6 +1260,11 @@
           "id": "github",
           "platform": "Github",
           "url": "https://github.com/sponsors/toxicity188"
+        },
+        {
+          "id": "bmac",
+          "platform": "Bmac",
+          "url": "https://buymeacoffee.com/toxicity188"
         }
       ],
       "downloads": 57222,
@@ -1521,14 +1521,14 @@
       "discord_url": "https://discord.gg/zmkyJa3",
       "donation_urls": [
         {
-          "id": "ko-fi",
-          "platform": "Ko-fi",
-          "url": "https://ko-fi.com/bluecolored"
-        },
-        {
           "id": "patreon",
           "platform": "Patreon",
           "url": "https://www.patreon.com/bluecolored"
+        },
+        {
+          "id": "ko-fi",
+          "platform": "Ko-fi",
+          "url": "https://ko-fi.com/bluecolored"
         }
       ],
       "downloads": 350071,
@@ -2005,14 +2005,14 @@
       "discord_url": "https://discord.gg/ZwVJukcNQG",
       "donation_urls": [
         {
-          "id": "github",
-          "platform": "Github",
-          "url": "https://github.com/sponsors/pop4959"
-        },
-        {
           "id": "paypal",
           "platform": "Paypal",
           "url": "https://www.paypal.com/paypalme/pop4959"
+        },
+        {
+          "id": "github",
+          "platform": "Github",
+          "url": "https://github.com/sponsors/pop4959"
         }
       ],
       "downloads": 12576495,
@@ -2543,7 +2543,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-02-15T11:31:24.327723Z",
-          "downloads": 54299,
+          "downloads": 54314,
           "file": {
             "filename": "ClickVillagers-paper-1.6.2.jar",
             "hashes": {
@@ -2681,14 +2681,14 @@
       "discord_url": "https://discord.gg/j8KK5dGBps",
       "donation_urls": [
         {
-          "id": "ko-fi",
-          "platform": "Ko-fi",
-          "url": "https://ko-fi.com/youhavetrouble"
-        },
-        {
           "id": "github",
           "platform": "Github",
           "url": "https://github.com/sponsors/YouHaveTrouble"
+        },
+        {
+          "id": "ko-fi",
+          "platform": "Ko-fi",
+          "url": "https://ko-fi.com/youhavetrouble"
         }
       ],
       "downloads": 70768,
@@ -3031,7 +3031,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-05-01T16:41:17.096136Z",
-          "downloads": 1162,
+          "downloads": 1164,
           "file": {
             "filename": "ConditionalEvents-4.76.2.jar",
             "hashes": {
@@ -3127,6 +3127,23 @@
       "title": "ConditionalEvents",
       "wiki_url": "https://ajneb97.gitbook.io/conditionalevents/"
     },
+    "coreprotect": {
+      "page_url": "https://cdn.modrinth.com/data/Lu3KuzdV/versions/6W2ad1iI/CoreProtect-CE-23.2.jar",
+      "selected_versions": {
+        "explicit": {
+          "file": {
+            "hashes": {
+              "sha256-sri": "sha256-LXi76LC049bJW334AiyzMTLI0YrMUxlcJz7tPisEkls="
+            },
+            "url": "https://cdn.modrinth.com/data/Lu3KuzdV/versions/6W2ad1iI/CoreProtect-CE-23.2.jar"
+          },
+          "version_number": "23.2"
+        }
+      },
+      "slug": "coreprotect",
+      "source": "explicit",
+      "title": "coreprotect"
+    },
     "crazyauctions": {
       "additional_categories": [
         "adventure",
@@ -3195,7 +3212,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2025-01-07T17:15:29.427809Z",
-          "downloads": 47625,
+          "downloads": 47630,
           "file": {
             "filename": "CrazyAuctions-1.7.0.jar",
             "hashes": {
@@ -3448,7 +3465,7 @@
           "url": "https://github.com/sponsors/Foxikle"
         }
       ],
-      "downloads": 49857,
+      "downloads": 49860,
       "followers": 130,
       "gallery": [
         {
@@ -3500,7 +3517,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-05-17T18:53:12.473596Z",
-          "downloads": 5,
+          "downloads": 7,
           "file": {
             "filename": "customnpcs-1.7.10-pre1.jar",
             "hashes": {
@@ -4209,14 +4226,14 @@
       "discord_url": "https://discord.meteordevelopments.com",
       "donation_urls": [
         {
-          "id": "github",
-          "platform": "Github",
-          "url": "https://github.com/sponsors/dumbo-the-developer"
-        },
-        {
           "id": "paypal",
           "platform": "Paypal",
           "url": "https://www.paypal.com/paypalme/gsdevs"
+        },
+        {
+          "id": "github",
+          "platform": "Github",
+          "url": "https://github.com/sponsors/dumbo-the-developer"
         }
       ],
       "downloads": 63147,
@@ -4286,7 +4303,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-04-21T16:24:19.720186Z",
-          "downloads": 3574,
+          "downloads": 3577,
           "file": {
             "filename": "Duels-Optimised-7.1.jar",
             "hashes": {
@@ -4467,6 +4484,40 @@
       "title": "Emotecraft",
       "wiki_url": "https://docs.zigythebird.com/emotecraft"
     },
+    "essentialsx": {
+      "page_url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsX/2.22.0-SNAPSHOT/EssentialsX-2.22.0-20260512.224021-100.jar",
+      "selected_versions": {
+        "explicit": {
+          "file": {
+            "hashes": {
+              "sha256-sri": "sha256-X7xAnAFPbVxLMvi4rTS/vXSsZ9wb0YT+lj6m1Htg5oU="
+            },
+            "url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsX/2.22.0-SNAPSHOT/EssentialsX-2.22.0-20260512.224021-100.jar"
+          },
+          "version_number": "2.22.0-20260512.224021-100"
+        }
+      },
+      "slug": "essentialsx",
+      "source": "explicit",
+      "title": "essentialsx"
+    },
+    "essentialsx-spawn": {
+      "page_url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsXSpawn/2.22.0-SNAPSHOT/EssentialsXSpawn-2.22.0-20260512.224021-100.jar",
+      "selected_versions": {
+        "explicit": {
+          "file": {
+            "hashes": {
+              "sha256-sri": "sha256-TVCKrAe29k8Fh/xIH+FeXQoWc89iiv69up3KF7L75Y4="
+            },
+            "url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsXSpawn/2.22.0-SNAPSHOT/EssentialsXSpawn-2.22.0-20260512.224021-100.jar"
+          },
+          "version_number": "2.22.0-20260512.224021-100"
+        }
+      },
+      "slug": "essentialsx-spawn",
+      "source": "explicit",
+      "title": "essentialsx-spawn"
+    },
     "eternaleconomy": {
       "categories": [
         "economy",
@@ -4619,7 +4670,7 @@
           "url": "https://www.buymeacoffee.com/realoliver"
         }
       ],
-      "downloads": 204610,
+      "downloads": 204627,
       "followers": 344,
       "gallery": [
         {
@@ -5103,14 +5154,14 @@
       "discord_url": "https://discord.zowi.gay/",
       "donation_urls": [
         {
-          "id": "ko-fi",
-          "platform": "Ko-fi",
-          "url": "https://ko-fi.com/imzowi"
-        },
-        {
           "id": "paypal",
           "platform": "Paypal",
           "url": "https://paypal.me/ybritez"
+        },
+        {
+          "id": "ko-fi",
+          "platform": "Ko-fi",
+          "url": "https://ko-fi.com/imzowi"
         }
       ],
       "downloads": 60624,
@@ -5583,7 +5634,7 @@
           "url": "https://ko-fi.com/grampr"
         }
       ],
-      "downloads": 58024,
+      "downloads": 58031,
       "followers": 36,
       "game_versions": [
         "1.16",
@@ -5973,14 +6024,14 @@
       "discord_url": "https://loohpjames.com/dev-discord",
       "donation_urls": [
         {
-          "id": "github",
-          "platform": "Github",
-          "url": "https://github.com/sponsors/LOOHP"
-        },
-        {
           "id": "paypal",
           "platform": "Paypal",
           "url": "https://paypal.me/loohpjames/5USD"
+        },
+        {
+          "id": "github",
+          "platform": "Github",
+          "url": "https://github.com/sponsors/LOOHP"
         }
       ],
       "downloads": 188630,
@@ -6444,14 +6495,14 @@
       "discord_url": "https://loohpjames.com/dev-discord",
       "donation_urls": [
         {
-          "id": "github",
-          "platform": "Github",
-          "url": "https://github.com/sponsors/LOOHP"
-        },
-        {
           "id": "paypal",
           "platform": "Paypal",
           "url": "https://paypal.me/loohpjames/5USD"
+        },
+        {
+          "id": "github",
+          "platform": "Github",
+          "url": "https://github.com/sponsors/LOOHP"
         }
       ],
       "downloads": 66266,
@@ -7081,17 +7132,17 @@
       "discord_url": "https://discord.gg/w5HVCDPtRp",
       "donation_urls": [
         {
-          "id": "paypal",
-          "platform": "Paypal",
-          "url": "https://www.paypal.me/FlavioLiponi/"
-        },
-        {
           "id": "ko-fi",
           "platform": "Ko-fi",
           "url": "https://ko-fi.com/emanon_dev"
+        },
+        {
+          "id": "paypal",
+          "platform": "Paypal",
+          "url": "https://www.paypal.me/FlavioLiponi/"
         }
       ],
-      "downloads": 130103,
+      "downloads": 130110,
       "followers": 132,
       "game_versions": [
         "1.8",
@@ -7297,7 +7348,7 @@
       "date_modified": "2026-05-16T20:57:53.497387Z",
       "description": "Real-time map used for mapping in-game or your browser as you explore.",
       "discord_url": "https://discord.gg/eP8gE69",
-      "downloads": 10841624,
+      "downloads": 10842097,
       "followers": 4368,
       "game_versions": [
         "1.7.10",
@@ -7909,7 +7960,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-05-16T17:50:59.920935Z",
-          "downloads": 194,
+          "downloads": 195,
           "file": {
             "filename": "LifeSteal-3.9.3.jar",
             "hashes": {
@@ -8103,7 +8154,7 @@
       "date_modified": "2026-05-16T21:00:50.617926Z",
       "description": "A complete authentication solution for Minecraft servers, providing secure login and database storage with secure BCrypt hashing and premium Autologin",
       "discord_url": "https://discord.gg/wZfZ8Q54mX",
-      "downloads": 49126,
+      "downloads": 49131,
       "followers": 29,
       "gallery": [
         {
@@ -8622,7 +8673,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-04-17T11:13:26.667952Z",
-          "downloads": 5250,
+          "downloads": 5251,
           "file": {
             "filename": "Maintenance-Paper-5.0.0.jar",
             "hashes": {
@@ -9200,14 +9251,14 @@
       "discord_url": "https://discord.gg/NZtfKky",
       "donation_urls": [
         {
-          "id": "other",
-          "platform": "Other",
-          "url": "https://opencollective.com/multiverse-plugins"
-        },
-        {
           "id": "github",
           "platform": "Github",
           "url": "https://github.com/sponsors/Multiverse"
+        },
+        {
+          "id": "other",
+          "platform": "Other",
+          "url": "https://opencollective.com/multiverse-plugins"
         }
       ],
       "downloads": 574073,
@@ -9413,14 +9464,14 @@
       "discord_url": "https://discord.gg/NZtfKky",
       "donation_urls": [
         {
-          "id": "other",
-          "platform": "Other",
-          "url": "https://opencollective.com/multiverse-plugins"
-        },
-        {
           "id": "github",
           "platform": "Github",
           "url": "https://github.com/sponsors/Multiverse"
+        },
+        {
+          "id": "other",
+          "platform": "Other",
+          "url": "https://opencollective.com/multiverse-plugins"
         }
       ],
       "downloads": 203146,
@@ -9756,14 +9807,14 @@
       "discord_url": "https://discord.gg/NZtfKky",
       "donation_urls": [
         {
-          "id": "other",
-          "platform": "Other",
-          "url": "https://opencollective.com/multiverse-plugins"
-        },
-        {
           "id": "github",
           "platform": "Github",
           "url": "https://github.com/sponsors/Multiverse"
+        },
+        {
+          "id": "other",
+          "platform": "Other",
+          "url": "https://opencollective.com/multiverse-plugins"
         }
       ],
       "downloads": 103896,
@@ -10244,7 +10295,7 @@
           "url": "https://ko-fi.com/synkdev"
         }
       ],
-      "downloads": 120075,
+      "downloads": 120085,
       "followers": 9,
       "gallery": [
         {
@@ -10558,7 +10609,7 @@
           "url": "https://boosty.to/marl/donate"
         }
       ],
-      "downloads": 201644,
+      "downloads": 201648,
       "followers": 157,
       "gallery": [
         {
@@ -10796,7 +10847,7 @@
       "date_created": "2025-02-14T16:14:59.000667Z",
       "date_modified": "2026-05-06T18:43:56.249944Z",
       "description": "Limits the number of Maces!",
-      "downloads": 57833,
+      "downloads": 57838,
       "followers": 55,
       "game_versions": [
         "1.21",
@@ -10895,9 +10946,9 @@
       "discord_url": "https://discord.gg/prqzNg9tRU",
       "donation_urls": [
         {
-          "id": "patreon",
-          "platform": "Patreon",
-          "url": "https://patreon.com/retrooper"
+          "id": "paypal",
+          "platform": "Paypal",
+          "url": "https://paypal.me/packetevents"
         },
         {
           "id": "github",
@@ -10905,9 +10956,9 @@
           "url": "https://github.com/sponsors/retrooper/"
         },
         {
-          "id": "paypal",
-          "platform": "Paypal",
-          "url": "https://paypal.me/packetevents"
+          "id": "patreon",
+          "platform": "Patreon",
+          "url": "https://patreon.com/retrooper"
         }
       ],
       "downloads": 553597,
@@ -11023,7 +11074,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-04-19T00:53:42.220896Z",
-          "downloads": 33604,
+          "downloads": 33630,
           "file": {
             "filename": "packetevents-spigot-2.12.1.jar",
             "hashes": {
@@ -12151,7 +12202,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2025-09-03T13:10:26.433014Z",
-          "downloads": 28195,
+          "downloads": 28199,
           "file": {
             "filename": "pv-addon-groups-1.1.1.jar",
             "hashes": {
@@ -12378,7 +12429,7 @@
           "url": "https://www.patreon.com/plasmomc"
         }
       ],
-      "downloads": 69775,
+      "downloads": 69776,
       "followers": 57,
       "game_versions": [
         "1.19.2",
@@ -12426,7 +12477,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2024-09-28T08:05:13.155265Z",
-          "downloads": 50048,
+          "downloads": 50049,
           "file": {
             "filename": "pv-addon-sculk-1.1.0.jar",
             "hashes": {
@@ -13799,7 +13850,7 @@
       "date_modified": "2026-05-12T17:57:44.710145Z",
       "description": "A working voice chat in Minecraft!",
       "discord_url": "https://discord.gg/4dH2zwTmyX",
-      "downloads": 47411794,
+      "downloads": 47412435,
       "followers": 11863,
       "gallery": [
         {
@@ -14420,14 +14471,14 @@
       "discord_url": "https://skinsrestorer.net/discord",
       "donation_urls": [
         {
-          "id": "paypal",
-          "platform": "Paypal",
-          "url": "https://skinsrestorer.net/donate"
-        },
-        {
           "id": "ko-fi",
           "platform": "Ko-fi",
           "url": "https://ko-fi.com/skinsrestorer"
+        },
+        {
+          "id": "paypal",
+          "platform": "Paypal",
+          "url": "https://skinsrestorer.net/donate"
         }
       ],
       "downloads": 1041774,
@@ -14700,14 +14751,14 @@
       "discord_url": "https://discord.gg/ZPsZAg6ygu",
       "donation_urls": [
         {
-          "id": "github",
-          "platform": "Github",
-          "url": "https://github.com/sponsors/SkriptLang"
-        },
-        {
           "id": "other",
           "platform": "Other",
           "url": "https://opencollective.com/skriptlang"
+        },
+        {
+          "id": "github",
+          "platform": "Github",
+          "url": "https://github.com/sponsors/SkriptLang"
         }
       ],
       "downloads": 94580,
@@ -14812,7 +14863,7 @@
       "date_created": "2023-06-08T19:41:46.095599Z",
       "date_modified": "2026-05-14T13:29:52.082661Z",
       "description": "Customize your night skips with a set sleep threshold, animation, and voting. All customizable in the config.",
-      "downloads": 50275,
+      "downloads": 50277,
       "followers": 153,
       "gallery": [
         {
@@ -14894,7 +14945,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2026-05-14T13:29:52.082661Z",
-          "downloads": 212,
+          "downloads": 214,
           "file": {
             "filename": "Sleeper-1.10.6.jar",
             "hashes": {
@@ -14994,14 +15045,14 @@
       "discord_url": "https://dsc.gg/nighterdevelopment",
       "donation_urls": [
         {
-          "id": "paypal",
-          "platform": "Paypal",
-          "url": "https://www.paypal.com/paypalme/Nighter02"
-        },
-        {
           "id": "ko-fi",
           "platform": "Ko-fi",
           "url": "https://ko-fi.com/nighterdevelopment"
+        },
+        {
+          "id": "paypal",
+          "platform": "Paypal",
+          "url": "https://www.paypal.com/paypalme/Nighter02"
         }
       ],
       "downloads": 135158,
@@ -15253,7 +15304,7 @@
       "selected_versions": {
         "26.1.2+paper": {
           "date_published": "2025-08-15T16:06:07.347435Z",
-          "downloads": 38878,
+          "downloads": 38885,
           "file": {
             "filename": "Spawn-2.4.2.jar",
             "hashes": {
@@ -16170,7 +16221,7 @@
       "date_created": "2024-02-15T17:39:47.384379Z",
       "date_modified": "2026-05-12T14:55:23.017815Z",
       "description": "A simple teleportation plugin that supports Folia, compatible with Bukkit/Spigot/Paper/Folia.",
-      "downloads": 98601,
+      "downloads": 98610,
       "followers": 62,
       "gallery": [
         {
@@ -18082,14 +18133,14 @@
       "description": "Voice messages in minecraft chat",
       "donation_urls": [
         {
-          "id": "paypal",
-          "platform": "Paypal",
-          "url": "https://www.paypal.com/donate/?hosted_button_id=FZ9PA86A62QLJ"
-        },
-        {
           "id": "other",
           "platform": "Other",
           "url": "https://boosty.to/dimaskama/donate"
+        },
+        {
+          "id": "paypal",
+          "platform": "Paypal",
+          "url": "https://www.paypal.com/donate/?hosted_button_id=FZ9PA86A62QLJ"
         }
       ],
       "downloads": 153910,
@@ -18344,14 +18395,14 @@
       "discord_url": "https://discord.gg/enginehub",
       "donation_urls": [
         {
-          "id": "github",
-          "platform": "Github",
-          "url": "https://github.com/sponsors/EngineHub"
-        },
-        {
           "id": "other",
           "platform": "Other",
           "url": "https://opencollective.com/enginehub"
+        },
+        {
+          "id": "github",
+          "platform": "Github",
+          "url": "https://github.com/sponsors/EngineHub"
         }
       ],
       "downloads": 7415159,

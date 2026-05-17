@@ -9,10 +9,25 @@
     "pluginName": "CombatLog",
     "url": "https://cdn.modrinth.com/data/TZGNkl3q/versions/kmCJefQE/CombatLogPlugin-1.2.1-26.1%2B.jar"
   },
+  "coreprotect": {
+    "hash": "sha256-LXi76LC049bJW334AiyzMTLI0YrMUxlcJz7tPisEkls=",
+    "pluginName": "CoreProtect",
+    "url": "https://cdn.modrinth.com/data/Lu3KuzdV/versions/6W2ad1iI/CoreProtect-CE-23.2.jar"
+  },
   "distant-horizons-support": {
     "hash": "sha512-eyxQSdPch9lYAX/T/8if+Pmv8ViOskyCTgU9PTkh1ZkIuqLdc66erl+7Rg859LVHjjO6C8Oa7OMDGB9I0RtO9A==",
     "pluginName": "DHSupport",
     "url": "https://cdn.modrinth.com/data/IjY7seTG/versions/v7By0W81/DistantHorizonsSupport-0.13.1.jar"
+  },
+  "essentialsx": {
+    "hash": "sha256-X7xAnAFPbVxLMvi4rTS/vXSsZ9wb0YT+lj6m1Htg5oU=",
+    "pluginName": "Essentials",
+    "url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsX/2.22.0-SNAPSHOT/EssentialsX-2.22.0-20260512.224021-100.jar"
+  },
+  "essentialsx-spawn": {
+    "hash": "sha256-TVCKrAe29k8Fh/xIH+FeXQoWc89iiv69up3KF7L75Y4=",
+    "pluginName": "EssentialsSpawn",
+    "url": "https://repo.essentialsx.net/snapshots/net/essentialsx/EssentialsXSpawn/2.22.0-SNAPSHOT/EssentialsXSpawn-2.22.0-20260512.224021-100.jar"
   },
   "eternaleconomy": {
     "hash": "sha512-DucqFS10tswfbXkP5a5L7rGFEwnd10NJB1HbIBXJdIVfElAUiC2UKJKGKTMYfuVG69IJVCVVm1nNy6nXZ79e8w==",
