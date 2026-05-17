@@ -1,43 +1,65 @@
 # Index
 
-NixOS images and modules for [ix](https://ix.dev) VMs. Built with `-march=znver5` for AMD EPYC Gen 5.
+Packages, services, and systems for ix.
 
-## Why a monorepo
+This repo is the shared shelf for things ix can build, run, or compose:
 
-Images, modules, library helpers, presets, tests, and tooling live together so the repo can keep improving without freezing internal APIs for backward compatibility. When a better module shape or helper contract emerges, the same change can update every in-repo caller, fixture, and preset instead of carrying old interfaces indefinitely.
+- **Packages:** repo-owned tools like `llm-clippy`, `nix-cargo-unit`, and the OCI image builder.
+- **Services:** reusable NixOS modules like Minecraft, Postgres, remote desktop, resource monitor, and git clone.
+- **Systems:** ready-to-run images and fleets built from those packages and services.
 
-## Building
+## Why Use This
 
-Images always target Linux. The flake exposes the same Linux image derivations under both `packages.x86_64-linux` and `packages.aarch64-darwin`, so macOS users can run the normal short form:
+Use this when you want a working ix system without rebuilding the same plumbing again.
+
+- One lockfile.
+- One package catalog.
+- One service module catalog.
+- One place for examples that prove the APIs still work.
+
+If a preset feels noisy, fix the shared package/service API so the next preset is smaller.
+
+## Fast Paths
+
+Build an image:
 
 ```sh
 nix build .#minecraft
 ```
 
-Building on macOS still needs a Linux builder configured for the resulting `x86_64-linux` derivation.
-
-## Fleets
-
-Fleets are VM-level NixOS systems, not primarily OCI rollouts. Missing VMs are created from a shared ix NixOS bootstrap image, then `switch` activates the desired system closure in place. Node-specific OCI archives are only for intentional VM replacement.
-
-See [examples/claude-code-demo/README.md](examples/claude-code-demo/README.md) for a Claude Code demo fleet with one Paper server and managed plugin hot reload.
-
-Outputs `packages.<node>` (replacement OCI archives), `packages.<node>-system` (NixOS systems), `plan` (JSON), `command`, and `switch`.
-
-```nix
-apps.switch.program = "${fleet.switch}/bin/ix-fleet-switch";
-```
-
-`nix run .#switch` snapshots and switches nodes in dependency order. Use `ix-fleet replace` only when VM recreation is intended.
-
-## Benchmarks
-
-For VCFS and file-system smoke checks, see [bench/filesystem](bench/filesystem):
+Plan the demo fleet:
 
 ```sh
-nix run .#bench-filesystem -- --target /path/to/vcfs
+nix run .#claude-code-demo-plan
 ```
 
-## Contributing
+Create or start the demo fleet:
 
-Drop `images/<category>/<name>/default.nix`. See [AGENTS.md](AGENTS.md). [MIT](LICENSE).
+```sh
+nix run .#claude-code-demo-up
+```
+
+Regenerate Minecraft catalogs:
+
+```sh
+nix run .#update-mods
+```
+
+On macOS, Linux image builds still need a Linux builder.
+
+## Where Things Go
+
+- `packages/` - tools and binaries.
+- `modules/` - reusable service/profile modules.
+- `images/` - runnable systems.
+- `images/presets/` - demos and fleet shapes.
+- `lib/` - shared build/composition helpers.
+- `tools/` - repo maintenance commands.
+
+## Add Something
+
+- New package: add `packages/<name>/default.nix`.
+- New service: add `modules/services/<name>.nix`, then register it in `modules/default.nix`.
+- New image: add `images/<category>/<name>/default.nix`.
+
+See [AGENTS.md](AGENTS.md) for repo rules. See [CONTRIBUTING.md](CONTRIBUTING.md) for local checks.
