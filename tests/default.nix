@@ -437,6 +437,23 @@ let
 
   bunLockPackage = builtins.head bunSite.bunNodeModules.bunCache.lock.packages;
 
+  uvAppFixture = fs.toSource {
+    root = ./fixtures/uv-app;
+    fileset = fs.unions [
+      ./fixtures/uv-app/pyproject.toml
+      ./fixtures/uv-app/src
+      ./fixtures/uv-app/uv.lock
+    ];
+  };
+
+  uvApplication = ix.buildUvApplication pkgs {
+    pname = "uv-app-fixture";
+    version = "0.1.0";
+    src = uvAppFixture;
+  };
+
+  uvLockedDistribution = builtins.head uvApplication.uvWheelhouse.lock.distributions;
+
   fleet = ix.mkFleet {
     deployment.region = "hil-1";
     secrets.sessionKey.generate = true;
@@ -936,6 +953,13 @@ let
           && lib.hasPrefix "sha512-" bunLockPackage.integrity;
         message = "bun lock helper should derive registry fetch metadata from bun.lock";
       }
+      {
+        assertion =
+          uvLockedDistribution.name == "click"
+          && uvLockedDistribution.version == "8.1.7"
+          && lib.hasPrefix "sha256-" uvLockedDistribution.hash;
+        message = "uv lock helper should derive registry fetch metadata from uv.lock";
+      }
     ];
 
     fleet = [
@@ -1111,6 +1135,10 @@ let
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
     test -d ${bunSite.bunNodeModules}/node_modules/clsx
     test -x ${bunSite.bunNodeModules.nodeCompat}/bin/node
+
+    ${uvApplication}/bin/uv-app-fixture > uv-app-fixture.out
+    grep -q 'hello from uv app fixture' uv-app-fixture.out
+    test -e ${uvApplication.uvWheelhouse}/click-8.1.7-py3-none-any.whl
   '';
 
   # --- Test derivation builder ----------------------------------------------

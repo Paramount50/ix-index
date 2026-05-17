@@ -167,6 +167,15 @@ let
     inherit bunLockFor;
   };
   buildNpmSite = import ./build-npm-site.nix;
+  uvLockFor =
+    pkgs:
+    import ./uv-lock.nix {
+      inherit lib pkgs;
+    };
+  uvLock = uvLockFor pkgs;
+  buildUvApplication = import ./build-uv-application.nix {
+    inherit uvLockFor;
+  };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
   cargoUnitFor =
     pkgs:
@@ -433,6 +442,7 @@ let
       buildBunSite
       buildGradleFatJar
       buildNpmSite
+      buildUvApplication
       bunLock
       bunLockFor
       cargoUnit
@@ -442,6 +452,8 @@ let
       mkMinecraftNbtFormat
       mkMinecraftSyncManaged
       systemdHardening
+      uvLock
+      uvLockFor
       writeNushellApplication
       writePythonApplication
       ;
@@ -595,6 +607,7 @@ in
     buildBunSite
     buildGradleFatJar
     buildNpmSite
+    buildUvApplication
     bunLock
     bunLockFor
     cargoUnit
@@ -605,6 +618,8 @@ in
     mkMinecraftSyncManaged
     packageSetFor
     systemdHardening
+    uvLock
+    uvLockFor
     writeNushellApplication
     writePythonApplication
     ;
