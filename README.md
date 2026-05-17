@@ -5,7 +5,7 @@
 ## Why You'll Like This
 
 - **Images that just boot.** Minecraft, Postgres, remote desktop, and the long tail you'd otherwise babysit.
-- **Services that compose.** Mix them like Lego.
+- **Services that compose.** Mix them like LEGO™.
 - **`llm-clippy` included.** A Rust linter tuned for output an LLM can actually read.
 - **One lockfile pinning the whole catalog.**
 

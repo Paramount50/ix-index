@@ -20,6 +20,8 @@ Do not use em dashes. Write so the sentence does not need one: split into two se
 
 Avoid the rule of three. Tricolons like "one lockfile, one catalog, one source of truth" or "fast, cheap, reliable" read as 2024-era LLM cadence and have become cliché. By 2026 readers have shifted toward out-of-distribution phrasing with a little friction in it: uneven list lengths, unexpected concrete nouns, sentences that resolve at two beats or at four. Prefer two-part or four-part structures, mix clause lengths, and reach for a specific surprising detail instead of a third parallel slot. If a sentence falls naturally into three balanced clauses, suspect the cadence and rewrite.
 
+Lean into small oddities. A line of prose should have one or two touches that a default LLM would not have produced: a trademark symbol on a brand name where most writers would drop it (`LEGO™`, not "Lego"), the actual proper-noun product instead of a generic synonym (`Postgres` over "a relational database"), an idiosyncratic capitalization the upstream project itself uses, a precise verb where a vague one would scan fine. The goal is texture that signals a human made specific choices, not polish that signals a model averaged its training data. Do not manufacture quirk for its own sake; let the oddity come from being more accurate, more specific, or more brand-faithful than the smooth version would be.
+
 ## Rust style
 
 Prefer local type annotations over turbofish when they make the data shape clearer. For example, use `let args: Vec<_> = env::args().collect();` instead of `let args = env::args().collect::<Vec<_>>();`. Keep turbofish for cases where an expression-local type is genuinely clearer, such as method chains where naming an intermediate value would add noise.
