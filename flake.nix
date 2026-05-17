@@ -91,10 +91,6 @@
       lib = ix;
       nixosModules = import ./modules;
       overlays.default = ix.overlay;
-      templates.default = {
-        path = ./template;
-        description = "Starter ix image";
-      };
       packages = collect "packages";
       apps = collect "apps";
       checks = collect "checks";
