@@ -130,6 +130,13 @@ in
   };
 
   config = mkIf cfg.enable {
+    ix.networking.portClaims.resource-monitor = {
+      protocol = "tcp";
+      inherit (cfg) port;
+      address = "0.0.0.0";
+      description = "resource monitor nginx";
+    };
+
     systemd.services.resource-monitor = {
       description = "VM resource monitor stats";
       wantedBy = [ "multi-user.target" ];

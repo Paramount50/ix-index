@@ -22,6 +22,13 @@ let
 in
 {
   config = lib.mkIf (modCfg != null || pluginCfg != null) {
+    ix.networking.portClaims.simple-voice-chat = {
+      protocol = "udp";
+      inherit (merged) port;
+      address = "0.0.0.0";
+      description = "Simple Voice Chat";
+    };
+
     networking.firewall.allowedUDPPorts = [ merged.port ];
 
     services.minecraft = {

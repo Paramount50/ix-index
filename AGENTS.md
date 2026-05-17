@@ -107,6 +107,21 @@ The "VM networking" section below is one specialization of this principle. Apply
 
 Networking policy lives in the image, not in ix. ix exposes two primitives: VM group membership (east-west, which VMs can reach each other) and internet ingress/egress on or off (north-south, per direction). Per-port filtering, L7 rules, WAF, rate limiting, and mTLS termination belong in the image's NixOS config (`networking.firewall.*`, services in front of the workload) or in a user-built gateway VM. Do not push port allowlists or L7 features into ix; the matching rule on the ix side is recorded in `ix/AGENTS.md` under "Architecture that must not drift". If a service needs only some ports exposed, declare it in the image with `networking.firewall.allowedTCPPorts` or front it with a gateway VM. Treat in-image firewall config as cooperative-guest intent per the trust model above: if the policy must hold against a rogue agent inside the same VM, the enforcement layer must live on a separate gateway/router VM the agent cannot reach.
 
+## Port ownership
+
+Default answer for same-protocol port conflicts is topology. In ix, put services that must keep the same public or natural port in separate fleet nodes/VMs. Two Minecraft Java servers can both bind `25565` cleanly when they are two nodes; squeezing them into one image makes the client-facing protocol fight the operating system.
+
+Inside one image, every repo-owned module that binds a TCP or UDP socket must register `ix.networking.portClaims.<owner>` with `protocol`, `port`, `address`, and a short `description`. Add the claim next to the service bind settings or `networking.firewall.allowed*` declaration. Duplicate claims in the same `namespace` fail evaluation, which is the desired failure mode for accidental co-location.
+
+Runtime fallback port allocation ("try `25565`, then pick whatever is free") is the wrong default for NixOS images. Firewall declarations, docs, client connection strings, health checks, and fleet plans need the chosen port before activation. Available-port probes also depend on service start order.
+
+Use one of these shapes:
+
+- Separate fleet node/VM when clients need the conventional port.
+- Explicit static alternate port when same-image co-location is intentional.
+- One frontend such as `nginx` or HAProxy on `80`/`443` with explicit upstream ports when clients only see HTTP(S).
+- A real namespace boundary (NixOS container, systemd `PrivateNetwork` with veth wiring, or a separate bind IP) when services truly share one image. Set `ix.networking.portClaims.<owner>.namespace` to that namespace name so eval permits the duplicate.
+
 ## Registry access
 
 Do not assume every `registry.ix.dev` image is public. The `ix` namespace is system-owned, so shared bootstrap refs such as `registry.ix.dev/ix/test-cluster-bootstrap:<tag>` are expected to be public. User images live under `registry.ix.dev/<username>/<image>:<tag>` and default to private; private images require the owner’s auth and should behave like not-found for other users. When debugging image pulls, distinguish a public system bootstrap image from a user-owned private image before treating access as a registry outage.

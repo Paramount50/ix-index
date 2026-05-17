@@ -62,6 +62,12 @@ in
   };
 
   config = mkIf cfg.enable {
+    ix.networking.portClaims.minestom = {
+      protocol = "tcp";
+      inherit (cfg) port;
+      description = "Minestom server";
+    };
+
     networking.firewall.allowedTCPPorts = [ cfg.port ];
 
     systemd.services.minestom = {

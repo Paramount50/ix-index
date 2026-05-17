@@ -119,6 +119,13 @@ in
   };
 
   config = mkIf cfg.enable {
+    ix.networking.portClaims.remote-desktop = {
+      protocol = "tcp";
+      inherit (cfg) port;
+      address = cfg.bindAddress;
+      description = "Xpra HTML5 remote desktop";
+    };
+
     services.remote-desktop.settings = {
       start = mkDefault cfg.desktopCommand;
       bind-tcp = mkDefault "${cfg.bindAddress}:${toString cfg.port}";

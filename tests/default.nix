@@ -22,6 +22,12 @@ let
   # Thin wrapper to keep call sites as plain lists; delegates to ix.evalImageConfig
   # so tests exercise the same evaluation path as production image builds.
   evalConfig = modules: ix.evalImageConfig { inherit modules; };
+  tryEvalToplevel =
+    modules:
+    let
+      config = evalConfig modules;
+    in
+    builtins.tryEval (builtins.unsafeDiscardStringContext config.system.build.toplevel.drvPath);
 
   minecraft =
     let
@@ -741,6 +747,48 @@ let
       activationScript = config.system.activationScripts.ix-extended-attributes.text;
     };
 
+  portClaimConflict = tryEvalToplevel [
+    {
+      services.remote-desktop = {
+        enable = true;
+        port = 6080;
+      };
+
+      services.resource-monitor = {
+        enable = true;
+        port = 6080;
+      };
+    }
+  ];
+
+  portClaimNamespaceAllowed = tryEvalToplevel [
+    {
+      ix.networking.portClaims = {
+        left = {
+          protocol = "tcp";
+          port = 1234;
+          namespace = "left-netns";
+        };
+
+        right = {
+          protocol = "tcp";
+          port = 1234;
+          namespace = "right-netns";
+        };
+      };
+    }
+  ];
+
+  portClaimAddressFamilyAllowed = tryEvalToplevel [
+    {
+      services.minecraft-bedrock = {
+        enable = true;
+        port = 19132;
+        portv6 = 19132;
+      };
+    }
+  ];
+
   # --- Per-image assertion groups -------------------------------------------
 
   groups = {
@@ -813,6 +861,32 @@ let
           && builtins.elem 8100 ports
           && !(builtins.elem factionsExample.cfg.rcon.port ports);
         message = "factions-server example should keep RCON private while exposing Minecraft and BlueMap";
+      }
+      {
+        assertion =
+          lib.all (claim: builtins.hasAttr claim factionsExample.config.ix.networking.portClaims)
+            [
+              "minecraft"
+              "minecraft-rcon"
+              "bluemap"
+              "simple-voice-chat"
+            ];
+        message = "factions-server example should register every service listener in ix.networking.portClaims";
+      }
+    ];
+
+    networking = [
+      {
+        assertion = !portClaimConflict.success;
+        message = "ix.networking.portClaims should fail eval when two services claim the same-namespace socket";
+      }
+      {
+        assertion = portClaimNamespaceAllowed.success;
+        message = "ix.networking.portClaims should allow the same port in separate network namespaces";
+      }
+      {
+        assertion = portClaimAddressFamilyAllowed.success;
+        message = "ix.networking.portClaims should allow the same UDP port on separate IPv4 and IPv6 bind addresses";
       }
     ];
 

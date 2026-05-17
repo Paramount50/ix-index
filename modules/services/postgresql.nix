@@ -32,6 +32,12 @@ in
   };
 
   config = mkIf cfg.enable {
+    ix.networking.portClaims.ix-postgresql = {
+      protocol = "tcp";
+      inherit (cfg) port;
+      description = "PostgreSQL";
+    };
+
     networking.firewall.allowedTCPPorts = [ cfg.port ];
 
     services.postgresql = {

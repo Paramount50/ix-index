@@ -1035,6 +1035,21 @@ in
       datapackXattrs
     ];
 
+    ix.networking.portClaims = {
+      minecraft = {
+        protocol = "tcp";
+        inherit (cfg) port;
+        description = "Minecraft Java server";
+      };
+    }
+    // lib.optionalAttrs rconEnabled {
+      minecraft-rcon = {
+        protocol = "tcp";
+        port = rconPort;
+        description = "Minecraft RCON";
+      };
+    };
+
     networking.firewall.allowedTCPPorts = [
       cfg.port
     ]

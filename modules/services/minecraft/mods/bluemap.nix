@@ -54,6 +54,13 @@ let
 in
 {
   config = lib.mkIf (modCfg != null || pluginCfg != null) {
+    ix.networking.portClaims.bluemap = {
+      protocol = "tcp";
+      inherit (merged) port;
+      address = "0.0.0.0";
+      description = "BlueMap web server";
+    };
+
     networking.firewall.allowedTCPPorts = [ merged.port ];
 
     services = {

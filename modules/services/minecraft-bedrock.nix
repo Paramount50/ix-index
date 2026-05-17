@@ -142,6 +142,22 @@ in
   };
 
   config = mkIf cfg.enable {
+    ix.networking.portClaims = {
+      minecraft-bedrock-ipv4 = {
+        protocol = "udp";
+        inherit (cfg) port;
+        address = "0.0.0.0";
+        description = "Minecraft Bedrock IPv4";
+      };
+
+      minecraft-bedrock-ipv6 = {
+        protocol = "udp";
+        port = cfg.portv6;
+        address = "::";
+        description = "Minecraft Bedrock IPv6";
+      };
+    };
+
     services.minecraft-bedrock.settings = {
       server-port = lib.mkDefault cfg.port;
       server-portv6 = lib.mkDefault cfg.portv6;
