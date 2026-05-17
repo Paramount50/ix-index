@@ -183,8 +183,8 @@ let
     args:
     import ./minecraft-sync-managed.nix (
       {
-        src = paths.packages.minecraftSyncManaged + "/minecraft-sync-managed.py";
-        inherit writePythonApplication;
+        package = pkgs.callPackage paths.packages.minecraftSyncManaged { };
+        inherit writeNushellApplication;
       }
       // args
     );
@@ -312,6 +312,7 @@ let
         minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
           ix = ixForPackages;
         };
+        minecraft-sync-managed = pkgs.callPackage paths.packages.minecraftSyncManaged { };
         nix-cargo-unit = pkgs.callPackage paths.packages.nixCargoUnit { };
         oci-image-builder = pkgs.callPackage paths.packages.ociImageBuilder { };
         tonbo-artifacts = pkgs.callPackage paths.packages.tonboArtifacts { };

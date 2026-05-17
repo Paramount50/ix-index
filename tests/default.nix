@@ -142,6 +142,7 @@ let
 
       access =
         let
+          json = pkgs.formats.json { };
           config = evalConfig [
             ../images/games/minecraft
             defaultMinecraftModule
@@ -171,7 +172,97 @@ let
         {
           inherit config;
           cfg = config.services.minecraft;
-          managed.serverFiles = config.environment.etc."minecraft/managed-server-files".source;
+          fixtures = {
+            whitelist = {
+              current = json.generate "minecraft-whitelist-current.json" [
+                {
+                  uuid = "00000000-0000-0000-0000-000000000001";
+                  name = "OldAlice";
+                }
+                {
+                  uuid = "00000000-0000-0000-0000-000000000003";
+                  name = "Manual";
+                }
+                {
+                  uuid = "00000000-0000-0000-0000-000000000004";
+                  name = "Removed";
+                }
+              ];
+
+              previous = json.generate "minecraft-whitelist-previous.json" [
+                {
+                  uuid = "00000000-0000-0000-0000-000000000001";
+                  name = "OldAlice";
+                }
+                {
+                  uuid = "00000000-0000-0000-0000-000000000004";
+                  name = "Removed";
+                }
+              ];
+            };
+
+            operators = {
+              current = json.generate "minecraft-operators-current.json" [
+                {
+                  uuid = "00000000-0000-0000-0000-000000000001";
+                  name = "OldAlice";
+                  level = 1;
+                  bypassesPlayerLimit = false;
+                }
+                {
+                  uuid = "00000000-0000-0000-0000-000000000005";
+                  name = "ManualOp";
+                  level = 4;
+                  bypassesPlayerLimit = false;
+                }
+                {
+                  uuid = "00000000-0000-0000-0000-000000000006";
+                  name = "RemovedOp";
+                  level = 4;
+                  bypassesPlayerLimit = false;
+                }
+              ];
+
+              previous = json.generate "minecraft-operators-previous.json" [
+                {
+                  uuid = "00000000-0000-0000-0000-000000000001";
+                  name = "OldAlice";
+                  level = 1;
+                  bypassesPlayerLimit = false;
+                }
+                {
+                  uuid = "00000000-0000-0000-0000-000000000006";
+                  name = "RemovedOp";
+                  level = 4;
+                  bypassesPlayerLimit = false;
+                }
+              ];
+            };
+          };
+          service =
+            let
+              unit = config.systemd.services.minecraft;
+            in
+            {
+              inherit unit;
+              config = unit.serviceConfig;
+            };
+          managed = {
+            access = config.environment.etc."minecraft/managed-access".source;
+            serverFiles = config.environment.etc."minecraft/managed-server-files".source;
+          };
+          syncManaged = ix.mkMinecraftSyncManaged {
+            inherit pkgs;
+            inherit (config.services.minecraft) dropDir;
+            dataDir = "/build/minecraft-access-data";
+            managedRoot = "/build/minecraft-managed-root";
+            plugmanReloadEnabled = false;
+            rconEnabled = false;
+            ignoredPlugins = [ ];
+            rconPort = config.services.minecraft.rcon.port;
+            rconPasswordFile = "/build/minecraft-access-data/.ix-rcon-password";
+            rconBroadcastToOps = false;
+          };
         };
     };
 
@@ -448,24 +539,16 @@ let
         message = "typed minecraft whitelist should enable enforce-whitelist by default";
       }
       {
-        assertion =
-          map (player: player.name) minecraft.access.cfg.serverFiles."whitelist.json" == [
-            "Alice"
-            "Bob"
-          ];
-        message = "typed minecraft players should generate whitelist.json entries";
+        assertion = !(minecraft.access.cfg.serverFiles ? "whitelist.json");
+        message = "typed minecraft whitelist should not symlink the mutable whitelist file through serverFiles";
       }
       {
-        assertion =
-          minecraft.access.cfg.serverFiles."ops.json" == [
-            {
-              uuid = "00000000-0000-0000-0000-000000000001";
-              name = "Alice";
-              level = 3;
-              bypassesPlayerLimit = true;
-            }
-          ];
-        message = "typed minecraft players should generate ops.json entries";
+        assertion = !(minecraft.access.cfg.serverFiles ? "ops.json");
+        message = "typed minecraft operators should not symlink the mutable ops file through serverFiles";
+      }
+      {
+        assertion = builtins.elem minecraft.access.managed.access minecraft.access.service.unit.restartTriggers;
+        message = "typed minecraft access changes should restart the server so Minecraft rereads mutable access files";
       }
     ];
 
@@ -757,10 +840,31 @@ let
       grep -q '^rcon.port=25575$' ${minecraft.nestedProperties.managed.serverFiles}/server.properties
       grep -q '^white-list=true$' ${minecraft.access.managed.serverFiles}/server.properties
       grep -q '^enforce-whitelist=true$' ${minecraft.access.managed.serverFiles}/server.properties
-      grep -q '"name": "Alice"' ${minecraft.access.managed.serverFiles}/whitelist.json
-      grep -q '"name": "Bob"' ${minecraft.access.managed.serverFiles}/whitelist.json
-      grep -q '"level": 3' ${minecraft.access.managed.serverFiles}/ops.json
-      grep -q '"bypassesPlayerLimit": true' ${minecraft.access.managed.serverFiles}/ops.json
+      grep -q '"name": "Alice"' ${minecraft.access.managed.access}/whitelist.json
+      grep -q '"name": "Bob"' ${minecraft.access.managed.access}/whitelist.json
+      grep -q '"level": 3' ${minecraft.access.managed.access}/ops.json
+      grep -q '"bypassesPlayerLimit": true' ${minecraft.access.managed.access}/ops.json
+
+      rm -rf /build/minecraft-access-data /build/minecraft-managed-root
+      mkdir -p /build/minecraft-access-data/.ix-managed-access /build/minecraft-managed-root
+      ln -s ${minecraft.access.managed.access} /build/minecraft-managed-root/managed-access
+      ln -s ${minecraft.access.managed.serverFiles} /build/minecraft-managed-root/managed-server-files
+      cp ${minecraft.access.fixtures.whitelist.current} /build/minecraft-access-data/whitelist.json
+      cp ${minecraft.access.fixtures.whitelist.previous} /build/minecraft-access-data/.ix-managed-access/whitelist.json
+      cp ${minecraft.access.fixtures.operators.current} /build/minecraft-access-data/ops.json
+      cp ${minecraft.access.fixtures.operators.previous} /build/minecraft-access-data/.ix-managed-access/ops.json
+
+      ${lib.getExe minecraft.access.syncManaged}
+      test ! -L /build/minecraft-access-data/whitelist.json
+      test ! -L /build/minecraft-access-data/ops.json
+      grep -q '"name": "Alice"' /build/minecraft-access-data/whitelist.json
+      grep -q '"name": "Bob"' /build/minecraft-access-data/whitelist.json
+      grep -q '"name": "Manual"' /build/minecraft-access-data/whitelist.json
+      ! grep -q '"name": "Removed"' /build/minecraft-access-data/whitelist.json
+      grep -q '"level": 3' /build/minecraft-access-data/ops.json
+      grep -q '"bypassesPlayerLimit": true' /build/minecraft-access-data/ops.json
+      grep -q '"name": "ManualOp"' /build/minecraft-access-data/ops.json
+      ! grep -q '"name": "RemovedOp"' /build/minecraft-access-data/ops.json
     '';
 
     "minecraft_1.21.11-paper" = ''

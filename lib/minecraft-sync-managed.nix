@@ -1,7 +1,7 @@
 {
   pkgs,
-  writePythonApplication,
-  src,
+  writeNushellApplication,
+  package,
   dataDir,
   dropDir,
   managedRoot,
@@ -15,29 +15,36 @@
 let
   inherit (pkgs) lib;
 in
-writePythonApplication pkgs {
+writeNushellApplication pkgs {
   name = "minecraft-sync-managed";
-  inherit src;
-  args = [
-    "--data-dir"
-    dataDir
-    "--drop-dir"
-    dropDir
-    "--managed-root"
-    managedRoot
-  ]
-  ++ lib.optionals plugmanReloadEnabled [ "--plugman-reload" ]
-  ++ lib.optionals rconEnabled [ "--rcon-enable" ]
-  ++ lib.concatMap (plugin: [
-    "--plugman-ignored-plugin"
-    plugin
-  ]) ignoredPlugins
-  ++ [
-    "--rcon-port"
-    (toString rconPort)
-    "--rcon-password-file"
-    rconPasswordFile
-    "--rcon-broadcast-to-ops"
-    (if rconBroadcastToOps then "true" else "false")
-  ];
+  text = ''
+    def main [] {
+      exec ${lib.getExe package} ${
+        lib.escapeShellArgs (
+          [
+            "--data-dir"
+            dataDir
+            "--drop-dir"
+            dropDir
+            "--managed-root"
+            managedRoot
+          ]
+          ++ lib.optionals plugmanReloadEnabled [ "--plugman-reload" ]
+          ++ lib.optionals rconEnabled [ "--rcon-enable" ]
+          ++ lib.concatMap (plugin: [
+            "--plugman-ignored-plugin"
+            plugin
+          ]) ignoredPlugins
+          ++ [
+            "--rcon-port"
+            (toString rconPort)
+            "--rcon-password-file"
+            rconPasswordFile
+            "--rcon-broadcast-to-ops"
+            (if rconBroadcastToOps then "true" else "false")
+          ]
+        )
+      }
+    }
+  '';
 }

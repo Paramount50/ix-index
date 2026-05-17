@@ -212,7 +212,7 @@ Mods without config (lithium, krypton, chunky) do not need a module. The slug in
 
 ### Minecraft player access
 
-Whitelist and operator files are derived from `services.minecraft.players`. Put each player's UUID and optional display name there, then set `whitelist = true` and/or `operator.enable = true` on the player. Use `services.minecraft.whitelist.enable` for `server.properties` whitelist enforcement, and `services.minecraft.operators.manage` only when you intentionally want the generated `ops.json` to exist even with no operators. Presets and examples should not hand-author `ops.json` or `whitelist.json` unless they are explicitly testing the raw `serverFiles` escape hatch.
+Whitelist and operator files are derived from `services.minecraft.players`. Put each player's UUID and optional display name there, then set `whitelist = true` and/or `operator.enable = true` on the player. Use `services.minecraft.whitelist.enable` for `server.properties` whitelist enforcement. Presets and examples must not hand-author `ops.json` or `whitelist.json`; those are mutable server-state files, so ix reconciles a Nix-managed subset at runtime and preserves entries that were not previously managed by Nix.
 
 ### Config file format inference
 
@@ -322,7 +322,9 @@ In fleet presets, `ix.image.name` usually defaults to the node name. Set it only
 
 Comments should explain why a line exists, not restate Nix syntax. Prefer comments that answer "why is this needed in an ix fleet?" over comments that paraphrase the option name.
 
-Prefer Rust for repo-owned tools that parse structured data, stream archives, move large byte ranges, implement nontrivial CLIs, or sit in build/runtime hot paths. Shell is fine for small orchestration around existing programs, and Python is fine for low-volume scripts or ecosystem-heavy tasks, but performance-sensitive builders should generally be compiled Rust packages with normal source files and Nix packaging.
+Default to Rust for repo-owned tools that parse structured data, reconcile mutable state, stream archives, move large byte ranges, implement nontrivial CLIs, or sit in build/runtime hot paths. In practice, the vast majority of new first-party tooling with real logic should be Rust with normal source files, Cargo metadata, tests where useful, and Nix packaging. Shell is fine for small orchestration around existing programs, and Python is fine for low-volume generators or ecosystem-heavy tasks such as catalog updates, but do not leave stateful reconcilers, performance-sensitive builders, or runtime helpers in Python merely because it is quick to prototype.
+
+Prefer structured encoders at the boundary that owns the data. For JSON, YAML, TOML, properties files, and test fixtures, use Nix values with `pkgs.formats.*` or a language-native serializer, then copy or link the generated file from the shell step. Keep shell focused on orchestration: arranging directories, invoking tools, and checking outputs. This keeps escaping, ordering, and encoding consistent, and makes the data shape reviewable as Nix or typed source instead of as heredoc text.
 
 When reasoning about build performance, assume package dependencies are already cached unless the question is specifically about bootstrap or cold-cache behavior. Treat Rust crates, Python dependencies, and other toolchain inputs like nixpkgs does: they are expected to be prebuilt/substituted in normal use, so benchmark the repo-owned derivation or image assembly path after dependencies are present.
 

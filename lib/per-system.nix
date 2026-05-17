@@ -114,7 +114,7 @@ in
       claude-code-demo-up = claudeCodeDemo.up;
       claude-code-demo-linux-up = claudeCodeDemoLinuxUp;
       claude-code-demo-minecraft-up = claudeCodeDemoMinecraftUp;
-      inherit (repoPackages) nix-cargo-unit oci-image-builder;
+      inherit (repoPackages) minecraft-sync-managed nix-cargo-unit oci-image-builder;
       minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
     }
     // lib.optionalAttrs (repoPackages ? ix) {

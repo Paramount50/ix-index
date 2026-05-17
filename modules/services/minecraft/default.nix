@@ -143,6 +143,14 @@ let
   );
 
   players = lib.attrValues cfg.players;
+  playerUUIDs = map (player: player.uuid) players;
+  duplicatePlayerUUIDs = lib.filter (
+    uuid: builtins.length (lib.filter (candidate: candidate == uuid) playerUUIDs) > 1
+  ) (lib.unique playerUUIDs);
+  rawAccessFileNames = lib.intersectLists [
+    "ops.json"
+    "whitelist.json"
+  ] (lib.attrNames cfg.serverFiles);
 
   whitelistEntries = map (player: {
     inherit (player) uuid name;
@@ -153,14 +161,10 @@ let
     inherit (player.operator) level bypassesPlayerLimit;
   }) (lib.filter (player: player.operator.enable) players);
 
-  accessServerFiles = lib.mkMerge [
-    (lib.mkIf (cfg.whitelist.manage || whitelistEntries != [ ]) {
-      "whitelist.json" = lib.mkDefault whitelistEntries;
-    })
-    (lib.mkIf (cfg.operators.manage || operatorEntries != [ ]) {
-      "ops.json" = lib.mkDefault operatorEntries;
-    })
-  ];
+  accessFiles = {
+    "whitelist.json" = whitelistEntries;
+    "ops.json" = operatorEntries;
+  };
 
   modJars = lib.mapAttrsToList (
     slug: _:
@@ -310,16 +314,19 @@ let
       );
       configFiles = mkManaged "config" cfg.configFiles;
       serverRootFiles = mkManaged "server-files" serverFiles;
+      access = mkManaged "access" accessFiles;
     in
     {
       inherit dropins;
       config = configFiles;
       serverFiles = serverRootFiles;
-      roots = [
+      inherit access;
+      reloadRoots = [
         dropins
         configFiles
         serverRootFiles
       ];
+      restartRoots = [ access ];
     };
 
   syncManaged = ix.mkMinecraftSyncManaged {
@@ -491,18 +498,6 @@ in
         default = true;
         description = "Whether the server should disconnect players who are removed from the whitelist while online.";
       };
-
-      manage = mkOption {
-        type = types.bool;
-        default = false;
-        description = "Whether to generate whitelist.json even when no players currently have `whitelist = true`.";
-      };
-    };
-
-    operators.manage = mkOption {
-      type = types.bool;
-      default = false;
-      description = "Whether to generate ops.json even when no players currently have `operator.enable = true`.";
     };
 
     javaPackage = mkOption {
@@ -649,6 +644,17 @@ in
   };
 
   config = mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = duplicatePlayerUUIDs == [ ];
+        message = "services.minecraft.players contains duplicate UUIDs: ${lib.concatStringsSep ", " duplicatePlayerUUIDs}";
+      }
+      {
+        assertion = rawAccessFileNames == [ ];
+        message = "services.minecraft.serverFiles must not manage ${lib.concatStringsSep ", " rawAccessFileNames}; use services.minecraft.players so ix can reconcile Minecraft's mutable access files.";
+      }
+    ];
+
     services.minecraft.serverFiles = lib.mkMerge [
       {
         "server.properties".server-port = lib.mkDefault cfg.port;
@@ -659,7 +665,6 @@ in
           enforce-whitelist = lib.mkDefault cfg.whitelist.enforce;
         };
       })
-      accessServerFiles
     ];
 
     networking.firewall.allowedTCPPorts = [
@@ -670,6 +675,7 @@ in
       "minecraft/managed-dropins".source = managed.dropins;
       "minecraft/managed-config".source = managed.config;
       "minecraft/managed-server-files".source = managed.serverFiles;
+      "minecraft/managed-access".source = managed.access;
     };
 
     systemd.services.minecraft = {
@@ -677,8 +683,8 @@ in
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
-      reloadTriggers = lib.optionals autoReloadEnabled managed.roots;
-      restartTriggers = lib.optionals (!autoReloadEnabled) managed.roots;
+      reloadTriggers = lib.optionals autoReloadEnabled managed.reloadRoots;
+      restartTriggers = lib.optionals (!autoReloadEnabled) managed.reloadRoots ++ managed.restartRoots;
       serviceConfig =
         ix.systemdHardening
         // {
