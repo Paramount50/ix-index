@@ -3,6 +3,7 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    rust-overlay.url = "github:oxalica/rust-overlay";
     ixCliX86_64Linux = {
       url = "https://ix.dev/cli/linux-x86_64/ix";
       flake = false;
@@ -20,6 +21,7 @@
   outputs =
     {
       nixpkgs,
+      rust-overlay,
       ixCliAarch64Darwin,
       ixCliX86_64Linux,
       ixCliX86_64Darwin,
@@ -45,6 +47,7 @@
           minecraftNbt = ./packages/minecraft-nbt;
           minecraftRcon = ./packages/minecraft-rcon;
           minecraftSyncManaged = ./packages/minecraft-sync-managed;
+          llmClippy = ./packages/llm-clippy;
           minestom.servers.hello = ./packages/minestom/servers/hello;
           nixCargoUnit = ./packages/nix-cargo-unit;
           ociImageBuilder = ./packages/oci-image-builder;
@@ -78,6 +81,7 @@
             ix
             nixpkgs
             paths
+            rust-overlay
             ;
         }
       );

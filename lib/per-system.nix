@@ -8,10 +8,14 @@
   ix,
   nixpkgs,
   paths,
+  rust-overlay,
 }:
 let
   inherit (nixpkgs) lib;
-  pkgs = nixpkgs.legacyPackages.${system};
+  pkgs = import nixpkgs {
+    inherit system;
+    overlays = [ rust-overlay.overlays.default ];
+  };
   fs = lib.fileset;
 
   mkApp = program: description: {
@@ -133,6 +137,7 @@ in
       inherit (repoPackages)
         minecraft-nbt
         minecraft-sync-managed
+        llm-clippy
         nix-cargo-unit
         oci-image-builder
         python-mcp-server

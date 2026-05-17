@@ -469,6 +469,7 @@ let
           inherit pkgs;
           ix = ixForPackages;
         };
+        llm-clippy = pkgs.callPackage paths.packages.llmClippy { };
         minecraft-sync-managed = pkgs.callPackage paths.packages.minecraftSyncManaged {
           inherit pkgs;
           ix = ixForPackages;
