@@ -402,13 +402,17 @@ Comments should explain why a line exists, not restate Nix syntax. Prefer commen
 
 Example docs and example flakes assume the reader already has the `ix` CLI.
 They should not include generic `Use` sections or wrapper outputs for
-`nix run .#plan`, `nix run .#up`, `nix run .#switch`, `nix build .#...`, or
-routine `ix shell ... journalctl` inspection. Example `flake.nix` files expose
-the build artifacts the example owns, such as image packages or a local app
-package. Leave `plan`/`diff`/`up`/`switch`/`replace` apps and matching wrapper
-packages out of standalone consumer examples. Keep examples focused on the shape
-being taught: files, modules, service settings, data paths, and the specific
-operational caveats that are unusual for that example.
+`nix run .#plan`, `nix run .#up`, `nix run .#switch`, or routine
+`ix shell ... journalctl` inspection. Every standalone example README should
+include a short `Run` section that shows `ix up` as the whole lifecycle command.
+Do not explain what happens behind that command. Do not spell out lower level
+image plumbing such as `nix build`, image pushes, or `ix new` unless that
+plumbing is the point of the example. Example `flake.nix` files expose the
+values ix needs plus any local package the example owns. Leave
+`plan`/`diff`/`up`/`switch`/`replace` apps and matching wrapper packages out of
+standalone consumer examples. Keep examples focused on the shape being taught:
+files, modules, service settings, data paths, and the specific operational
+caveats that are unusual for that example.
 
 Default to Rust for repo-owned tools that parse structured data, reconcile mutable state, stream archives, move large byte ranges, implement nontrivial CLIs, or sit in build/runtime hot paths. In practice, the vast majority of new first-party tooling with real logic should be Rust with normal source files, Cargo metadata, tests where useful, and Nix packaging. Shell is fine for small orchestration around existing programs, and Python is fine for low-volume generators or ecosystem-heavy tasks such as catalog updates, but do not leave stateful reconcilers, performance-sensitive builders, or runtime helpers in Python merely because it is quick to prototype.
 

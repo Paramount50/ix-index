@@ -2,12 +2,18 @@
 
 Standalone consumer example for a Paper factions server on ix.
 
-It builds one VM image with Paper `26.1.2`, a curated plugin set, a `12000`
-block world border, a 4064-block max-height datapack, BlueMap on TCP `8100`,
-Simple Voice Chat on UDP `24454`, and local-only RCON for managed reloads.
+It defines one Paper `26.1.2` server with a curated plugin set, a `12000` block
+world border, a 4064-block max-height datapack, BlueMap on TCP `8100`, Simple
+Voice Chat on UDP `24454`, and local-only RCON for managed reloads.
 
 Customize real player UUIDs and spawn/claim policy before using it with real
 players.
+
+## Run
+
+```sh
+ix up
+```
 
 ## Shape
 
