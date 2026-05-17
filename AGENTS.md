@@ -22,6 +22,18 @@ Avoid the rule of three. Tricolons like "one lockfile, one catalog, one source o
 
 Lean into small oddities. A line of prose should have one or two touches that a default LLM would not have produced: a trademark symbol on a brand name where most writers would drop it (`LEGO™`, not "Lego"), the actual proper-noun product instead of a generic synonym (`Postgres` over "a relational database"), an idiosyncratic capitalization the upstream project itself uses, a precise verb where a vague one would scan fine. The goal is texture that signals a human made specific choices, not polish that signals a model averaged its training data. Do not manufacture quirk for its own sake; let the oddity come from being more accurate, more specific, or more brand-faithful than the smooth version would be.
 
+Other oddities worth borrowing, all downstream of one principle: commit to a specific thing rather than a smooth abstraction.
+
+Use concrete numbers in place of qualifiers. "~67 OCI layers" beats "many layers"; "the first build takes about 40 minutes" beats "slow at first". A number commits you to having measured, and an approximate `~67` is more honest than "lots". Vague intensifiers like "robust", "scalable", "performant", or "battle-tested" commit to nothing and read as a model averaging its training data.
+
+Anti-marketing earns trust. A short "bad fit if" or "known limitations" paragraph signals the writer has used the thing in anger and survived its failures, so the reader trusts the rest of the page. List the cases where the project is the wrong choice; name the workarounds that hurt.
+
+Use parenthetical asides with teeth. A real-opinion clause set off in parens lets you hedge without softening. (The LEGO™ metaphor falls apart the moment two services want port 25565.) Default LLM writing either commits fully or smears the hedge across the main clause with "may sometimes"; parens admit the edge case while keeping the main assertion sharp.
+
+Match upstream's own capitalization. `nixpkgs`, `systemd`, `ix`, `znver5`, `pnpm`. Title-casing project names as if they were normal English nouns ("Nixpkgs", "Systemd") signals the writer learned about them from a tutorial, not from the project's own README.
+
+Name the failure mode you are claiming to avoid. "Will not crash your VM on a bad switch" is more useful than "stable"; "recovers in one rollback" beats "reliable". Failures are concrete and falsifiable. Adjectives like "stable" and "reliable" are not.
+
 ## Rust style
 
 Prefer local type annotations over turbofish when they make the data shape clearer. For example, use `let args: Vec<_> = env::args().collect();` instead of `let args = env::args().collect::<Vec<_>>();`. Keep turbofish for cases where an expression-local type is genuinely clearer, such as method chains where naming an intermediate value would add noise.
