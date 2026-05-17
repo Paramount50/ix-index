@@ -14,7 +14,8 @@ It uses Paper `26.1.2` with a generated Paper plugin catalog entry for:
 - WorldEdit and WorldGuard for spawn/admin regions and claim-adjacent tooling
 - TerraformGenerator for custom overworld generation
 - CombatLog for PvP logout protection
-- Simple Voice Chat and Distant Horizons Support
+- Simple Voice Chat for proximity voice on UDP `24454`
+- Distant Horizons Support
 - BlueMap for a 3D browser map on TCP `8100`
 - Skript for server-side scripted gameplay and admin automation
 
@@ -41,8 +42,8 @@ The world border is applied after startup through local RCON. The RCON port is
 not opened in the firewall by default; it exists so ix can apply the border and
 reload managed Paper plugins during a switch.
 
-BlueMap opens TCP `8100` for the rendered 3D web map. The Minecraft and BlueMap
-ports are the only public TCP ports in this example.
+BlueMap opens TCP `8100` for the rendered 3D web map. Simple Voice Chat opens
+UDP `24454` with the module default. RCON stays local.
 
 ## Layout
 
