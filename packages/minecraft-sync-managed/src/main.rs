@@ -4,7 +4,7 @@ use std::io;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use clap::Parser;
 use serde_json::Value;
 
@@ -179,10 +179,10 @@ fn plugin_name_for(managed_root: &Path, rel: &str) -> Result<String> {
     if metadata.exists() {
         let text = fs::read_to_string(&metadata)
             .with_context(|| format!("reading {}", metadata.display()))?;
-        if let Some(line) = text.lines().next() {
-            if !line.is_empty() {
-                return Ok(line.to_owned());
-            }
+        if let Some(line) = text.lines().next()
+            && !line.is_empty()
+        {
+            return Ok(line.to_owned());
         }
     }
 
@@ -357,16 +357,24 @@ fn read_kernel_uuid() -> Result<String> {
 }
 
 fn set_owner_read_write(path: &Path) -> Result<()> {
-    let mut permissions = fs::metadata(path)
-        .with_context(|| format!("reading metadata for {}", path.display()))?
-        .permissions();
-    permissions.set_readonly(false);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        permissions.set_mode(0o600);
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let permissions = fs::Permissions::from_mode(0o600);
+        fs::set_permissions(path, permissions)
+            .with_context(|| format!("chmod 0600 {}", path.display()))
     }
-    fs::set_permissions(path, permissions).with_context(|| format!("chmod 0600 {}", path.display()))
+
+    #[cfg(not(unix))]
+    {
+        let mut permissions = fs::metadata(path)
+            .with_context(|| format!("reading metadata for {}", path.display()))?
+            .permissions();
+        permissions.set_readonly(false);
+        fs::set_permissions(path, permissions)
+            .with_context(|| format!("making {} owner writable", path.display()))
+    }
 }
 
 fn set_property(file: &Path, key: &str, value: &str) -> Result<()> {
@@ -511,10 +519,10 @@ fn reconcile_entries(current: &[Value], previous: &[Value], desired: &[Value]) -
     }
 
     for entry in desired {
-        if let Some(uuid) = entry_uuid(entry) {
-            if !emitted.contains(uuid) {
-                next_entries.push(entry.clone());
-            }
+        if let Some(uuid) = entry_uuid(entry)
+            && !emitted.contains(uuid)
+        {
+            next_entries.push(entry.clone());
         }
     }
 

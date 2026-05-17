@@ -137,13 +137,24 @@ let
     as `pkgs.<name>`. Flake-output-only packages live in `packageSetFor`
     instead so they don't leak into the nixpkgs namespace inside images.
   */
-  overlay = final: _prev: {
-    minecraft-hot-reload-agent = final.callPackage paths.packages.minecraftHotReloadAgent { };
-    minecraft-rcon = final.callPackage paths.packages.minecraftRcon {
-      writePythonApplication = writePythonApplication final;
+  overlay =
+    final: _prev:
+    let
+      ixForOverlay = {
+        buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
+      };
+      checkedOciImageBuilder = final.callPackage paths.packages.ociImageBuilder {
+        pkgs = final;
+        ix = ixForOverlay;
+      };
+    in
+    {
+      minecraft-hot-reload-agent = final.callPackage paths.packages.minecraftHotReloadAgent { };
+      minecraft-rcon = final.callPackage paths.packages.minecraftRcon {
+        writePythonApplication = writePythonApplication final;
+      };
+      oci-image-builder = checkedOciImageBuilder.passthru.unchecked or checkedOciImageBuilder;
     };
-    oci-image-builder = final.callPackage paths.packages.ociImageBuilder { };
-  };
   overlays = [ overlay ];
 
   /**
@@ -177,13 +188,36 @@ let
     inherit uvLockFor;
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
+  rustFor =
+    pkgs:
+    import ./rust.nix {
+      inherit lib pkgs;
+    };
   cargoUnitFor =
     pkgs:
+    let
+      rust = rustFor pkgs;
+      checkedNixCargoUnit = pkgs.callPackage paths.packages.nixCargoUnit {
+        inherit pkgs;
+        ix = {
+          buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
+        };
+      };
+    in
     import ./cargo-unit.nix {
-      inherit lib pkgs;
-      nixCargoUnit = pkgs.callPackage paths.packages.nixCargoUnit { };
+      inherit lib pkgs rust;
+      nixCargoUnit = checkedNixCargoUnit.passthru.unchecked or checkedNixCargoUnit;
     };
   cargoUnit = cargoUnitFor pkgs;
+
+  /**
+    Build a repo-owned Rust package with the shared Rust policy.
+
+    Wraps `rustPlatform.buildRustPackage`, enables parallel test execution by
+    default, and attaches the repo's clippy and unused-dependency checks as
+    `passthru.tests` plus policy dependencies of the returned package.
+  */
+  buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
 
   systemdHardening = import ./systemd-hardening.nix;
 
@@ -254,7 +288,13 @@ let
         "zlib"
       ];
       jsonFormat = pkgs.formats.json { };
-      minecraftNbt = pkgs.callPackage paths.packages.minecraftNbt { };
+      checkedMinecraftNbt = pkgs.callPackage paths.packages.minecraftNbt {
+        inherit pkgs;
+        ix = {
+          buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
+        };
+      };
+      minecraftNbt = checkedMinecraftNbt.passthru.unchecked or checkedMinecraftNbt;
     in
     assert lib.assertMsg (builtins.elem format validFormats)
       "mkMinecraftNbtFormat: format must be one of ${lib.concatStringsSep ", " validFormats}";
@@ -286,9 +326,17 @@ let
   */
   mkMinecraftSyncManaged =
     args:
+    let
+      checkedPackage = pkgs.callPackage paths.packages.minecraftSyncManaged {
+        inherit pkgs;
+        ix = {
+          buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
+        };
+      };
+    in
     import ./minecraft-sync-managed.nix (
       {
-        package = pkgs.callPackage paths.packages.minecraftSyncManaged { };
+        package = checkedPackage.passthru.unchecked or checkedPackage;
         inherit writeNushellApplication;
       }
       // args
@@ -417,10 +465,22 @@ let
         minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
           ix = ixForPackages;
         };
-        minecraft-nbt = pkgs.callPackage paths.packages.minecraftNbt { };
-        minecraft-sync-managed = pkgs.callPackage paths.packages.minecraftSyncManaged { };
-        nix-cargo-unit = pkgs.callPackage paths.packages.nixCargoUnit { };
-        oci-image-builder = pkgs.callPackage paths.packages.ociImageBuilder { };
+        minecraft-nbt = pkgs.callPackage paths.packages.minecraftNbt {
+          inherit pkgs;
+          ix = ixForPackages;
+        };
+        minecraft-sync-managed = pkgs.callPackage paths.packages.minecraftSyncManaged {
+          inherit pkgs;
+          ix = ixForPackages;
+        };
+        nix-cargo-unit = pkgs.callPackage paths.packages.nixCargoUnit {
+          inherit pkgs;
+          ix = ixForPackages;
+        };
+        oci-image-builder = pkgs.callPackage paths.packages.ociImageBuilder {
+          inherit pkgs;
+          ix = ixForPackages;
+        };
         python-mcp-server = pkgs.callPackage paths.packages.pythonMcpServer {
           ix = ixForPackages;
         };
@@ -444,6 +504,7 @@ let
       artifacts
       buildBunSite
       buildGradleFatJar
+      buildRustPackage
       buildNpmSite
       buildUvApplication
       bunLock

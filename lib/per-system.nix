@@ -90,6 +90,22 @@ let
 
   repoPackages = ix.packageSetFor pkgs;
 
+  rustPackageTests =
+    let
+      rustPackages = lib.getAttrs [
+        "minecraft-nbt"
+        "minecraft-sync-managed"
+        "nix-cargo-unit"
+        "oci-image-builder"
+      ] repoPackages;
+    in
+    lib.concatMapAttrs (
+      packageName: package:
+      lib.mapAttrs' (testName: test: lib.nameValuePair "rust-${packageName}-${testName}" test) (
+        package.passthru.tests or { }
+      )
+    ) rustPackages;
+
   lintSource = fs.toSource {
     inherit (paths) root;
     fileset = fs.gitTracked paths.root;
@@ -146,16 +162,18 @@ in
     claude-code-demo-switch = mkApp claudeCodeDemo.switch "Switch the Claude Code demo fleet";
   };
 
-  checks = lib.optionalAttrs (system == ix.system) {
-    inherit (tests) eval;
-    lint = pkgs.runCommand "ix-images-lint" { nativeBuildInputs = [ pkgs.coreutils ]; } ''
-      cp -R ${lintSource} source
-      chmod -R u+w source
-      cd source
-      ${lib.getExe lint}
-      mkdir -p "$out"
-    '';
-  };
+  checks =
+    lib.optionalAttrs (system == ix.system) {
+      inherit (tests) eval;
+      lint = pkgs.runCommand "ix-images-lint" { nativeBuildInputs = [ pkgs.coreutils ]; } ''
+        cp -R ${lintSource} source
+        chmod -R u+w source
+        cd source
+        ${lib.getExe lint}
+        mkdir -p "$out"
+      '';
+    }
+    // lib.optionalAttrs (system == ix.system) rustPackageTests;
 
   formatter = pkgs.nixfmt;
 }

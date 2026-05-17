@@ -38,6 +38,7 @@ struct UnitsNixTemplate {
     package_entries: String,
     binary_entries: String,
     library_entries: String,
+    test_entries: String,
     default_entry: String,
 }
 
@@ -52,6 +53,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         package_entries: render_root_entries(graph, &prepared, |_| true),
         binary_entries: render_root_entries(graph, &prepared, Unit::is_bin),
         library_entries: render_root_entries(graph, &prepared, Unit::is_library),
+        test_entries: render_test_entries(graph, &prepared),
         default_entry: render_default_entry(graph, &prepared),
     };
 
@@ -96,9 +98,9 @@ fn render_policy_check_entries(
 ) -> Result<String> {
     let mut entries = String::new();
     if options.deny_unused_crate_dependencies {
-        write!(
+        writeln!(
             entries,
-            "    unusedCrateDependencies = {};\n",
+            "    unusedCrateDependencies = {};",
             render_unused_crate_dependencies_check(graph, options, prepared)
         )?;
     }
@@ -368,6 +370,10 @@ fn render_rustc_build_phase(
     }
 
     push_rustc_args(&mut script, unit, &prepared.hashes[index]);
+    script.push_str(
+        "${pkgs.lib.concatStringsSep \"\\n\" (map (arg: \"rustc_args+=( ${pkgs.lib.escapeShellArg arg} )\") extraRustcArgs)}\n",
+    );
+
     for dep_index in &prepared.transitive_unit_deps[index] {
         let dep = &graph.units[*dep_index];
         if dep.is_bin() {
@@ -375,11 +381,8 @@ fn render_rustc_build_phase(
         }
         writeln!(
             script,
-            "rustc_args+=( -L {} )",
-            shell::double_quote(&format!(
-                "dependency=${{units.{}}}/lib",
-                nix_attr(&prepared.names[*dep_index])
-            ))
+            "rustc_args+=( -L \"dependency=${{units.{}}}/lib\" )",
+            nix_attr(&prepared.names[*dep_index])
         )?;
     }
 
@@ -399,12 +402,9 @@ fn render_rustc_build_phase(
         }
         writeln!(
             script,
-            "rustc_args+=( --extern {} )",
-            shell::double_quote(&format!(
-                "{}=$(cat ${{units.{}}}/nix-support/extern-path)",
-                dependency.extern_crate_name,
-                nix_attr(&prepared.names[dependency.index])
-            ))
+            "rustc_args+=( --extern \"{}=$(cat ${{units.{}}}/nix-support/extern-path)\" )",
+            dependency.extern_crate_name,
+            nix_attr(&prepared.names[dependency.index])
         )?;
     }
 
@@ -415,7 +415,7 @@ fn render_rustc_build_phase(
         shell::double_quote(&source_path)
     )?;
 
-    if unit.is_bin() {
+    if unit.is_bin() || unit.is_test() {
         writeln!(
             script,
             "rustc_args+=( -o {} )",
@@ -559,7 +559,7 @@ fn push_arg(script: &mut String, value: &str) {
 }
 
 fn append_build_script_flag_reader(script: &mut String, run_ref: &str) {
-    let quoted_run_ref = shell::double_quote(run_ref);
+    let quoted_run_ref = format!("\"{run_ref}\"");
     let snippets = [
         ("rustc-cfg", "--cfg"),
         ("rustc-link-lib", "-l"),
@@ -600,7 +600,7 @@ fi
         ""
     };
 
-    if unit.is_bin() {
+    if unit.is_bin() || unit.is_test() {
         format!(
             "\
 mkdir -p $out/bin $out/nix-support
@@ -864,9 +864,7 @@ fn render_unused_crate_dependencies_check(
     for (dependency, unit_indexes) in dependency_units {
         let unit_refs = unit_indexes
             .iter()
-            .map(|index| {
-                shell::double_quote(&format!("${{units.{}}}", nix_attr(&prepared.names[*index])))
-            })
+            .map(|index| format!("\"${{units.{}}}\"", nix_attr(&prepared.names[*index])))
             .collect::<Vec<_>>()
             .join(" ");
         let package = format!("{} {}", dependency.package_name, dependency.package_version);
@@ -1000,6 +998,33 @@ fn render_checked_roots(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
         .join(" ")
 }
 
+fn render_test_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
+    let mut entries = String::new();
+    let mut seen = BTreeSet::new();
+    for index in &graph.roots {
+        let unit = &graph.units[*index];
+        if !unit.is_test() {
+            continue;
+        }
+
+        let key = if seen.insert(unit.target.name.clone()) {
+            unit.target.name.clone()
+        } else {
+            prepared.names[*index].clone()
+        };
+        let unit_ref = format!("${{units.{}}}", nix_attr(&prepared.names[*index]));
+        let binary = format!("\"{unit_ref}/bin/{}\"", unit.target.name);
+        let _ = writeln!(
+            entries,
+            "    {} = pkgs.runCommand {} {{ }} ''\n      export RUST_TEST_THREADS=\"$NIX_BUILD_CORES\"\n      {binary}\n      mkdir -p \"$out\"\n    '';",
+            nix_attr(&key),
+            nix_attr(&format!("cargo-unit-test-{key}")),
+        );
+    }
+
+    entries
+}
+
 fn nix_attr(value: &str) -> String {
     serde_json::to_string(value).expect("serialize Nix string")
 }
@@ -1092,8 +1117,55 @@ mod tests {
         assert!(rendered.contains("${src}/src/main.rs"));
         assert!(rendered.contains("default = withPolicyChecks units."));
         assert!(rendered.contains("policyChecks"));
+        assert!(rendered.contains("extraRustcArgs"));
+        assert!(rendered.contains("tests ="));
         assert!(rendered.contains("--json=unused-externs-silent"));
         assert!(rendered.contains("withPolicyChecks"));
+    }
+
+    #[test]
+    fn exposes_test_roots_as_runnable_checks() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "hello",
+                    "src_path": "/workspace/src/lib.rs",
+                    "edition": "2024",
+                    "test": true
+                  },
+                  "profile": { "name": "test", "opt_level": "0" },
+                  "features": [],
+                  "mode": "test",
+                  "dependencies": []
+                }
+              ],
+              "roots": [0]
+            }"#,
+        )
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: None,
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("tests = {"));
+        assert!(rendered.contains("\"hello\" = pkgs.runCommand \"cargo-unit-test-hello\""));
+        assert!(rendered.contains("RUST_TEST_THREADS"));
+        assert!(rendered.contains("/bin/hello"));
     }
 
     #[test]

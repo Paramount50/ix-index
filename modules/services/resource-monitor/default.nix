@@ -50,7 +50,7 @@ let
     preBuild = "cp ${pkgs.writeText "resource-monitor-vm-config.json" (builtins.toJSON vmConfig)} src/lib/vm-config.json";
   };
 
-  statsWriter = pkgs.rustPlatform.buildRustPackage {
+  statsWriter = ix.buildRustPackage pkgs {
     pname = "resource-monitor-stats-writer";
     version = "0.1.0";
     src = ./stats-writer;

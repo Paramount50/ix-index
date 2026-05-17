@@ -2,33 +2,9 @@
   lib,
   pkgs,
   nixCargoUnit,
+  rust,
 }:
 let
-  defaultRustToolchain = pkgs.symlinkJoin {
-    name = "cargo-unit-rust-toolchain";
-    paths = [
-      pkgs.cargo
-      pkgs.rustc
-    ];
-  };
-
-  defaultRustsecAdvisoryDb = pkgs.fetchFromGitHub {
-    owner = "rustsec";
-    repo = "advisory-db";
-    rev = "f2ae5fc8e5d208373b6c838f9676434525327a72";
-    hash = "sha256-iqXYpuCoWoGypnpM5ceXN748QlYeBXDtZx0uI98qFLo=";
-  };
-
-  defaultPolicy = {
-    denyUnusedCrateDependencies = true;
-    cargoAudit = {
-      enable = true;
-      db = defaultRustsecAdvisoryDb;
-      deny = [ ];
-      ignore = [ ];
-    };
-  };
-
   profileArgs =
     profile:
     if profile == "release" then
@@ -41,57 +17,12 @@ let
         profile
       ];
 
-  resolveVendorDir =
-    {
-      cargoLock,
-      outputHashes,
-      vendorDir,
-    }:
-    if vendorDir != null then
-      vendorDir
-    else
-      pkgs.rustPlatform.importCargoLock {
-        lockFile = cargoLock;
-        inherit outputHashes;
-      };
-
-  vendorConfigScript =
-    {
-      cargoExtraConfig,
-      vendorDir,
-    }:
-    let
-      cargoExtraConfigFile = pkgs.writeText "cargo-extra-config.toml" cargoExtraConfig;
-    in
-    ''
-      export CARGO_HOME="$TMPDIR/cargo-home"
-      mkdir -p "$CARGO_HOME"
-
-      if [ -f "${vendorDir}/.cargo/config.toml" ]; then
-        sed 's|directory = "cargo-vendor-dir"|directory = "${vendorDir}"|' \
-          "${vendorDir}/.cargo/config.toml" > "$CARGO_HOME/config.toml"
-      else
-        {
-          printf '%s\n' '[source.crates-io]'
-          printf '%s\n' 'replace-with = "vendored-sources"'
-          printf '\n'
-          printf '%s\n' '[source.vendored-sources]'
-          printf '%s\n' 'directory = "${vendorDir}"'
-        } > "$CARGO_HOME/config.toml"
-      fi
-    ''
-    + lib.optionalString (cargoExtraConfig != "") ''
-
-      printf '\n' >> "$CARGO_HOME/config.toml"
-      cat ${cargoExtraConfigFile} >> "$CARGO_HOME/config.toml"
-    '';
-
   commonArgs = args: {
     inherit (args) src;
     cargoLock = args.cargoLock or (args.src + "/Cargo.lock");
     cargoArgs = args.cargoArgs or [ "--workspace" ];
     profile = args.profile or "release";
-    rustToolchain = args.rustToolchain or defaultRustToolchain;
+    rustToolchain = args.rustToolchain or rust.defaultRustToolchain;
     nativeBuildInputs = args.nativeBuildInputs or [ ];
     env = args.env or { };
     cargoExtraConfig = args.cargoExtraConfig or "";
@@ -102,15 +33,12 @@ let
       let
         rawPolicy = args.policy or { };
         rawCargoAudit = rawPolicy.cargoAudit or { };
+        resolved = rust.resolvePolicy rawPolicy;
       in
-      {
-        denyUnusedCrateDependencies =
-          rawPolicy.denyUnusedCrateDependencies or defaultPolicy.denyUnusedCrateDependencies;
-        cargoAudit = {
-          enable = rawCargoAudit.enable or defaultPolicy.cargoAudit.enable;
-          db = rawCargoAudit.db or defaultPolicy.cargoAudit.db;
-          deny = rawCargoAudit.deny or defaultPolicy.cargoAudit.deny;
-          ignore = rawCargoAudit.ignore or defaultPolicy.cargoAudit.ignore;
+      resolved
+      // {
+        cargoAudit = resolved.cargoAudit // {
+          enable = rawCargoAudit.enable or true;
         };
       };
   };
@@ -143,7 +71,7 @@ let
     rawArgs:
     let
       args = commonArgs rawArgs;
-      vendorDir = resolveVendorDir {
+      vendorDir = rust.resolveVendorDir {
         inherit (args) cargoLock outputHashes vendorDir;
       };
     in
@@ -164,7 +92,7 @@ let
         // args.env
       )
       ''
-        ${vendorConfigScript {
+        ${rust.vendorConfigScript {
           inherit vendorDir;
           inherit (args) cargoExtraConfig;
         }}
@@ -185,7 +113,7 @@ let
     rawArgs:
     let
       args = commonArgs rawArgs;
-      vendorDir = resolveVendorDir {
+      vendorDir = rust.resolveVendorDir {
         inherit (args) cargoLock outputHashes vendorDir;
       };
       unitGraphJson = rawArgs.unitGraphJson or (generateUnitGraph rawArgs);
@@ -221,35 +149,14 @@ let
     rawArgs:
     let
       args = commonArgs rawArgs;
-      inherit (args.policy) cargoAudit;
-      auditFlags = [
-        "audit"
-        "--file"
-        (builtins.toString args.cargoLock)
-        "--db"
-        (builtins.toString cargoAudit.db)
-        "--no-fetch"
-        "--stale"
-      ]
-      ++ lib.concatMap (deny: [
-        "--deny"
-        deny
-      ]) cargoAudit.deny
-      ++ lib.concatMap (advisory: [
-        "--ignore"
-        advisory
-      ]) cargoAudit.ignore;
     in
-    pkgs.runCommand "cargo-unit-cargo-audit"
-      {
-        nativeBuildInputs = [ pkgs.cargo-audit ];
+    rust.cargoAuditCheck (
+      rawArgs
+      // {
+        pname = rawArgs.pname or "cargo-unit";
+        inherit (args) policy;
       }
-      ''
-        export CARGO_HOME="$TMPDIR/cargo-home"
-        mkdir -p "$CARGO_HOME"
-        cargo-audit ${lib.escapeShellArgs auditFlags}
-        mkdir -p "$out"
-      '';
+    );
 
   /**
     Build a Rust workspace as one Nix derivation per Cargo rustc unit.
@@ -263,7 +170,7 @@ let
     rawArgs:
     let
       args = commonArgs rawArgs;
-      vendorDir = resolveVendorDir {
+      vendorDir = rust.resolveVendorDir {
         inherit (args) cargoLock outputHashes vendorDir;
       };
       unitGraphJson = generateUnitGraph (rawArgs // { inherit vendorDir; });
@@ -276,16 +183,16 @@ let
       units = import unitsNix {
         inherit pkgs vendorDir;
         inherit (args) src rustToolchain;
-        extraNativeBuildInputs = args.nativeBuildInputs;
+        extraNativeBuildInputs = args.nativeBuildInputs ++ rust.nativeBuildInputsForPolicy args.policy;
         extraEnv = args.env;
-        extraPolicyChecks = lib.optionalAttrs args.policy.cargoAudit.enable {
-          cargoAudit = auditCargoLock (
-            rawArgs
-            // {
-              inherit vendorDir;
-            }
-          );
-        };
+        extraRustcArgs = rust.rustcArgsForPolicy args.policy;
+        extraPolicyChecks = rust.policyChecksFor (
+          rawArgs
+          // {
+            inherit vendorDir;
+            inherit (args) policy;
+          }
+        );
       };
     in
     units

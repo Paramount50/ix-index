@@ -1,9 +1,10 @@
 {
+  ix,
   lib,
-  rustPlatform,
+  pkgs,
 }:
 
-rustPlatform.buildRustPackage {
+ix.buildRustPackage pkgs {
   pname = "minecraft-sync-managed";
   version = "0.1.0";
 
