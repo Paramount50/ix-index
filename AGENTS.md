@@ -237,7 +237,7 @@ Helpers shared across modules go in `lib/` and are exposed to every module throu
 ix.mkMinecraftLoader {
   inherit config lib;
   name = "paper";
-  dropDir = "plugins";
+  dropinDir = "plugins";
   extraOptions = { /* loader-specific options */ };
 }
 ```

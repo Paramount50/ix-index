@@ -12,7 +12,7 @@
 ix.mkMinecraftLoader {
   inherit ix config lib;
   name = "fabric";
-  dropDir = "mods";
+  dropinDir = "mods";
   # Fabric uses the shared Temurin JVM default. Hot reload can redefine ordinary
   # classes through the Java agent, but it does not dynamically load new mods or
   # mutate frozen registries.

@@ -9,5 +9,5 @@
 ix.mkMinecraftLoader {
   inherit ix config lib;
   name = "sponge";
-  dropDir = "mods";
+  dropinDir = "mods";
 }

@@ -9,5 +9,5 @@
 ix.mkMinecraftLoader {
   inherit ix config lib;
   name = "purpur";
-  dropDir = "plugins";
+  dropinDir = "plugins";
 }

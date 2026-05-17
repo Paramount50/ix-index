@@ -10,5 +10,5 @@
 ix.mkMinecraftLoader {
   inherit ix config lib;
   name = "neoforge";
-  dropDir = "mods";
+  dropinDir = "mods";
 }

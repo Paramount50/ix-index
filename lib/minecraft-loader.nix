@@ -19,7 +19,7 @@
   config,
   lib,
   name,
-  dropDir ? "mods",
+  dropinDir ? "mods",
   extraOptions ? { },
   configFragment ? _: { },
 }:
@@ -51,7 +51,7 @@ in
       {
         services.minecraft = {
           enable = lib.mkDefault true;
-          dropDir = lib.mkDefault dropDir;
+          dropinDir = lib.mkDefault dropinDir;
           serverJar = cfg.src;
         };
       }

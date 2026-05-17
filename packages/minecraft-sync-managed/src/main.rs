@@ -15,7 +15,7 @@ struct Config {
     data_dir: PathBuf,
 
     #[arg(long)]
-    drop_dir: String,
+    dropin_dir: String,
 
     #[arg(long)]
     managed_root: PathBuf,
@@ -213,7 +213,7 @@ fn write_plan(plan_path: &Path, plan: &BTreeSet<(String, String)>) -> Result<()>
 fn plan_dropin_reloads(config: &Config, plan: &mut BTreeSet<(String, String)>) -> Result<()> {
     let dropin_manifest = config
         .data_dir
-        .join(format!(".ix-managed-{}", config.drop_dir));
+        .join(format!(".ix-managed-{}", config.dropin_dir));
     let managed_dropins = config.managed_root.join("managed-dropins");
     if !(dropin_manifest.exists() && managed_dropins.exists()) {
         return Ok(());
@@ -311,7 +311,7 @@ fn plan_server_file_reloads(config: &Config, plan: &mut BTreeSet<(String, String
 fn plan_plugman_reload(config: &Config) -> Result<()> {
     let plan_path = config
         .data_dir
-        .join(format!(".ix-managed-{}.reload-plan", config.drop_dir));
+        .join(format!(".ix-managed-{}.reload-plan", config.dropin_dir));
     if let Some(parent) = plan_path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
@@ -585,10 +585,10 @@ fn main() -> Result<()> {
 
     sync_tree(
         &config.managed_root.join("managed-dropins"),
-        &config.data_dir.join(&config.drop_dir),
+        &config.data_dir.join(&config.dropin_dir),
         &config
             .data_dir
-            .join(format!(".ix-managed-{}", config.drop_dir)),
+            .join(format!(".ix-managed-{}", config.dropin_dir)),
         &BTreeSet::new(),
     )?;
     sync_tree(

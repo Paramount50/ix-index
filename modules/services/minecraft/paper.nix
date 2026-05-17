@@ -10,7 +10,7 @@
 ix.mkMinecraftLoader {
   inherit ix config lib;
   name = "paper";
-  dropDir = "plugins";
+  dropinDir = "plugins";
   configFragment =
     _:
     let

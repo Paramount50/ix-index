@@ -10,5 +10,5 @@
 ix.mkMinecraftLoader {
   inherit ix config lib;
   name = "spigot";
-  dropDir = "plugins";
+  dropinDir = "plugins";
 }

@@ -1,9 +1,9 @@
 # Minecraft server runtime.
 #
 # Loader-agnostic. Provides systemd unit, mods, Java runtime, port.
-# `serverJar` and `dropDir` are slots filled by a loader module (fabric,
+# `serverJar` and `dropinDir` are slots filled by a loader module (fabric,
 # folia, neoforge, paper, purpur, spigot, sponge, vanilla) via module merging.
-# `dropDir` is where mod jars get symlinked: fabric/neoforge/sponge use
+# `dropinDir` is where mod jars get symlinked: fabric/neoforge/sponge use
 # `mods`, paper/folia/purpur/spigot use `plugins`.
 #
 # All server config files (server.properties, bukkit.yml, spigot.yml, etc.)
@@ -303,7 +303,7 @@ let
 
   managed =
     let
-      dropins = pkgs.runCommand "minecraft-managed-${cfg.dropDir}" { } (
+      dropins = pkgs.runCommand "minecraft-managed-${cfg.dropinDir}" { } (
         ''
           mkdir -p "$out"
         ''
@@ -340,7 +340,7 @@ let
       rconPasswordFile
       rconBroadcastToOps
       ;
-    inherit (cfg) dropDir;
+    inherit (cfg) dropinDir;
     inherit (cfg.autoReload.plugman) ignoredPlugins;
   };
 
@@ -353,7 +353,7 @@ let
     text = ''
       const driver = ${builtins.toJSON autoReloadDriver}
       const socket = ${builtins.toJSON cfg.autoReload.socketPath}
-      const plan = ${builtins.toJSON "${dataDir}/.ix-managed-${cfg.dropDir}.reload-plan"}
+      const plan = ${builtins.toJSON "${dataDir}/.ix-managed-${cfg.dropinDir}.reload-plan"}
 
       def main [] {
         minecraft-sync-managed
@@ -434,7 +434,7 @@ in
       description = "Server jar to launch. Set by a loader module (fabric/paper/vanilla).";
     };
 
-    dropDir = mkOption {
+    dropinDir = mkOption {
       type = types.str;
       default = "mods";
       description = "Subdirectory under the data dir where mod jars are symlinked. Loaders set this: fabric uses mods, paper uses plugins.";
@@ -483,20 +483,20 @@ in
     players = mkOption {
       type = types.attrsOf playerType;
       default = { };
-      description = "Minecraft players keyed by a stable local name. Entries can be reused by whitelist.json and ops.json without repeating UUIDs.";
+      description = "Minecraft players keyed by a stable local name. Entries generate whitelist.json and ops.json by UUID, while preserving manual runtime additions during sync.";
     };
 
     whitelist = {
       enable = mkOption {
         type = types.bool;
         default = false;
-        description = "Whether to enable the Minecraft whitelist in server.properties.";
+        description = "Whether to write white-list=true in server.properties.";
       };
 
       enforce = mkOption {
         type = types.bool;
         default = true;
-        description = "Whether the server should disconnect players who are removed from the whitelist while online.";
+        description = "Whether to write enforce-whitelist=true, so online players are disconnected when removed from the whitelist.";
       };
     };
 
@@ -634,7 +634,7 @@ in
     serverFiles = mkOption {
       type = types.attrsOf formatValueType;
       default = { };
-      description = "Files to place relative to the server root. Keys are paths (server.properties, bukkit.yml, etc.). Format inferred from extension.";
+      description = "Files to place relative to the server root. Keys are paths (server.properties, bukkit.yml, etc.). Format inferred from extension. Use services.minecraft.players for whitelist.json and ops.json so ix can reconcile Minecraft's mutable access files.";
     };
 
     port = mkOption {
@@ -651,7 +651,7 @@ in
       }
       {
         assertion = rawAccessFileNames == [ ];
-        message = "services.minecraft.serverFiles must not manage ${lib.concatStringsSep ", " rawAccessFileNames}; use services.minecraft.players so ix can reconcile Minecraft's mutable access files.";
+        message = "services.minecraft.serverFiles cannot manage ${lib.concatStringsSep ", " rawAccessFileNames}; use services.minecraft.players so ix can reconcile Minecraft's mutable access files by UUID.";
       }
     ];
 
@@ -699,7 +699,7 @@ in
           RuntimeDirectory = "minecraft-hot-reload";
         };
       preStart = ''
-        mkdir -p ${dataDir}/${cfg.dropDir}
+        mkdir -p ${dataDir}/${cfg.dropinDir}
         echo "eula=true" > ${dataDir}/eula.txt
         ${lib.getExe syncManaged}
       '';

@@ -253,7 +253,7 @@ let
           };
           syncManaged = ix.mkMinecraftSyncManaged {
             inherit pkgs;
-            inherit (config.services.minecraft) dropDir;
+            inherit (config.services.minecraft) dropinDir;
             dataDir = "/build/minecraft-access-data";
             managedRoot = "/build/minecraft-managed-root";
             plugmanReloadEnabled = false;
@@ -554,7 +554,7 @@ let
 
     "minecraft_1.21.11-paper" = [
       {
-        assertion = minecraft.paper.cfg.dropDir == "plugins";
+        assertion = minecraft.paper.cfg.dropinDir == "plugins";
         message = "Paper minecraft should use the plugins drop directory";
       }
       {
