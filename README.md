@@ -5,9 +5,9 @@
 ## Why You'll Like This
 
 - **Images that just boot.** Minecraft, Postgres, remote desktop, more.
-- **Compose, don't glue.** Mix services like Lego — no config soup.
-- **`llm-clippy`** — Rust linter tuned for LLM-friendly output. Ships in the box.
-- **One lockfile.** One catalog. One source of truth.
+- **Services that compose.** Mix them like Lego.
+- **`llm-clippy` included.** A Rust linter tuned for LLM-friendly output.
+- **One lockfile, one catalog, one source of truth.**
 
 ## Try It
 
@@ -20,8 +20,8 @@ Done.
 
 ## Want More?
 
-- `packages/` — tools (incl. `llm-clippy`)
-- `modules/` — services to plug in
-- `images/` — runnable systems
+- `packages/` for tools (including `llm-clippy`)
+- `modules/` for services to plug in
+- `images/` for runnable systems
 
 See [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md) when you're ready to dig in.

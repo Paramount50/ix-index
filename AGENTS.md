@@ -10,6 +10,14 @@ Work directly in the main checkout on `main` unless the user asks for a branch o
 
 When a commit actually fixes a tracked GitHub issue, include an auto-closing keyword in the commit body, for example `Fixes #123`, `Closes #123`, or `Resolves #123`. Use `Refs #123` only for related work, policy docs, investigation, or partial cleanup that should not close the issue.
 
+## Writing style
+
+These rules apply to prose in docs, READMEs, comments, issues, and PR descriptions.
+
+Do not use the "X, not Y" or "X, don't Y" rhetorical pattern. It is filler that reads as marketing. State what the thing is in a positive form, drop the contrast. Replace "ix VMs without the plumbing, not glue" with "ix VMs with services that compose." Replace "Compose, don't glue" with "Compose services."
+
+Do not use em dashes. Write so the sentence does not need one: split into two sentences, use a colon, use parentheses, or restructure. If the urge is to insert "—", the sentence is doing two jobs and should be cut into two.
+
 ## Rust style
 
 Prefer local type annotations over turbofish when they make the data shape clearer. For example, use `let args: Vec<_> = env::args().collect();` instead of `let args = env::args().collect::<Vec<_>>();`. Keep turbofish for cases where an expression-local type is genuinely clearer, such as method chains where naming an intermediate value would add noise.
