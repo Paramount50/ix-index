@@ -1,7 +1,7 @@
 import { BILLING, type UsageStats } from './stats';
 
 // Per-resource rates let the breakdown row render `$rate × value = bill`
-// independently of the server's totalCost. The Nushell writer in default.nix
+// independently of the server's totalCost. The resource-monitor module's writer
 // computes the same formulas against the same vm-config.json, so the rows sum
 // to the server-published total.
 const SECONDS_PER_HOUR = 60 * 60;

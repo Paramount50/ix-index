@@ -13,6 +13,7 @@
   minecraft-bedrock = ./services/minecraft-bedrock.nix;
   postgresql = ./services/postgresql.nix;
   remote-desktop = ./services/remote-desktop.nix;
+  resource-monitor = ./services/resource-monitor;
 
   minecraft = {
     runtime = ./services/minecraft;

@@ -10,6 +10,7 @@
   - `pname`, `version`: derivation identity.
   - `src`: project root containing `package.json` and `package-lock.json`.
   - `buildScript`: npm script to run for the production build.
+  - `preBuild`: shell code to run before the npm build.
   - `distDir`: relative path of the build output inside `src`.
   - `installDir`: path under `$out` where the built assets are installed.
   - `extraNativeBuildInputs`: extra packages on PATH for the build.
@@ -21,6 +22,7 @@ pkgs:
   version ? "0.0.0",
   src,
   buildScript ? "build",
+  preBuild ? "",
   distDir ? "dist",
   installDir ? "share/${pname}",
   extraNativeBuildInputs ? [ ],
@@ -54,6 +56,7 @@ pkgs.stdenvNoCC.mkDerivation (_: {
 
   buildPhase = ''
     runHook preBuild
+    ${preBuild}
     npm run ${buildScript}
     runHook postBuild
   '';
