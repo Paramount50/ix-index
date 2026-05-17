@@ -1512,6 +1512,15 @@ let
       }
       {
         assertion =
+          minecraft.config.ix.build.ociEfficiency.enable
+          && minecraft.config.ix.build.ociEfficiency.minEfficiency == 0.95
+          && minecraft.config.ix.build.ociEfficiency.maxWastedBytes == 20 * 1024 * 1024
+          && minecraft.config.ix.build.ociEfficiency.maxWastedPercent == 0.20
+          && minecraft.config.ix.build.ociEfficiency.reportTopPaths == 10;
+        message = "OCI image builds should check layer efficiency by default";
+      }
+      {
+        assertion =
           bunLockPackage.name == "clsx"
           && bunLockPackage.version == "2.1.1"
           && lib.hasPrefix "sha512-" bunLockPackage.integrity;

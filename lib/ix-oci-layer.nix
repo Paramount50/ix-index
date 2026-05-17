@@ -29,6 +29,33 @@
       type = lib.types.package;
       internal = true;
     };
+    build.ociEfficiency = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Analyze generated OCI layers and fail builds when wasted payload crosses the configured limits.";
+      };
+      minEfficiency = lib.mkOption {
+        type = lib.types.number;
+        default = 0.95;
+        description = "Minimum layer efficiency score accepted by the build. The score is required payload bytes divided by discovered payload bytes.";
+      };
+      maxWastedBytes = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 20 * 1024 * 1024;
+        description = "Maximum wasted layer payload bytes accepted before the build fails.";
+      };
+      maxWastedPercent = lib.mkOption {
+        type = lib.types.number;
+        default = 0.20;
+        description = "Maximum wasted payload ratio accepted before the build fails.";
+      };
+      reportTopPaths = lib.mkOption {
+        type = lib.types.ints.unsigned;
+        default = 10;
+        description = "Number of repeated or removed paths to print when wasted payload is present.";
+      };
+    };
   };
 
   config.ix = {
@@ -62,6 +89,22 @@
           contents = [ systemRoot ];
           config.Entrypoint = [ "${toplevel}/init" ];
         };
+
+        efficiency = config.ix.build.ociEfficiency;
+        efficiencyArgs =
+          if efficiency.enable then
+            [
+              "--min-efficiency"
+              (toString efficiency.minEfficiency)
+              "--max-wasted-bytes"
+              (toString efficiency.maxWastedBytes)
+              "--max-wasted-percent"
+              (toString efficiency.maxWastedPercent)
+              "--efficiency-top-paths"
+              (toString efficiency.reportTopPaths)
+            ]
+          else
+            [ "--skip-efficiency-check" ];
       in
       pkgs.runCommand "${config.ix.image.name}-oci.tar"
         {
@@ -72,7 +115,7 @@
           ];
         }
         ''
-          oci-image-builder ${stream.passthru.conf} "$out"
+          oci-image-builder ${lib.escapeShellArgs (efficiencyArgs ++ [ "${stream.passthru.conf}" ])} "$out"
         '';
   };
 }

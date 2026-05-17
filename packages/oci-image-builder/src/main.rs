@@ -1,15 +1,46 @@
 use chrono::{DateTime, SecondsFormat, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::{btree_map::Entry, BTreeMap};
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::os::unix::fs::symlink;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tempfile::tempdir;
+
+const DEFAULT_MIN_EFFICIENCY: f64 = 0.95;
+const DEFAULT_MAX_WASTED_BYTES: u64 = 20 * 1024 * 1024;
+const DEFAULT_MAX_WASTED_PERCENT: f64 = 0.20;
+const DEFAULT_EFFICIENCY_TOP_PATHS: usize = 10;
+
+struct Args {
+    conf_path: PathBuf,
+    out_path: PathBuf,
+    efficiency_policy: Option<EfficiencyPolicy>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EfficiencyPolicy {
+    min_efficiency: f64,
+    max_wasted_bytes: u64,
+    max_wasted_percent: f64,
+    top_paths: usize,
+}
+
+impl Default for EfficiencyPolicy {
+    fn default() -> Self {
+        Self {
+            min_efficiency: DEFAULT_MIN_EFFICIENCY,
+            max_wasted_bytes: DEFAULT_MAX_WASTED_BYTES,
+            max_wasted_percent: DEFAULT_MAX_WASTED_PERCENT,
+            top_paths: DEFAULT_EFFICIENCY_TOP_PATHS,
+        }
+    }
+}
 
 #[derive(Deserialize)]
 struct Config {
@@ -26,22 +57,50 @@ struct Config {
     store_dir: String,
 }
 
-#[derive(Serialize)]
 struct Layer {
     checksum: String,
     size: u64,
     paths: Vec<String>,
+    tar_path: PathBuf,
+}
+
+#[derive(Debug, PartialEq)]
+struct LayerEfficiency {
+    entries: usize,
+    paths: usize,
+    repeated_paths: usize,
+    discovered_bytes: u64,
+    required_bytes: u64,
+    wasted_bytes: u64,
+    efficiency: f64,
+    wasted_percent: f64,
+    inefficient_paths: Vec<InefficientPath>,
+}
+
+#[derive(Debug, PartialEq)]
+struct InefficientPath {
+    path: String,
+    occurrences: usize,
+    cumulative_size: u64,
+    minimum_size: u64,
+}
+
+impl InefficientPath {
+    const fn wasted_bytes(&self) -> u64 {
+        self.cumulative_size.saturating_sub(self.minimum_size)
+    }
+}
+
+struct PathStats {
+    occurrences: usize,
+    cumulative_size: u64,
+    minimum_size: u64,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let args: Vec<_> = env::args().collect();
-    if args.len() != 3 {
-        return Err(format!("usage: {} <conf.json> <out.tar>", args[0]).into());
-    }
+    let args = parse_args(env::args())?;
 
-    let conf_path = Path::new(&args[1]);
-    let out_path = Path::new(&args[2]);
-    let conf: Config = serde_json::from_reader(File::open(conf_path)?)?;
+    let conf: Config = serde_json::from_reader(File::open(&args.conf_path)?)?;
 
     if !conf.from_image.is_null() {
         return Err("oci-image-builder: fromImage is not supported".into());
@@ -80,11 +139,114 @@ fn main() -> Result<(), Box<dyn Error>> {
         &blobs_dir,
     )?);
 
+    if let Some(policy) = args.efficiency_policy {
+        let efficiency = analyze_layer_efficiency(&layers)?;
+        report_layer_efficiency(&efficiency, policy)?;
+    }
+
     eprintln!("Adding manifests...");
-    write_metadata(&conf, &created, &layers, &image_dir, &mtime, out_path)?;
+    write_metadata(&conf, &created, &layers, &image_dir, &mtime, &args.out_path)?;
     eprintln!("Done.");
 
     Ok(())
+}
+
+fn parse_args<I>(args: I) -> Result<Args, Box<dyn Error>>
+where
+    I: IntoIterator<Item = String>,
+{
+    let args: Vec<String> = args.into_iter().collect();
+    let program = args
+        .first()
+        .map_or_else(|| "oci-image-builder".to_owned(), String::to_owned);
+    let mut iter = args.into_iter().skip(1);
+    let mut efficiency_policy = EfficiencyPolicy::default();
+    let mut efficiency_enabled = true;
+    let mut positional = Vec::new();
+
+    while let Some(arg) = iter.next() {
+        match arg.as_str() {
+            "--skip-efficiency-check" => {
+                efficiency_enabled = false;
+            }
+            "--min-efficiency" => {
+                let value = next_arg(&mut iter, "--min-efficiency")?;
+                efficiency_policy.min_efficiency = parse_ratio(&value, "--min-efficiency")?;
+            }
+            "--max-wasted-bytes" => {
+                let value = next_arg(&mut iter, "--max-wasted-bytes")?;
+                efficiency_policy.max_wasted_bytes =
+                    parse_byte_limit(&value, "--max-wasted-bytes")?;
+            }
+            "--max-wasted-percent" => {
+                let value = next_arg(&mut iter, "--max-wasted-percent")?;
+                efficiency_policy.max_wasted_percent = parse_ratio(&value, "--max-wasted-percent")?;
+            }
+            "--efficiency-top-paths" => {
+                let value = next_arg(&mut iter, "--efficiency-top-paths")?;
+                efficiency_policy.top_paths = value.parse()?;
+            }
+            _ if arg.starts_with('-') => {
+                return Err(format!("unknown argument: {arg}").into());
+            }
+            _ => {
+                positional.push(PathBuf::from(arg));
+            }
+        }
+    }
+
+    if positional.len() != 2 {
+        return Err(format!(
+            "usage: {program} [--skip-efficiency-check] [--min-efficiency <ratio>] [--max-wasted-bytes <bytes>] [--max-wasted-percent <ratio>] [--efficiency-top-paths <count>] <conf.json> <out.tar>"
+        )
+        .into());
+    }
+
+    Ok(Args {
+        conf_path: positional.remove(0),
+        out_path: positional.remove(0),
+        efficiency_policy: efficiency_enabled.then_some(efficiency_policy),
+    })
+}
+
+fn next_arg<I>(args: &mut I, flag: &str) -> Result<String, Box<dyn Error>>
+where
+    I: Iterator<Item = String>,
+{
+    args.next()
+        .ok_or_else(|| format!("missing value for {flag}").into())
+}
+
+fn parse_ratio(value: &str, flag: &str) -> Result<f64, Box<dyn Error>> {
+    let ratio: f64 = value.parse()?;
+    if !(0.0..=1.0).contains(&ratio) {
+        return Err(format!("{flag} must be between 0 and 1").into());
+    }
+
+    Ok(ratio)
+}
+
+fn parse_byte_limit(value: &str, flag: &str) -> Result<u64, Box<dyn Error>> {
+    let trimmed = value.trim();
+    let uppercase = trimmed.to_ascii_uppercase();
+    let suffixes = [
+        ("GB", 1_000_000_000_u64),
+        ("MB", 1_000_000_u64),
+        ("KB", 1_000_u64),
+        ("B", 1_u64),
+    ];
+
+    for (suffix, multiplier) in suffixes {
+        if uppercase.ends_with(suffix) {
+            let number = trimmed[..trimmed.len() - suffix.len()].trim();
+            let bytes: u64 = number.parse()?;
+            return bytes
+                .checked_mul(multiplier)
+                .ok_or_else(|| format!("{flag} is too large").into());
+        }
+    }
+
+    Ok(trimmed.parse()?)
 }
 
 fn parse_time(value: &str) -> Result<DateTime<Utc>, Box<dyn Error>> {
@@ -121,12 +283,14 @@ fn make_store_layer(
 
     let layer_tmp = layers_dir.join(format!("{number}.layer.tar"));
     let (checksum, size) = write_tar_layer(&layer_tmp, &paths_file, conf, mtime)?;
-    fs::rename(&layer_tmp, blobs_dir.join(&checksum))?;
+    let tar_path = blobs_dir.join(&checksum);
+    fs::rename(&layer_tmp, &tar_path)?;
 
     Ok(Layer {
         checksum,
         size,
         paths: paths.to_vec(),
+        tar_path,
     })
 }
 
@@ -147,13 +311,251 @@ fn make_customisation_layer(
 
     let layer_path = customisation_layer.join("layer.tar");
     let size = fs::metadata(&layer_path)?.len();
-    symlink(&layer_path, blobs_dir.join(&checksum))?;
+    let tar_path = blobs_dir.join(&checksum);
+    symlink(&layer_path, &tar_path)?;
 
     Ok(Layer {
         checksum,
         size,
         paths: vec![customisation_layer.display().to_string()],
+        tar_path,
     })
+}
+
+fn analyze_layer_efficiency(layers: &[Layer]) -> Result<LayerEfficiency, Box<dyn Error>> {
+    let mut entries = 0;
+    let mut paths = BTreeMap::new();
+    let mut live_paths = BTreeMap::new();
+
+    for layer in layers {
+        read_layer_entries(&layer.tar_path, &mut entries, &mut paths, &mut live_paths)?;
+    }
+
+    let mut required_bytes = 0;
+    let mut discovered_bytes = 0;
+    let mut repeated_paths = 0;
+    let mut inefficient_paths = Vec::new();
+
+    for (path, stats) in &paths {
+        required_bytes += stats.minimum_size;
+        discovered_bytes += stats.cumulative_size;
+
+        if stats.occurrences > 1 {
+            repeated_paths += 1;
+        }
+
+        if stats.cumulative_size > stats.minimum_size {
+            inefficient_paths.push(InefficientPath {
+                path: path.clone(),
+                occurrences: stats.occurrences,
+                cumulative_size: stats.cumulative_size,
+                minimum_size: stats.minimum_size,
+            });
+        }
+    }
+
+    inefficient_paths.sort_by(|left, right| {
+        right
+            .wasted_bytes()
+            .cmp(&left.wasted_bytes())
+            .then_with(|| left.path.cmp(&right.path))
+    });
+
+    let wasted_bytes = discovered_bytes.saturating_sub(required_bytes);
+    let efficiency = ratio(required_bytes, discovered_bytes);
+    let wasted_percent = ratio(wasted_bytes, discovered_bytes);
+
+    Ok(LayerEfficiency {
+        entries,
+        paths: paths.len(),
+        repeated_paths,
+        discovered_bytes,
+        required_bytes,
+        wasted_bytes,
+        efficiency,
+        wasted_percent,
+        inefficient_paths,
+    })
+}
+
+fn read_layer_entries(
+    tar_path: &Path,
+    entries: &mut usize,
+    paths: &mut BTreeMap<String, PathStats>,
+    live_paths: &mut BTreeMap<String, u64>,
+) -> Result<(), Box<dyn Error>> {
+    let file = File::open(tar_path)?;
+    let mut archive = tar::Archive::new(file);
+
+    for entry in archive.entries()? {
+        let entry = entry?;
+        *entries += 1;
+
+        let path = String::from_utf8_lossy(entry.path_bytes().as_ref()).into_owned();
+        if path.is_empty() {
+            continue;
+        }
+
+        if let Some(target) = whiteout_target(&path) {
+            let removed_size = removed_path_size(live_paths, &target);
+            record_path(paths, &target, removed_size);
+            remove_live_path(live_paths, &target);
+            continue;
+        }
+
+        let entry_type = entry.header().entry_type();
+        let size = if entry_type.is_file() {
+            entry.header().size()?
+        } else {
+            0
+        };
+        record_path(paths, &path, size);
+
+        if entry_type.is_dir() {
+            live_paths.entry(path).or_insert(0);
+        } else {
+            live_paths.insert(path, size);
+        }
+    }
+
+    Ok(())
+}
+
+fn whiteout_target(path: &str) -> Option<String> {
+    let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+    let target_name = name.strip_prefix(".wh.")?;
+    if target_name == ".wh..opq" {
+        return None;
+    }
+
+    if parent.is_empty() {
+        Some(target_name.to_owned())
+    } else {
+        Some(format!("{parent}/{target_name}"))
+    }
+}
+
+fn removed_path_size(live_paths: &BTreeMap<String, u64>, target: &str) -> u64 {
+    let prefix = format!("{target}/");
+    live_paths
+        .iter()
+        .filter_map(|(path, size)| (path == target || path.starts_with(&prefix)).then_some(*size))
+        .sum()
+}
+
+fn remove_live_path(live_paths: &mut BTreeMap<String, u64>, target: &str) {
+    let prefix = format!("{target}/");
+    live_paths.retain(|path, _| path != target && !path.starts_with(&prefix));
+}
+
+fn record_path(paths: &mut BTreeMap<String, PathStats>, path: &str, size: u64) {
+    match paths.entry(path.to_owned()) {
+        Entry::Vacant(entry) => {
+            entry.insert(PathStats {
+                occurrences: 1,
+                cumulative_size: size,
+                minimum_size: size,
+            });
+        }
+        Entry::Occupied(mut entry) => {
+            let stats = entry.get_mut();
+            stats.occurrences += 1;
+            stats.cumulative_size += size;
+            stats.minimum_size = stats.minimum_size.min(size);
+        }
+    }
+}
+
+fn report_layer_efficiency(
+    efficiency: &LayerEfficiency,
+    policy: EfficiencyPolicy,
+) -> Result<(), Box<dyn Error>> {
+    eprintln!(
+        "OCI layer efficiency: score={} wasted={} ({}) required={} discovered={} entries={} paths={} repeated-paths={}",
+        format_percent(efficiency.efficiency),
+        format_bytes(efficiency.wasted_bytes),
+        format_percent(efficiency.wasted_percent),
+        format_bytes(efficiency.required_bytes),
+        format_bytes(efficiency.discovered_bytes),
+        efficiency.entries,
+        efficiency.paths,
+        efficiency.repeated_paths,
+    );
+
+    for path in efficiency.inefficient_paths.iter().take(policy.top_paths) {
+        eprintln!(
+            "  wasted={} count={} path={}",
+            format_bytes(path.wasted_bytes()),
+            path.occurrences,
+            path.path,
+        );
+    }
+
+    let mut failures = Vec::new();
+    if efficiency.efficiency < policy.min_efficiency {
+        failures.push(format!(
+            "efficiency {} is below {}",
+            format_percent(efficiency.efficiency),
+            format_percent(policy.min_efficiency),
+        ));
+    }
+
+    if efficiency.wasted_bytes > policy.max_wasted_bytes {
+        failures.push(format!(
+            "wasted bytes {} exceeds {}",
+            format_bytes(efficiency.wasted_bytes),
+            format_bytes(policy.max_wasted_bytes),
+        ));
+    }
+
+    if efficiency.wasted_bytes > 0 && efficiency.wasted_percent >= policy.max_wasted_percent {
+        failures.push(format!(
+            "wasted percent {} meets or exceeds {}",
+            format_percent(efficiency.wasted_percent),
+            format_percent(policy.max_wasted_percent),
+        ));
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "oci-image-builder: OCI layer efficiency check failed: {}",
+            failures.join("; ")
+        )
+        .into())
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn ratio(numerator: u64, denominator: u64) -> f64 {
+    if denominator == 0 {
+        1.0
+    } else {
+        numerator as f64 / denominator as f64
+    }
+}
+
+fn format_percent(value: f64) -> String {
+    format!("{:.2}%", value * 100.0)
+}
+
+fn format_bytes(bytes: u64) -> String {
+    let units = [
+        ("GiB", 1024_u64.pow(3)),
+        ("MiB", 1024_u64.pow(2)),
+        ("KiB", 1024_u64),
+    ];
+
+    for (unit, divisor) in units {
+        if bytes >= divisor {
+            let whole = bytes / divisor;
+            let decimal = bytes % divisor * 10 / divisor;
+            return format!("{whole}.{decimal} {unit}");
+        }
+    }
+
+    format!("{bytes} B")
 }
 
 fn write_metadata(
@@ -330,4 +732,119 @@ fn run(command: &mut Command) -> Result<(), Box<dyn Error>> {
         return Err(format!("command failed with {status}: {command:?}").into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tar::{Builder, Header};
+
+    #[test]
+    fn layer_efficiency_counts_repeated_paths() -> Result<(), Box<dyn Error>> {
+        let work = tempdir()?;
+        let first = work.path().join("first.tar");
+        let second = work.path().join("second.tar");
+        write_test_tar(&first, &[("app/server.jar", b"first-version".as_slice())])?;
+        write_test_tar(
+            &second,
+            &[
+                ("app/server.jar", b"v2".as_slice()),
+                ("app/other.txt", b"kept".as_slice()),
+            ],
+        )?;
+
+        let efficiency =
+            analyze_layer_efficiency(&[test_layer(first, 1)?, test_layer(second, 2)?])?;
+
+        assert_eq!(efficiency.entries, 3);
+        assert_eq!(efficiency.repeated_paths, 1);
+        assert_eq!(efficiency.discovered_bytes, 19);
+        assert_eq!(efficiency.required_bytes, 6);
+        assert_eq!(efficiency.wasted_bytes, 13);
+        assert_close(efficiency.efficiency, 6.0 / 19.0);
+        assert_eq!(efficiency.inefficient_paths[0].path, "app/server.jar");
+        assert_eq!(efficiency.inefficient_paths[0].wasted_bytes(), 13);
+
+        Ok(())
+    }
+
+    #[test]
+    fn layer_efficiency_counts_removed_paths() -> Result<(), Box<dyn Error>> {
+        let work = tempdir()?;
+        let first = work.path().join("first.tar");
+        let second = work.path().join("second.tar");
+        write_test_tar(&first, &[("srv/world.dat", b"world-state".as_slice())])?;
+        write_test_tar(&second, &[("srv/.wh.world.dat", b"".as_slice())])?;
+
+        let efficiency =
+            analyze_layer_efficiency(&[test_layer(first, 1)?, test_layer(second, 2)?])?;
+
+        assert_eq!(efficiency.discovered_bytes, 22);
+        assert_eq!(efficiency.required_bytes, 11);
+        assert_eq!(efficiency.wasted_bytes, 11);
+        assert_eq!(efficiency.inefficient_paths[0].path, "srv/world.dat");
+
+        Ok(())
+    }
+
+    #[test]
+    fn efficiency_policy_rejects_excess_waste() {
+        let efficiency = LayerEfficiency {
+            entries: 2,
+            paths: 1,
+            repeated_paths: 1,
+            discovered_bytes: 200,
+            required_bytes: 100,
+            wasted_bytes: 100,
+            efficiency: 0.5,
+            wasted_percent: 0.5,
+            inefficient_paths: vec![InefficientPath {
+                path: "/nix/store/example".to_owned(),
+                occurrences: 2,
+                cumulative_size: 200,
+                minimum_size: 100,
+            }],
+        };
+
+        let result = report_layer_efficiency(
+            &efficiency,
+            EfficiencyPolicy {
+                min_efficiency: 0.95,
+                max_wasted_bytes: 20,
+                max_wasted_percent: 0.20,
+                top_paths: 1,
+            },
+        );
+
+        assert!(result.is_err());
+    }
+
+    fn test_layer(tar_path: PathBuf, number: usize) -> Result<Layer, Box<dyn Error>> {
+        Ok(Layer {
+            checksum: format!("{number:064x}"),
+            size: fs::metadata(&tar_path)?.len(),
+            paths: vec![tar_path.display().to_string()],
+            tar_path,
+        })
+    }
+
+    fn write_test_tar(path: &Path, files: &[(&str, &[u8])]) -> Result<(), Box<dyn Error>> {
+        let file = File::create(path)?;
+        let mut builder = Builder::new(file);
+
+        for (name, contents) in files {
+            let mut header = Header::new_gnu();
+            header.set_path(name)?;
+            header.set_size(contents.len().try_into()?);
+            header.set_cksum();
+            builder.append(&header, *contents)?;
+        }
+
+        builder.finish()?;
+        Ok(())
+    }
+
+    fn assert_close(left: f64, right: f64) {
+        assert!((left - right).abs() < f64::EPSILON);
+    }
 }
