@@ -394,6 +394,10 @@ At the same time, do not spray files around without a boundary. Group support co
 
 For self-contained support projects, filter at the project boundary instead of listing every source file. Prefer `lib.fileset.intersection (lib.fileset.gitTracked ./.) ./.` in the project-local `default.nix` so new tracked files under `src/`, `resources/`, Gradle metadata, or similar project-owned paths are included automatically while untracked build caches stay out of the store. Use explicit file lists only when the derivation intentionally consumes a small cross-cutting subset.
 
+## Audio data
+
+Prefer `WAV`, stereo PCM, `44 kHz`, `float32` for repo-owned audio data by default. Choose another lossless format or sample rate only when a downstream tool, platform, or source asset requires it, and record that reason next to the data or derivation.
+
 ## Artifact inputs
 
 Fetched artifacts (mod jars, server jars, plugins, source trees) belong at the point of use, not as flake inputs. Use a `pkgs.*` fetcher with an inline SRI hash kept beside the source in the per-image catalog (`images/games/minecraft/mods/*.json` or the image's own data file). The `flake.nix` inputs list is reserved for things that genuinely participate in the flake graph: `nixpkgs` and tooling flakes that expose `lib`, `overlays`, or `packages`. A static URL is not a flake input. It is data, and data lives next to the code that reads it.
