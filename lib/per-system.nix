@@ -57,14 +57,12 @@ let
   updateMods = ix.writePythonApplication pkgs {
     name = "update-mods";
     src = paths.tools.updateMods;
-    typeCheckingMode = "standard";
   };
 
   ixFleet = ix.writePythonApplication pkgs {
     name = "ix-fleet";
     src = paths.tools.ixFleet;
     python = pythonWithPydantic;
-    typeCheckingMode = "standard";
   };
 
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };

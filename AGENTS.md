@@ -66,6 +66,22 @@ Use blank lines as paragraph breaks inside function bodies. Each paragraph shoul
 
 For snippets in docs, comments, presets, or task descriptions that readers may see without IDE inlay hints, include explicit types on important bindings and use real repo APIs rather than invented simplified ones. In source files, use inference where it reads cleanly.
 
+## Sane defaults
+
+Helpers, modules, packages, templates, examples, and generated commands should be in a good state by default. Defaults should be checked, typed, reproducible, reasonably locked down, and fit for the common production-shaped path. Callers should opt into weaker behavior with a named reason.
+
+Examples should show intent and uncommon choices. Helpers and modules should carry boring safety such as typechecking, validation, durable state, hardening, and conservative networking. If a consumer has to spell a boring default to look correct, fix the helper or module.
+
+When work exposes recurring pain and the fix belongs in `AGENTS.md`, capture the broad rule first. Write the invariant future tasks can reuse, then name the current case only when it adds clarity. A policy note should survive the next helper, language, or module with the same failure mode.
+
+## Python style
+
+Default Python projects to uv. A repo-owned Python app has `pyproject.toml`, a committed `uv.lock`, normal `src/<package>/` files, and Nix packaging through [`ix.buildUvApplication`](lib/build-uv-application.nix). Keep dependency resolver diffs reviewable: change source and lockfiles together only when the source change needs the dependency move.
+
+`ix.buildUvApplication` and `ix.writePythonApplication` run basedpyright in `standard` mode by default. Pass `typeCheckingMode` only when the package needs a deliberate stricter or narrower mode.
+
+Use `ix.writePythonApplication` for tiny single-file commands with no dependency graph to lock. Once a script needs PyPI packages, console entry points, or multiple source files, give it the uv project shape.
+
 ## Debugging VMs
 
 Use the real ix CLI to inspect running VMs before inferring from source. Prefer machine-readable host commands when available, for example `ix ls --output json`.

@@ -27,6 +27,7 @@ You're on aarch64, FreeBSD, or any CPU that isn't znver5. The "from source" rule
 - [`packages/`](packages/) for tools (including [`llm-clippy`](packages/llm-clippy/))
 - [`modules/`](modules/) for services to plug in
 - [`images/`](images/) for runnable systems
+- [`examples/`](examples/) for downstream-style fleets such as a daily Python scraper
 - [`lib/`](lib/) for the shared helpers the rest stands on
 
 See [AGENTS.md](AGENTS.md) and [CONTRIBUTING.md](CONTRIBUTING.md) when you're ready to dig in.

@@ -16,9 +16,9 @@ let
 
     Wraps `src` in a launcher script that prepends `runtimeInputs` to PATH
     and runs the file under `python`. When `check` is true (default), the
-    derivation also runs `basedpyright` over `src` with `typeCheckingMode`
-    enforcement during the build, so type regressions fail the build instead
-    of surfacing at runtime.
+    derivation also runs `basedpyright` over `src` in `standard` mode during
+    the build, so type regressions fail the build instead of surfacing at
+    runtime.
 
     Arguments:
     - `name`: derivation name and `/bin/<name>` executable.
@@ -39,7 +39,7 @@ let
       runtimeInputs ? [ ],
       python ? pkgs.python314,
       check ? true,
-      typeCheckingMode ? "all",
+      typeCheckingMode ? "standard",
       pythonPlatform ? "Linux",
       extraPaths ? [ "${python}/${python.sitePackages}" ],
       meta ? { },

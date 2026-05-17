@@ -745,6 +745,45 @@ let
       };
     };
 
+  dailyScraperExample =
+    let
+      fleet = import ../examples/python-daily-scraper {
+        index = {
+          lib = ix;
+        };
+      };
+      config = fleet.nodes.scraper;
+    in
+    {
+      inherit fleet config;
+      cfg = config.services.daily-scraper;
+      plan = fleet.planValue.nodes.scraper;
+      service = config.systemd.services.daily-scraper;
+      timer = config.systemd.timers.daily-scraper;
+    };
+
+  dailyScraperS3 =
+    let
+      config = evalConfig [
+        ../examples/python-daily-scraper/service.nix
+        {
+          services.daily-scraper = {
+            enable = true;
+            s3 = {
+              uri = "s3://andrew-scraper-output/github";
+              deleteRemoved = true;
+              awsEnvironmentFile = "/run/secrets/daily-scraper/aws.env";
+            };
+          };
+        }
+      ];
+    in
+    {
+      inherit config;
+      cfg = config.services.daily-scraper;
+      service = config.systemd.services.daily-scraper;
+    };
+
   extendedAttributes =
     let
       config = evalConfig [
@@ -897,6 +936,66 @@ let
           && claims.simple-voice-chat.protocol == "udp"
           && claims.simple-voice-chat.port == 24454;
         message = "factions-server example should register every service listener in ix.networking.portClaims";
+      }
+    ];
+
+    python-daily-scraper = [
+      {
+        assertion = dailyScraperExample.config.ix.image.tag == "daily-scraper";
+        message = "python-daily-scraper example should set a stable replacement image tag";
+      }
+      {
+        assertion =
+          dailyScraperExample.cfg.enable
+          && dailyScraperExample.cfg.package.meta.mainProgram == "daily-scraper"
+          && dailyScraperExample.cfg.repository == "indexable-inc/index";
+        message = "python-daily-scraper example should package and enable the scraper";
+      }
+      {
+        assertion =
+          dailyScraperExample.service.serviceConfig.Type == "oneshot"
+          && dailyScraperExample.service.serviceConfig.DynamicUser
+          && dailyScraperExample.service.serviceConfig.StateDirectory == "daily-scraper"
+          && dailyScraperExample.service.serviceConfig.WorkingDirectory == "/var/lib/daily-scraper";
+        message = "python-daily-scraper example should render a stateful oneshot systemd service";
+      }
+      {
+        assertion =
+          builtins.elem "network-online.target" dailyScraperExample.service.after
+          && builtins.elem "network-online.target" dailyScraperExample.service.wants;
+        message = "python-daily-scraper service should wait for network readiness";
+      }
+      {
+        assertion =
+          lib.hasInfix "/var/lib/daily-scraper/parquet" dailyScraperExample.service.serviceConfig.ExecStart
+          && lib.hasInfix "--repo indexable-inc/index" dailyScraperExample.service.serviceConfig.ExecStart;
+        message = "python-daily-scraper service should pass the durable output directory and repository";
+      }
+      {
+        assertion =
+          dailyScraperExample.timer.timerConfig.OnCalendar == "*-*-* 03:17:00 UTC"
+          && dailyScraperExample.timer.timerConfig.Persistent
+          && dailyScraperExample.timer.timerConfig.RandomizedDelaySec == "20m"
+          && dailyScraperExample.timer.timerConfig.Unit == "daily-scraper.service";
+        message = "python-daily-scraper example should run from a persistent daily timer";
+      }
+      {
+        assertion =
+          !dailyScraperExample.plan.ipv4
+          && dailyScraperExample.plan.snapshot
+          && dailyScraperExample.plan.replacementImage.imageTag == "daily-scraper";
+        message = "python-daily-scraper fleet plan should keep the worker private with snapshots on";
+      }
+      {
+        assertion =
+          dailyScraperS3.cfg.s3.uri == "s3://andrew-scraper-output/github"
+          && lib.hasInfix "s3 sync --only-show-errors /var/lib/daily-scraper/parquet s3://andrew-scraper-output/github --delete" dailyScraperS3.service.serviceConfig.ExecStartPost
+          &&
+            dailyScraperS3.service.serviceConfig.LoadCredential == [
+              "aws-env:/run/secrets/daily-scraper/aws.env"
+            ]
+          && dailyScraperS3.service.serviceConfig.EnvironmentFile == "%d/aws-env";
+        message = "python-daily-scraper service should support S3 sync through systemd credentials";
       }
     ];
 

@@ -9,8 +9,8 @@
   `uv lock` and do not maintain a separate Nix dependency hash. Locked
   distributions are fetched into a wheelhouse, installed offline into a virtual
   environment, and the local project is built as a wheel before installation.
-  Type checking runs by default after install against the installed virtual
-  environment, matching `writePythonApplication`.
+  Type checking runs by default in basedpyright `standard` mode after install
+  against the installed virtual environment, matching `writePythonApplication`.
 
   The default path supports registry packages with `wheels` or `sdist` entries
   in `uv.lock`. Projects that use a non-uv build backend may need to pass a
@@ -28,6 +28,7 @@
   - `check`, `typeCheckingMode`, `pythonPlatform`, `typeCheckPaths`:
     basedpyright knobs.
   - `extraNativeBuildInputs`: extra packages on PATH for the build.
+  - `runtimeLibraryInputs`: shared libraries made visible to binary wheels.
   - `fetcherOpts`: per-package fetcher overrides for locked distributions.
   - `meta`: standard derivation meta.
 */
@@ -48,12 +49,13 @@ pkgs:
   pipInstallFlags ? [ ],
   buildFlags ? [ ],
   check ? true,
-  typeCheckingMode ? "all",
+  typeCheckingMode ? "standard",
   pythonPlatform ? "Linux",
   typeCheckPaths ? [ "." ],
   extraPaths ? [ ],
   typeCheckArgs ? [ ],
   extraNativeBuildInputs ? [ ],
+  runtimeLibraryInputs ? [ ],
   fetcherOpts ? { },
   meta ? { },
 }:
@@ -103,6 +105,7 @@ let
     "requirements.txt"
   ]
   ++ pipInstallFlags;
+  runtimeLibraryPath = lib.makeLibraryPath runtimeLibraryInputs;
   buildArgs = [
     "--wheel"
     "--offline"
@@ -129,6 +132,7 @@ pkgs.stdenvNoCC.mkDerivation (_: {
   strictDeps = true;
 
   nativeBuildInputs = [
+    pkgs.makeWrapper
     pkgs.uv
     python
   ]
@@ -159,7 +163,11 @@ pkgs.stdenvNoCC.mkDerivation (_: {
       dist/*.whl
 
     test -x "$out/venv/bin/${mainProgram}"
-    ln -s "$out/venv/bin/${mainProgram}" "$out/bin/${mainProgram}"
+    makeWrapper "$out/venv/bin/${mainProgram}" "$out/bin/${mainProgram}" ${
+      lib.optionalString (
+        runtimeLibraryInputs != [ ]
+      ) "--prefix LD_LIBRARY_PATH : ${lib.escapeShellArg runtimeLibraryPath}"
+    }
 
     runHook postInstall
   '';

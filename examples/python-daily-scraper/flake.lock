@@ -1,0 +1,119 @@
+{
+  "nodes": {
+    "index": {
+      "inputs": {
+        "ixCliAarch64Darwin": "ixCliAarch64Darwin",
+        "ixCliX86_64Darwin": "ixCliX86_64Darwin",
+        "ixCliX86_64Linux": "ixCliX86_64Linux",
+        "nixpkgs": "nixpkgs",
+        "rust-overlay": "rust-overlay"
+      },
+      "locked": {
+        "lastModified": 1779055192,
+        "narHash": "sha256-cp8BnZLGp4HsH2FtAmX8x5+z9cXcUIiauGGuqlvjKkI=",
+        "owner": "indexable-inc",
+        "repo": "index",
+        "rev": "1f069e78e1bfa0dcb737ac6079e3e3b6328b03df",
+        "type": "github"
+      },
+      "original": {
+        "owner": "indexable-inc",
+        "repo": "index",
+        "type": "github"
+      }
+    },
+    "ixCliAarch64Darwin": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-SgLGCCs7/bHjdD9IcwVFnHEM8jXj+k668h+9ZgPdxoo=",
+        "type": "file",
+        "url": "https://ix.dev/cli/darwin-arm64/ix"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://ix.dev/cli/darwin-arm64/ix"
+      }
+    },
+    "ixCliX86_64Darwin": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-8CIpfu2yq+P+aCzCy2jdcPfiEmreXbKXaz0RiggjHOo=",
+        "type": "file",
+        "url": "https://ix.dev/cli/darwin-x86_64/ix"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://ix.dev/cli/darwin-x86_64/ix"
+      }
+    },
+    "ixCliX86_64Linux": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-pLw+BhmBkwmKiE5dx6tpBDvC7YkW3RhGd2U5xV267dA=",
+        "type": "file",
+        "url": "https://ix.dev/cli/linux-x86_64/ix"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://ix.dev/cli/linux-x86_64/ix"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1777578337,
+        "narHash": "sha256-Ad49moKWeXtKBJNy2ebiTQUEgdLyvGmTeykAQ9xM+Z4=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "15f4ee454b1dce334612fa6843b3e05cf546efab",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1744536153,
+        "narHash": "sha256-awS2zRgF4uTwrOKwwiJcByDzDOdo3Q1rPZbiHQg/N38=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "18dd725c29603f582cf1900e0d25f9f1063dbf11",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "index": "index"
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1778987862,
+        "narHash": "sha256-V3qGt9P1eJP/r/1ONablphfGiH0RP4agQhrRANpDYx8=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "6f44d8874ac29806c8d5cae42bf8e19ebb5ce0d3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
