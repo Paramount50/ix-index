@@ -36,6 +36,14 @@ Name the failure mode you are claiming to avoid. "Will not crash your VM on a ba
 
 Link concrete nouns. When prose names a repo-owned tool, package, command, file, directory, or upstream project, make it a link wherever a curious reader might want to click through. The first mention of `llm-clippy` in a README should link to `packages/llm-clippy/`; `nixpkgs` links to the project; a directory pointer like `images/` links to `images/`. Anchor text is the literal name in code voice (backticks live inside the link, as `[`llm-clippy`](packages/llm-clippy/)`). Link only the first mention in a given section; do not relink the same noun every paragraph. Skip the link only when the target genuinely does not exist or when the reader is already standing on it (no self-links in the same file).
 
+## Inline comments
+
+Inline comments are scarce by default. Reserve them for cases where the code does not explain itself: a workaround whose reason lives outside the file, a value that looks wrong but is load-bearing, a choice that survives an obvious-looking refactor for a real reason, a number whose origin would otherwise be lost. If you'd answer "why is this here?" with anything other than "read the code", leave a one-line `#` (or `//`, `--`) comment.
+
+Do not narrate what the code does. `# install the package` above `pkgs.install ...` is noise the next reader has to skip. The comment should add information the syntax can't recover: an upstream bug link, the failure mode that motivated the workaround, a benchmark number, a date.
+
+Concretely: if you find yourself about to delete something because it looks redundant, and then have to put it back because a build, eval, or test breaks, that is the canonical case for an inline comment. Add it the moment you discover the constraint, name the symptom you observed ("ERROR: Missing Cargo.lock from src" beats "needed for build"), and keep it next to the line whose existence it justifies.
+
 ## Rust style
 
 Prefer local type annotations over turbofish when they make the data shape clearer. For example, use `let args: Vec<_> = env::args().collect();` instead of `let args = env::args().collect::<Vec<_>>();`. Keep turbofish for cases where an expression-local type is genuinely clearer, such as method chains where naming an intermediate value would add noise.

@@ -33,6 +33,9 @@ rustPlatform.buildRustPackage {
 
   inherit src;
   cargoLock.lockFile = ./Cargo.lock;
+  # Upstream indexable-inc/clippy ships no Cargo.lock. cargoLock.lockFile only
+  # vendors and validates ("ERROR: Missing Cargo.lock from src" if it isn't
+  # present), so cargoPatches is how we plant the file into $sourceRoot.
   cargoPatches = [ ./cargo-lock.patch ];
 
   nativeBuildInputs = [ makeWrapper ];
