@@ -492,6 +492,7 @@ let
 
   cargoUnitWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
+    workspaceSourceRoot = ./fixtures/cargo-unit-hello;
     cargoArgs = [
       "--bin"
       "cargo-unit-hello"
@@ -502,6 +503,7 @@ let
 
   cargoUnitTestWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
+    workspaceSourceRoot = ./fixtures/cargo-unit-hello;
     cargoArgs = [
       "--workspace"
       "--tests"
@@ -510,6 +512,7 @@ let
 
   cargoUnitPolicyDisabledWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
+    workspaceSourceRoot = ./fixtures/cargo-unit-hello;
     cargoArgs = [
       "--bin"
       "cargo-unit-hello"
@@ -519,6 +522,96 @@ let
       cargoAudit.enable = false;
       cargoMachete.enable = false;
       clippy.enable = false;
+    };
+  };
+
+  cargoUnitScopePolicy = {
+    denyUnusedCrateDependencies = false;
+    cargoAudit.enable = false;
+    cargoMachete.enable = false;
+    clippy.enable = false;
+  };
+
+  cargoUnitScopeFixture = fs.toSource {
+    root = ./fixtures/cargo-unit-workspace-scope;
+    fileset = fs.unions [
+      ./fixtures/cargo-unit-workspace-scope/Cargo.lock
+      ./fixtures/cargo-unit-workspace-scope/Cargo.toml
+      ./fixtures/cargo-unit-workspace-scope/crates
+    ];
+  };
+
+  cargoUnitScopeAlphaChangedFixture = fs.toSource {
+    root = ./fixtures/cargo-unit-workspace-scope-alpha-changed;
+    fileset = fs.unions [
+      ./fixtures/cargo-unit-workspace-scope-alpha-changed/Cargo.lock
+      ./fixtures/cargo-unit-workspace-scope-alpha-changed/Cargo.toml
+      ./fixtures/cargo-unit-workspace-scope-alpha-changed/crates
+    ];
+  };
+
+  cargoUnitScopeLockChangedFixture = pkgs.runCommand "cargo-unit-workspace-scope-lock-changed" { } ''
+    cp -R ${cargoUnitScopeFixture}/. "$out"
+    chmod -R u+w "$out"
+    cp ${./fixtures/cargo-unit-workspace-scope/Cargo.itoa-1.0.14.lock} "$out/Cargo.lock"
+  '';
+
+  cargoUnitScopeWorkspace =
+    {
+      name,
+      src,
+      workspaceSourceRoot ? ./fixtures/cargo-unit-workspace-scope,
+    }:
+    ix.cargoUnit.buildWorkspace {
+      pname = "cargo-unit-workspace-scope-${name}";
+      inherit src;
+      inherit workspaceSourceRoot;
+      cargoArgs = [ "--workspace" ];
+      policy = cargoUnitScopePolicy;
+    };
+
+  cargoUnitScopeWorkspaces = {
+    base = cargoUnitScopeWorkspace {
+      name = "base";
+      src = cargoUnitScopeFixture;
+    };
+    alphaChanged = cargoUnitScopeWorkspace {
+      name = "alpha-changed";
+      src = cargoUnitScopeAlphaChangedFixture;
+      workspaceSourceRoot = ./fixtures/cargo-unit-workspace-scope-alpha-changed;
+    };
+    lockChanged = cargoUnitScopeWorkspace {
+      name = "lock-changed";
+      src = cargoUnitScopeLockChangedFixture;
+    };
+  };
+
+  cargoUnitScopeUnit =
+    workspace: prefix:
+    let
+      matches = lib.filterAttrs (name: _: lib.hasPrefix prefix name) workspace.units;
+      names = builtins.attrNames matches;
+    in
+    assert lib.assertMsg (builtins.length names == 1)
+      "expected exactly one cargo-unit unit with prefix ${prefix}, found ${lib.concatStringsSep ", " names}";
+    matches.${builtins.head names};
+
+  cargoUnitScope = {
+    base = {
+      alpha = cargoUnitScopeUnit cargoUnitScopeWorkspaces.base "scope_alpha-0.1.0-";
+      bravo = cargoUnitScopeUnit cargoUnitScopeWorkspaces.base "scope_bravo-0.1.0-";
+      itoa = cargoUnitScopeUnit cargoUnitScopeWorkspaces.base "itoa-1.0.18-";
+      ryu = cargoUnitScopeUnit cargoUnitScopeWorkspaces.base "ryu-1.0.23-";
+    };
+    alphaChanged = {
+      alpha = cargoUnitScopeUnit cargoUnitScopeWorkspaces.alphaChanged "scope_alpha-0.1.0-";
+      bravo = cargoUnitScopeUnit cargoUnitScopeWorkspaces.alphaChanged "scope_bravo-0.1.0-";
+      itoa = cargoUnitScopeUnit cargoUnitScopeWorkspaces.alphaChanged "itoa-1.0.18-";
+      ryu = cargoUnitScopeUnit cargoUnitScopeWorkspaces.alphaChanged "ryu-1.0.23-";
+    };
+    lockChanged = {
+      itoa = cargoUnitScopeUnit cargoUnitScopeWorkspaces.lockChanged "itoa-1.0.14-";
+      ryu = cargoUnitScopeUnit cargoUnitScopeWorkspaces.lockChanged "ryu-1.0.23-";
     };
   };
 
@@ -568,6 +661,7 @@ let
         pname = "cargo-unit-real-workspace-${name}";
         inherit src;
         cargoLock = lockFile;
+        allowAggregateWorkspaceSource = true;
         policy = cargoUnitRealWorkspacePolicy;
       };
       buildWorkspace = ix.cargoUnit.buildWorkspace (commonArgs // { cargoArgs = buildArgs; });
@@ -1578,6 +1672,30 @@ let
       {
         assertion = cargoUnitPolicyDisabledWorkspace.policyChecks == { };
         message = "cargo-unit policy checks should be disableable for generated workspaces";
+      }
+      {
+        assertion = cargoUnitScope.base.alpha.drvPath != cargoUnitScope.alphaChanged.alpha.drvPath;
+        message = "cargo-unit should rebuild the changed workspace crate";
+      }
+      {
+        assertion = cargoUnitScope.base.bravo.drvPath == cargoUnitScope.alphaChanged.bravo.drvPath;
+        message = "cargo-unit should keep unrelated workspace crate derivations stable when one crate source changes";
+      }
+      {
+        assertion = cargoUnitScope.base.itoa.drvPath == cargoUnitScope.alphaChanged.itoa.drvPath;
+        message = "cargo-unit should keep locked transitive dependency derivations stable when workspace source changes";
+      }
+      {
+        assertion = cargoUnitScope.base.ryu.drvPath == cargoUnitScope.alphaChanged.ryu.drvPath;
+        message = "cargo-unit should keep unrelated locked dependency derivations stable when workspace source changes";
+      }
+      {
+        assertion = cargoUnitScope.base.itoa.drvPath != cargoUnitScope.lockChanged.itoa.drvPath;
+        message = "cargo-unit should rebuild the locked dependency whose Cargo.lock entry changed";
+      }
+      {
+        assertion = cargoUnitScope.base.ryu.drvPath == cargoUnitScope.lockChanged.ryu.drvPath;
+        message = "cargo-unit should keep unrelated locked dependency derivations stable when another transitive dependency changes";
       }
       {
         assertion = repoPackages.minecraft-nbt.passthru.policyChecks ? cargoMachete;

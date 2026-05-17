@@ -178,6 +178,162 @@ let
         inherit outputHashes;
       };
 
+  registryDownloadUrls = {
+    "registry+https://github.com/rust-lang/crates.io-index" =
+      pkg: "https://crates.io/api/v1/crates/${pkg.name}/${pkg.version}/download";
+    "sparse+https://index.crates.io/" =
+      pkg: "https://static.crates.io/crates/${pkg.name}/${pkg.name}-${pkg.version}.crate";
+  };
+
+  parseGitSource =
+    source:
+    let
+      parts = builtins.match ''git\+([^?]+)(\?(rev|tag|branch)=([^#]*))?#(.*)'' source;
+    in
+    if parts == null then
+      null
+    else
+      {
+        url = builtins.elemAt parts 0;
+        sha = builtins.elemAt parts 4;
+      };
+
+  replaceWorkspaceValues = pkgs.writers.writePython3 "replace-workspace-values" {
+    libraries = with pkgs.python3Packages; [
+      tomli
+      tomli-w
+    ];
+    flakeIgnore = [
+      "E501"
+      "W503"
+    ];
+  } (builtins.readFile (pkgs.path + "/pkgs/build-support/rust/replace-workspace-values.py"));
+
+  resolveVendorSources =
+    {
+      cargoLock,
+      outputHashes,
+      vendorSources ? null,
+    }:
+    if vendorSources != null then
+      vendorSources
+    else
+      let
+        lock = builtins.fromTOML (builtins.readFile (cargoLockFile cargoLock));
+        dependencyPackages = builtins.filter (pkg: pkg ? source) (lock.package or [ ]);
+        gitPackages = builtins.filter (pkg: lib.hasPrefix "git+" pkg.source) dependencyPackages;
+        gitShasByNameVersion = builtins.listToAttrs (
+          map (
+            pkg:
+            let
+              git = parseGitSource pkg.source;
+            in
+            {
+              name = "${pkg.name}-${pkg.version}";
+              value = git.sha;
+            }
+          ) gitPackages
+        );
+        gitOutputHashes = lib.mapAttrs' (
+          nameVersion: hash:
+          let
+            unusedHash = throw "A hash was specified for ${nameVersion}, but there is no corresponding git dependency.";
+            rev = gitShasByNameVersion.${nameVersion} or unusedHash;
+          in
+          {
+            name = rev;
+            value = hash;
+          }
+        ) outputHashes;
+        registryPackageSource =
+          pkg: source: checksum:
+          let
+            crateTarball = pkgs.fetchurl {
+              name = "crate-${pkg.name}-${pkg.version}.tar.gz";
+              url = (builtins.getAttr source registryDownloadUrls) pkg;
+              sha256 = checksum;
+            };
+          in
+          pkgs.runCommand "${pkg.name}-${pkg.version}" { } ''
+            mkdir "$out"
+            tar xf ${crateTarball} -C "$out" --strip-components=1
+            printf '{"files":{},"package":"${crateTarball.outputHash}"}' > "$out/.cargo-checksum.json"
+          '';
+        gitPackageSource =
+          pkg:
+          let
+            git = parseGitSource pkg.source;
+            missingHash = throw ''
+              No hash was found while vendoring the git dependency ${pkg.name}-${pkg.version}.
+              Add outputHashes."${pkg.name}-${pkg.version}".
+            '';
+            tree = pkgs.fetchgit {
+              inherit (git) url;
+              rev = git.sha;
+              sha256 = gitOutputHashes.${git.sha} or missingHash;
+            };
+          in
+          pkgs.runCommand "${pkg.name}-${pkg.version}"
+            {
+              nativeBuildInputs = [
+                pkgs.cargo
+                pkgs.jq
+              ];
+            }
+            ''
+              tree=${tree}
+              crateCargoTOML=""
+
+              if [ -f "$tree/Cargo.toml" ]; then
+                crateCargoTOML=$(cargo metadata --format-version 1 --no-deps --manifest-path "$tree/Cargo.toml" | \
+                  jq -r '.packages[] | select(.name == "${pkg.name}") | .manifest_path' || :)
+              fi
+
+              if [ -z "$crateCargoTOML" ]; then
+                while IFS= read -r manifest; do
+                  crateCargoTOML=$(cargo metadata --format-version 1 --no-deps --manifest-path "$manifest" | \
+                    jq -r '.packages[] | select(.name == "${pkg.name}") | .manifest_path' || :)
+                  [ -n "$crateCargoTOML" ] && break
+                done < <(find "$tree" -name Cargo.toml)
+              fi
+
+              if [ -z "$crateCargoTOML" ]; then
+                echo "Cannot find ${pkg.name}-${pkg.version} in ${pkg.source}" >&2
+                exit 1
+              fi
+
+              crateRoot=$(dirname "$crateCargoTOML")
+              cp -prvL "$crateRoot" "$out" || echo "Warning: certain files could not be copied" >&2
+              chmod -R u+w "$out"
+
+              if grep -q workspace "$out/Cargo.toml"; then
+                ${replaceWorkspaceValues} "$out/Cargo.toml" "$(cargo metadata --format-version 1 --no-deps --manifest-path "$crateCargoTOML" | jq -r .workspace_root)/Cargo.toml"
+              fi
+
+              printf '{"files":{},"package":null}' > "$out/.cargo-checksum.json"
+            '';
+        packageSource =
+          pkg:
+          let
+            source = pkg.source or null;
+            checksum = pkg.checksum or null;
+          in
+          if source == null then
+            null
+          else if builtins.hasAttr source registryDownloadUrls then
+            assert lib.assertMsg (checksum != null) ''
+              Package ${pkg.name} ${pkg.version} is missing a Cargo.lock checksum.
+            '';
+            lib.nameValuePair "${pkg.name}-${pkg.version}" (registryPackageSource pkg source checksum)
+          else if lib.hasPrefix "git+" source then
+            lib.nameValuePair "${pkg.name}-${pkg.version}" (gitPackageSource pkg)
+          else
+            throw "Cannot create a package-shaped vendor source for ${pkg.name}-${pkg.version} from ${source}";
+      in
+      builtins.deepSeq gitOutputHashes (
+        builtins.listToAttrs (builtins.filter (entry: entry != null) (map packageSource dependencyPackages))
+      );
+
   vendorConfigScript =
     {
       cargoExtraConfig,
@@ -473,6 +629,7 @@ in
     nativeBuildInputsForPolicy
     policyChecksFor
     resolvePolicy
+    resolveVendorSources
     resolveVendorDir
     rustcArgsForPolicy
     rustFlagsStringForPolicy

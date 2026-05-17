@@ -27,6 +27,10 @@ let
     env = args.env or { };
     cargoExtraConfig = args.cargoExtraConfig or "";
     vendorDir = args.vendorDir or null;
+    vendorSources = args.vendorSources or null;
+    workspaceSourceRoot = args.workspaceSourceRoot or args.src;
+    allowAggregateWorkspaceSource = args.allowAggregateWorkspaceSource or false;
+    allowAggregateVendorSource = args.allowAggregateVendorSource or false;
     outputHashes = args.outputHashes or { };
     contentAddressed = args.contentAddressed or false;
     policy =
@@ -161,6 +165,13 @@ let
   /**
     Build a Rust workspace as one Nix derivation per Cargo rustc unit.
 
+    Each generated unit gets a scoped source input by default. Workspace crates
+    receive their own package root, and registry/git crates receive their own
+    vendored package directory. A source edit in `crates/api` does not change
+    the Nix input for `crates/worker`, `itoa`, or `ryu`; a `Cargo.lock` update
+    for one transitive crate leaves unrelated vendored crate derivations alone.
+    Rendering fails when a unit path cannot be tied back to `src` or `vendorDir`.
+
     Returns the generated attrset with `units`, `roots`, `checkedRoots`,
     `packages`, `binaries`, `libraries`, `default`, `policyChecks`, plus the
     intermediate `unitGraphJson`, `unitsNix`, and `vendorDir` derivations for
@@ -173,6 +184,9 @@ let
       vendorDir = rust.resolveVendorDir {
         inherit (args) cargoLock outputHashes vendorDir;
       };
+      vendorSources = rust.resolveVendorSources {
+        inherit (args) cargoLock outputHashes vendorSources;
+      };
       unitGraphJson = generateUnitGraph (rawArgs // { inherit vendorDir; });
       unitsNix = generateUnitsNix (
         rawArgs
@@ -181,8 +195,14 @@ let
         }
       );
       units = import unitsNix {
-        inherit pkgs vendorDir;
-        inherit (args) src rustToolchain;
+        inherit pkgs vendorDir vendorSources;
+        inherit (args)
+          allowAggregateVendorSource
+          allowAggregateWorkspaceSource
+          src
+          rustToolchain
+          workspaceSourceRoot
+          ;
         extraNativeBuildInputs = args.nativeBuildInputs ++ rust.nativeBuildInputsForPolicy args.policy;
         extraEnv = args.env;
         extraRustcArgs = rust.rustcArgsForPolicy args.policy;

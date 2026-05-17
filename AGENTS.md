@@ -82,6 +82,10 @@ Examples should show intent and uncommon choices. Helpers and modules should car
 
 When work exposes recurring pain and the fix belongs in `AGENTS.md`, capture the broad rule first. Write the invariant future tasks can reuse, then name the current case only when it adds clarity. A policy note should survive the next helper, language, or module with the same failure mode.
 
+Prefer the future-correct interface over compatibility layers. This repo can break callers when an old helper surface makes the safe default hard to express. Remove old spellings, migration branches, and dual-mode behavior in the same change that introduces the new invariant unless the user explicitly asks for a migration window.
+
+Nix builders for language workspaces should scope source inputs to the smallest package-shaped boundary the compiler can consume. For Cargo unit builders, each `rustc` unit gets one package source: a local workspace member root or one vendored crate directory. Treat a generated derivation that references the monorepo root or aggregate `cargo-vendor-dir` from every unit as a cache invalidation bug. Add eval checks that compare `.drvPath` before and after a one-crate source edit, plus a separate check for a one-dependency `Cargo.lock` change.
+
 ## Python style
 
 Default Python projects to uv. A repo-owned Python app has `pyproject.toml`, a committed `uv.lock`, normal `src/<package>/` files, and Nix packaging through [`ix.buildUvApplication`](lib/build-uv-application.nix). Keep dependency resolver diffs reviewable: change source and lockfiles together only when the source change needs the dependency move.

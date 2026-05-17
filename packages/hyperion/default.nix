@@ -38,6 +38,9 @@ let
     # lock keeps a removed tool's second Valence branch, which collides in
     # cargo-unit's name-version keyed vendor hash map.
     cargoLock = ./Cargo.lock;
+    # The build source is a patched upstream derivation, so there is no
+    # repo-local workspace root for cargo-unit to rescan per package.
+    allowAggregateWorkspaceSource = true;
     cargoArgs = [
       "--package"
       "bedwars"

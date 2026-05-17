@@ -1,6 +1,5 @@
 use serde::Deserialize;
 use sha2::Digest as _;
-
 use color_eyre::eyre::{Result as EyreResult, bail, ensure, eyre};
 
 #[derive(Debug, Deserialize)]
@@ -371,8 +370,10 @@ impl Unit {
     pub fn is_external(&self) -> bool {
         self.pkg_id.starts_with("registry+")
             || self.pkg_id.starts_with("git+")
+            || self.pkg_id.starts_with("sparse+")
             || self.pkg_id.contains("(registry+")
             || self.pkg_id.contains("(git+")
+            || self.pkg_id.contains("(sparse+")
     }
 
     pub fn identity_hash(
@@ -403,7 +404,8 @@ impl Unit {
 }
 
 fn write_unit_identity(hasher: &mut sha2::Sha256, unit: &Unit) {
-    hasher.update(unit.pkg_id.as_bytes());
+    let package_identity = package_identity(unit);
+    hasher.update(package_identity.as_bytes());
     hasher.update(b"\0");
     hasher.update(unit.target.name.as_bytes());
     hasher.update(b"\0");
@@ -458,6 +460,14 @@ fn write_unit_identity(hasher: &mut sha2::Sha256, unit: &Unit) {
     hash_bool(hasher, unit.target.test);
     hash_bool(hasher, unit.target.doctest);
     hash_bool(hasher, unit.target.doc);
+}
+
+fn package_identity(unit: &Unit) -> String {
+    if unit.pkg_id.starts_with("path+") || unit.pkg_id.contains("(path+") {
+        format!("path#{}@{}", unit.package_name(), unit.package_version())
+    } else {
+        unit.pkg_id.clone()
+    }
 }
 
 fn hash_bool(hasher: &mut sha2::Sha256, value: bool) {
@@ -612,5 +622,43 @@ mod tests {
         let error = graph.ensure_supported().unwrap_err().to_string();
 
         assert!(error.contains("unit 0 dependency missing"));
+    }
+
+    #[test]
+    fn path_package_identity_ignores_absolute_source_roots() {
+        let left: Unit = serde_json::from_str(
+            r#"{
+              "pkg_id": "path+file:///nix/store/source-left/crates/alpha#alpha@0.1.0",
+              "target": {
+                "kind": ["lib"],
+                "crate_types": ["lib"],
+                "name": "alpha",
+                "src_path": "/nix/store/source-left/crates/alpha/src/lib.rs",
+                "edition": "2024"
+              },
+              "profile": { "name": "release", "opt_level": "3" },
+              "mode": "build",
+              "dependencies": []
+            }"#,
+        )
+        .unwrap();
+        let right: Unit = serde_json::from_str(
+            r#"{
+              "pkg_id": "path+file:///nix/store/source-right/crates/alpha#alpha@0.1.0",
+              "target": {
+                "kind": ["lib"],
+                "crate_types": ["lib"],
+                "name": "alpha",
+                "src_path": "/nix/store/source-right/crates/alpha/src/lib.rs",
+                "edition": "2024"
+              },
+              "profile": { "name": "release", "opt_level": "3" },
+              "mode": "build",
+              "dependencies": []
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(left.identity_hash(&[], None), right.identity_hash(&[], None));
     }
 }

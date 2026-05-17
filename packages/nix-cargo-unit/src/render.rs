@@ -1,9 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 use askama::Template as _;
 use color_eyre::eyre::{Result, eyre};
+use sha2::Digest as _;
 
 use crate::model::{Unit, UnitGraph};
 use crate::shell;
@@ -19,6 +21,8 @@ pub struct RenderOptions {
 struct PreparedGraph {
     hashes: Vec<String>,
     names: Vec<String>,
+    source_refs: Vec<String>,
+    source_entries: BTreeMap<String, SourceEntry>,
     transitive_unit_deps: Vec<BTreeSet<usize>>,
     build_script_runs: BTreeMap<usize, BuildScriptRun>,
 }
@@ -28,9 +32,52 @@ struct BuildScriptRun {
     dependency_runs: Vec<usize>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SourceEntry {
+    name: String,
+    base: SourceBase,
+    root: PathBuf,
+    relative: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceBase {
+    Workspace,
+    VendorPackage,
+    VendorAggregate,
+}
+
+impl SourceBase {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::VendorPackage | Self::VendorAggregate => "vendor",
+        }
+    }
+}
+
+impl SourceEntry {
+    fn nix_expr(&self) -> String {
+        match self.base {
+            SourceBase::Workspace => format!(
+                "scopedWorkspaceSource {} {}",
+                nix_attr(&self.name),
+                nix_attr(&self.relative)
+            ),
+            SourceBase::VendorPackage => format!("vendorSources.{}", nix_attr(&self.relative)),
+            SourceBase::VendorAggregate => format!(
+                "scopedAggregateVendorSource {} {}",
+                nix_attr(&self.name),
+                nix_attr(&self.relative)
+            ),
+        }
+    }
+}
+
 #[derive(askama::Template)]
 #[template(path = "units.nix.askama", escape = "none")]
 struct UnitsNixTemplate {
+    source_entries: String,
     unit_entries: String,
     policy_check_entries: String,
     roots: String,
@@ -46,6 +93,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
     graph.ensure_supported()?;
     let prepared = prepare_graph(graph, options)?;
     let template = UnitsNixTemplate {
+        source_entries: render_source_entries(&prepared),
         unit_entries: render_unit_entries(graph, options, &prepared)?,
         policy_check_entries: render_policy_check_entries(graph, options, &prepared)?,
         roots: render_roots(graph, &prepared),
@@ -108,6 +156,14 @@ fn render_policy_check_entries(
     Ok(entries)
 }
 
+fn render_source_entries(prepared: &PreparedGraph) -> String {
+    let mut entries = String::new();
+    for (key, source) in &prepared.source_entries {
+        let _ = writeln!(entries, "    {} = {};", nix_attr(key), source.nix_expr());
+    }
+    entries
+}
+
 fn render_default_entry(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
     graph
         .roots
@@ -128,6 +184,20 @@ impl PreparedGraph {
 
     fn unit_ref(&self, index: usize) -> String {
         format!("units.{}", self.unit_attr(index))
+    }
+
+    fn source_ref(&self, index: usize) -> String {
+        format!("sources.{}", nix_attr(&self.source_refs[index]))
+    }
+
+    fn source_entry(&self, index: usize) -> Result<&SourceEntry> {
+        let key = self
+            .source_refs
+            .get(index)
+            .ok_or_else(|| eyre!("unit index {index} has no scoped source entry"))?;
+        self.source_entries
+            .get(key)
+            .ok_or_else(|| eyre!("unit index {index} references missing scoped source {key}"))
     }
 }
 
@@ -168,6 +238,15 @@ fn prepare_graph(graph: &UnitGraph, options: &RenderOptions) -> Result<PreparedG
             Ok(deps)
         })
         .collect::<Result<Vec<_>>>()?;
+
+    let mut source_refs = Vec::with_capacity(graph.units.len());
+    let mut source_entries = BTreeMap::new();
+    for unit in &graph.units {
+        let source = source_entry_for_unit(unit, options)?;
+        let key = source.name.clone();
+        source_refs.push(key.clone());
+        source_entries.entry(key).or_insert(source);
+    }
 
     let mut build_script_runs = BTreeMap::new();
     for (index, unit) in graph.units.iter().enumerate() {
@@ -212,6 +291,8 @@ fn prepare_graph(graph: &UnitGraph, options: &RenderOptions) -> Result<PreparedG
     Ok(PreparedGraph {
         hashes,
         names,
+        source_refs,
+        source_entries,
         transitive_unit_deps,
         build_script_runs,
     })
@@ -278,6 +359,7 @@ fn render_rustc_unit(
 
     attrs.string("pname", &unit.target.name);
     attrs.string("version", unit.package_version());
+    attrs.expr("src", &prepared.source_ref(index));
     let native_build_inputs = if collects_unused_crate_dependencies(unit, options) {
         "[ rustToolchain pkgs.jq ] ++ extraNativeBuildInputs"
     } else {
@@ -352,6 +434,7 @@ fn render_rustc_build_phase(
     index: usize,
 ) -> Result<String> {
     let unit = &graph.units[index];
+    let source = prepared.source_entry(index)?;
     let mut script = String::new();
 
     script.push_str("mkdir -p build\n");
@@ -361,7 +444,7 @@ fn render_rustc_build_phase(
     writeln!(
         script,
         "export CARGO_MANIFEST_DIR={}",
-        shell::double_quote(&path_expr(options, &crate_root_for_unit(unit)))
+        shell::double_quote(&source_path_expr(source, &crate_root_for_unit(unit))?)
     )?;
 
     if let Some(run_index) = unit_build_script_run(graph, index) {
@@ -408,7 +491,7 @@ fn render_rustc_build_phase(
         )?;
     }
 
-    let source_path = path_expr(options, Path::new(&unit.target.src_path));
+    let source_path = source_path_expr(source, Path::new(&unit.target.src_path))?;
     writeln!(
         script,
         "rustc_args+=( {} )",
@@ -649,6 +732,7 @@ fn render_build_script_run(
         &format!("{}-build-script-output", run_unit.package_name()),
     );
     attrs.string("version", run_unit.package_version());
+    attrs.expr("src", &prepared.source_ref(run_index));
     attrs.expr(
         "nativeBuildInputs",
         "[ rustToolchain ] ++ extraNativeBuildInputs",
@@ -674,11 +758,13 @@ fn render_build_script_run(
     attrs.multiline(
         "buildPhase",
         &render_build_script_run_phase(
-            options,
+            graph,
             prepared,
+            run_index,
             run_unit,
             compile_unit,
             build_script_run.compile_index,
+            build_script_run,
         )?,
     );
     attrs.multiline("installPhase", "true\n");
@@ -687,21 +773,25 @@ fn render_build_script_run(
 }
 
 fn render_build_script_run_phase(
-    options: &RenderOptions,
+    graph: &UnitGraph,
     prepared: &PreparedGraph,
+    run_index: usize,
     run_unit: &Unit,
     compile_unit: &Unit,
     compile_index: usize,
+    build_script_run: &BuildScriptRun,
 ) -> Result<String> {
     let mut script = String::new();
+    let source = prepared.source_entry(run_index)?;
     let compile_ref = format!("${{units.{}}}", nix_attr(&prepared.names[compile_index]));
 
     script.push_str("mkdir -p $out/out-dir\n");
     script.push_str("export OUT_DIR=$out/out-dir\n");
+    ensure_source_contains_unit(source, run_unit)?;
     writeln!(
         script,
         "export CARGO_MANIFEST_DIR={}",
-        shell::double_quote(&path_expr(options, &crate_root_for_unit(run_unit)))
+        shell::double_quote(&source_path_expr(source, &crate_root_for_unit(run_unit))?)
     )?;
     script.push_str("export RUSTC=\"$(type -p rustc)\"\n");
     script.push_str("HOST_TRIPLE=\"$($RUSTC -vV | sed -n 's/^host: //p')\"\n");
@@ -731,6 +821,10 @@ fn render_build_script_run_phase(
         })
     )?;
     script.push_str(&cargo_package_exports(run_unit));
+    script.push_str(&cargo_manifest_links_export(run_unit));
+    append_cargo_feature_exports(&mut script, run_unit);
+    append_cargo_cfg_exports(&mut script);
+    append_dependency_metadata_exports(&mut script, graph, prepared, build_script_run);
     script.push_str("cd \"$CARGO_MANIFEST_DIR\"\n");
     script.push_str("build_script_stdout=$(mktemp)\n");
     script.push_str("build_script_stderr=$(mktemp)\n");
@@ -884,7 +978,13 @@ fn cargo_package_exports(unit: &Unit) -> String {
     let mut script = String::new();
     let package_name = unit.package_name();
     let version = unit.package_version();
-    let mut version_parts = version.split('.');
+    // Build scripts observe Cargo's split version fields, including the empty
+    // prerelease string. ring uses CARGO_PKG_VERSION_PRE in its links invariant.
+    let version_without_build_metadata = version.split_once('+').map_or(version, |(base, _)| base);
+    let (version_core, version_pre) = version_without_build_metadata
+        .split_once('-')
+        .unwrap_or((version_without_build_metadata, ""));
+    let mut version_parts = version_core.split('.');
     let major = version_parts.next().unwrap_or("0");
     let minor = version_parts.next().unwrap_or("0");
     let patch = version_parts.next().unwrap_or("0");
@@ -895,15 +995,175 @@ fn cargo_package_exports(unit: &Unit) -> String {
         ("CARGO_PKG_VERSION_MAJOR", major),
         ("CARGO_PKG_VERSION_MINOR", minor),
         ("CARGO_PKG_VERSION_PATCH", patch),
+        ("CARGO_PKG_VERSION_PRE", version_pre),
     ] {
-        let _ = writeln!(script, "export {name}={}", shell::quote(value));
+        let _ = writeln!(script, "export {name}={}", shell_env_value(value));
     }
 
     script
 }
 
+fn cargo_manifest_links_export(unit: &Unit) -> String {
+    // Cargo injects package.links for build.rs. nix-cargo-unit runs build scripts
+    // outside Cargo, and crates like ring panic when CARGO_MANIFEST_LINKS is absent.
+    cargo_manifest_links(unit)
+        .map(|links| format!("export CARGO_MANIFEST_LINKS={}\n", shell_env_value(&links)))
+        .unwrap_or_default()
+}
+
+fn shell_env_value(value: &str) -> String {
+    if value.is_empty() {
+        // The shell spelling for an empty single-quoted value is also the Nix
+        // indented-string terminator. Use double quotes so generated Nix parses.
+        "\"\"".to_string()
+    } else {
+        shell::quote(value)
+    }
+}
+
+fn cargo_manifest_links(unit: &Unit) -> Option<String> {
+    let manifest_path = crate_root_for_unit(unit).join("Cargo.toml");
+    let manifest = fs::read_to_string(manifest_path).ok()?;
+
+    package_manifest_string(&manifest, "links")
+}
+
+fn package_manifest_string(manifest: &str, key: &str) -> Option<String> {
+    let mut in_package_section = false;
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_package_section = trimmed == "[package]";
+            continue;
+        }
+        if !in_package_section || trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        let Some((raw_key, raw_value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        if raw_key.trim() != key {
+            continue;
+        }
+
+        return parse_manifest_string(raw_value.trim());
+    }
+
+    None
+}
+
+fn parse_manifest_string(value: &str) -> Option<String> {
+    if value.starts_with('"') {
+        serde_json::from_str(value).ok()
+    } else if let Some(stripped) = value.strip_prefix('\'').and_then(|inner| inner.strip_suffix('\''))
+    {
+        Some(stripped.to_string())
+    } else {
+        None
+    }
+}
+
+fn append_cargo_feature_exports(script: &mut String, unit: &Unit) {
+    for feature in &unit.features {
+        let _ = writeln!(script, "export {}=1", cargo_feature_env_name(feature));
+    }
+}
+
+fn cargo_feature_env_name(feature: &str) -> String {
+    let mut env_name = String::from("CARGO_FEATURE_");
+    for byte in feature.bytes() {
+        match byte {
+            b'a'..=b'z' => env_name.push(char::from(byte.to_ascii_uppercase())),
+            b'A'..=b'Z' | b'0'..=b'9' | b'_' => env_name.push(char::from(byte)),
+            b'-' => env_name.push('_'),
+            _ => env_name.push('_'),
+        }
+    }
+    env_name
+}
+
+fn append_cargo_cfg_exports(script: &mut String) {
+    // Cargo normally exports CARGO_CFG_* before build.rs. Direct build-script
+    // execution has to synthesize them or target-sensitive crates like libm fail.
+    script.push_str(
+        r#"cargo_cfg_output=$(mktemp)
+"$RUSTC" --print cfg --target "$TARGET" > "$cargo_cfg_output"
+while IFS= read -r cargo_cfg_line; do
+  case "$cargo_cfg_line" in
+    *=*)
+      cargo_cfg_key="''${cargo_cfg_line%%=*}"
+      cargo_cfg_value="''${cargo_cfg_line#*=}"
+      cargo_cfg_value="''${cargo_cfg_value%\"}"
+      cargo_cfg_value="''${cargo_cfg_value#\"}"
+      ;;
+    *)
+      cargo_cfg_key="$cargo_cfg_line"
+      cargo_cfg_value=""
+      ;;
+  esac
+
+  cargo_cfg_env="CARGO_CFG_$(printf '%s' "$cargo_cfg_key" | tr '[:lower:]-' '[:upper:]_')"
+  if [ "''${!cargo_cfg_env+x}" = x ] && [ -n "$cargo_cfg_value" ]; then
+    export "$cargo_cfg_env=''${!cargo_cfg_env},$cargo_cfg_value"
+  else
+    export "$cargo_cfg_env=$cargo_cfg_value"
+  fi
+done < "$cargo_cfg_output"
+"#,
+    );
+}
+
+fn append_dependency_metadata_exports(
+    script: &mut String,
+    graph: &UnitGraph,
+    prepared: &PreparedGraph,
+    build_script_run: &BuildScriptRun,
+) {
+    for dep_run_index in &build_script_run.dependency_runs {
+        let dep_run_unit = &graph.units[*dep_run_index];
+        let Some(links) = cargo_manifest_links(dep_run_unit) else {
+            continue;
+        };
+        let dep_run_ref = format!("${{units.{}}}", nix_attr(&prepared.names[*dep_run_index]));
+        let env_prefix = cargo_links_env_prefix(&links);
+        let _ = writeln!(
+            script,
+            r#"# Cargo exposes metadata from build-script dependencies through DEP_<links>_*.
+# aws-lc-rs uses these variables to find the aws-lc-sys headers and link outputs.
+if [ -f "{dep_run_ref}/cargo-metadata" ]; then
+  while IFS= read -r cargo_metadata_line; do
+    case "$cargo_metadata_line" in
+      *=*)
+        cargo_metadata_key="''${{cargo_metadata_line%%=*}}"
+        cargo_metadata_value="''${{cargo_metadata_line#*=}}"
+        cargo_metadata_env="DEP_{env_prefix}_$(printf '%s' "$cargo_metadata_key" | tr '[:lower:]-' '[:upper:]_')"
+        export "$cargo_metadata_env=$cargo_metadata_value"
+        ;;
+    esac
+  done < "{dep_run_ref}/cargo-metadata"
+fi"#
+        );
+    }
+}
+
+fn cargo_links_env_prefix(links: &str) -> String {
+    links
+        .chars()
+        .map(|ch| match ch {
+            'a'..='z' => ch.to_ascii_uppercase(),
+            '-' => '_',
+            _ => ch,
+        })
+        .collect()
+}
+
 fn crate_root_for_unit(unit: &Unit) -> PathBuf {
     let source = Path::new(&unit.target.src_path);
+    if let Some(manifest_root) = nearest_manifest_root(source) {
+        return manifest_root;
+    }
+
     if source.file_name().is_some_and(|name| name == "build.rs") {
         return source.parent().unwrap_or(source).to_path_buf();
     }
@@ -916,37 +1176,275 @@ fn crate_root_for_unit(unit: &Unit) -> PathBuf {
     source.parent().unwrap_or(source).to_path_buf()
 }
 
-fn path_expr(options: &RenderOptions, path: &Path) -> String {
-    if let Some(expr) = path_under(path, &options.workspace_root, "src") {
-        return expr;
+fn nearest_manifest_root(source: &Path) -> Option<PathBuf> {
+    let mut dir = source.parent()?;
+    loop {
+        // Cargo sets CARGO_MANIFEST_DIR to the package root even when the
+        // build script entrypoint is nested, as aws-lc-sys does with builder/main.rs.
+        if dir.join("Cargo.toml").is_file() {
+            return Some(dir.to_path_buf());
+        }
+        dir = dir.parent()?;
     }
-    if let Some(vendor_root) = &options.vendor_root
-        && let Some(expr) = path_under(path, vendor_root, "vendorDir")
-    {
-        return expr;
-    }
-    if let Some(expr) = registry_path_expr(path) {
-        return expr;
-    }
-
-    path.to_string_lossy().into_owned()
 }
 
-fn path_under(path: &Path, root: &Path, nix_var: &str) -> Option<String> {
-    let relative = path.strip_prefix(root).ok()?;
+fn source_entry_for_unit(unit: &Unit, options: &RenderOptions) -> Result<SourceEntry> {
+    if unit.is_external() {
+        let vendor_root = options.vendor_root.as_ref().ok_or_else(|| {
+            eyre!(
+                "external unit {} {} needs --vendor-root to scope its vendored source",
+                unit.package_name(),
+                unit.package_version()
+            )
+        })?;
+        let root = vendored_source_root_for_unit(unit, vendor_root)?;
+        let relative = relative_path_string(&root, vendor_root).map_err(|_| {
+            eyre!(
+                "external unit {} {} source root {} is outside vendor root {}",
+                unit.package_name(),
+                unit.package_version(),
+                root.display(),
+                vendor_root.display()
+            )
+        })?;
+
+        let base = if relative.is_empty() {
+            SourceBase::VendorAggregate
+        } else {
+            SourceBase::VendorPackage
+        };
+
+        return Ok(SourceEntry {
+            name: source_name(base, unit, &relative),
+            base,
+            root,
+            relative,
+        });
+    }
+
+    let root = local_source_root_for_unit(unit, &options.workspace_root)?;
+    let relative = relative_path_string(&root, &options.workspace_root)?;
+
+    Ok(SourceEntry {
+        name: source_name(SourceBase::Workspace, unit, &relative),
+        base: SourceBase::Workspace,
+        root,
+        relative,
+    })
+}
+
+fn local_source_root_for_unit(unit: &Unit, workspace_root: &Path) -> Result<PathBuf> {
+    let package_root = local_package_root_from_pkg_id(&unit.pkg_id)
+        .unwrap_or_else(|| crate_root_for_unit(unit));
+    relative_path_string(&package_root, workspace_root).map_err(|_| {
+        eyre!(
+            "local unit {} {} source root {} is outside workspace root {}",
+            unit.package_name(),
+            unit.package_version(),
+            package_root.display(),
+            workspace_root.display()
+        )
+    })?;
+
+    if source_tree_has_symlink_escape(&package_root, &package_root)? {
+        // Some workspaces publish package directories with symlinks back to
+        // siblings. serde_derive_internals/src is one example. Package-only
+        // scoping would preserve a broken symlink, so the source boundary has
+        // to widen to the workspace root for those crates.
+        return Ok(workspace_root.to_path_buf());
+    }
+
+    Ok(package_root)
+}
+
+fn vendored_source_root_for_unit(unit: &Unit, vendor_root: &Path) -> Result<PathBuf> {
+    let source = Path::new(&unit.target.src_path);
+    let relative = source.strip_prefix(vendor_root).map_err(|_| {
+        eyre!(
+            "external unit {} {} source path {} is outside vendor root {}",
+            unit.package_name(),
+            unit.package_version(),
+            source.display(),
+            vendor_root.display()
+        )
+    })?;
+
+    let crate_root = match relative.components().next() {
+        Some(Component::Normal(component)) => vendor_root.join(component),
+        _ => Err(eyre!(
+            "external unit {} {} source path {} does not contain a vendored crate directory under {}",
+            unit.package_name(),
+            unit.package_version(),
+            source.display(),
+            vendor_root.display()
+        ))?,
+    };
+
+    if source_tree_has_symlink_escape(&crate_root, &crate_root)? {
+        // Vendored crates are usually self-contained. When a crate ships
+        // symlinks to sibling directories, the compiler needs the full vendor
+        // root so those symlinks stay valid.
+        return Ok(vendor_root.to_path_buf());
+    }
+
+    Ok(crate_root)
+}
+
+fn relative_path_string(path: &Path, root: &Path) -> Result<String> {
+    let relative = path.strip_prefix(root)?;
+    Ok(relative.to_string_lossy().into_owned())
+}
+
+fn source_name(base: SourceBase, unit: &Unit, relative: &str) -> String {
+    let hash = stable_hash(&format!(
+        "{}\0{}\0{}\0{}",
+        base.label(),
+        unit.package_name(),
+        unit.package_version(),
+        relative
+    ));
+    format!(
+        "cargo-unit-source-{}-{}-{hash}",
+        store_name_component(unit.package_name()),
+        store_name_component(unit.package_version())
+    )
+}
+
+fn store_name_component(value: &str) -> String {
+    let component: String = value
+        .chars()
+        .map(|ch| match ch {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '+' | '-' | '.' | '_' => ch,
+            _ => '-',
+        })
+        .collect();
+
+    if component.is_empty() {
+        "unknown".to_string()
+    } else {
+        component
+    }
+}
+
+fn stable_hash(value: &str) -> String {
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(value.as_bytes());
+    let digest = hasher.finalize();
+    hex16(&digest[..8])
+}
+
+fn local_package_root_from_pkg_id(pkg_id: &str) -> Option<PathBuf> {
+    if let Some(rest) = pkg_id.strip_prefix("path+file://") {
+        let (path, _) = rest.split_once('#')?;
+        return percent_decode_path(path).map(PathBuf::from);
+    }
+
+    let (_, rest) = pkg_id.split_once("(path+file://")?;
+    let (path, _) = rest.split_once(')')?;
+    percent_decode_path(path).map(PathBuf::from)
+}
+
+fn percent_decode_path(path: &str) -> Option<String> {
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let hi = hex_value(*bytes.get(index + 1)?)?;
+            let lo = hex_value(*bytes.get(index + 2)?)?;
+            out.push((hi << 4) | lo);
+            index += 3;
+        } else {
+            out.push(bytes[index]);
+            index += 1;
+        }
+    }
+
+    String::from_utf8(out).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn hex16(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(16);
+    for byte in bytes {
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0xf) as usize] as char);
+    }
+    out
+}
+
+fn source_tree_has_symlink_escape(root: &Path, boundary: &Path) -> Result<bool> {
+    if !root.exists() {
+        return Ok(false);
+    }
+
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        let file_type = entry.file_type()?;
+        if file_type.is_symlink() {
+            let target = fs::read_link(&path)?;
+            let target = if target.is_absolute() {
+                target
+            } else {
+                path.parent().unwrap_or(root).join(target)
+            };
+            if !normalize_path(&target).starts_with(boundary) {
+                return Ok(true);
+            }
+        } else if file_type.is_dir() && source_tree_has_symlink_escape(&path, boundary)? {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    normalized
+}
+
+fn source_path_expr(source: &SourceEntry, path: &Path) -> Result<String> {
+    let relative = path.strip_prefix(&source.root).map_err(|_| {
+        eyre!(
+            "unit source path {} is outside scoped source root {}",
+            path.display(),
+            source.root.display()
+        )
+    })?;
     let relative = relative.to_string_lossy();
     if relative.is_empty() {
-        Some(format!("${{{nix_var}}}"))
+        Ok("$src".to_string())
     } else {
-        Some(format!("${{{nix_var}}}/{relative}"))
+        Ok(format!("$src/{relative}"))
     }
 }
 
-fn registry_path_expr(path: &Path) -> Option<String> {
-    let value = path.to_string_lossy();
-    let (_, after_registry) = value.split_once("/registry/src/")?;
-    let (_, after_index) = after_registry.split_once('/')?;
-    Some(format!("${{vendorDir}}/{after_index}"))
+fn ensure_source_contains_unit(source: &SourceEntry, unit: &Unit) -> Result<()> {
+    let path = Path::new(&unit.target.src_path);
+    source_path_expr(source, path).map(|_| ())
 }
 
 fn render_roots(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
@@ -1110,7 +1608,11 @@ mod tests {
 
         assert!(rendered.contains("units = rec"));
         assert!(rendered.contains("--crate-name"));
-        assert!(rendered.contains("${src}/src/main.rs"));
+        assert!(rendered.contains("sources = {"));
+        assert!(rendered.contains("scopedWorkspaceSource \"cargo-unit-source-hello-0.1.0-"));
+        assert!(rendered.contains("\"\""));
+        assert!(rendered.contains("src = sources."));
+        assert!(rendered.contains("\"$src/src/main.rs\""));
         assert!(rendered.contains("default = withPolicyChecks units."));
         assert!(rendered.contains("policyChecks"));
         assert!(rendered.contains("extraRustcArgs"));
@@ -1241,6 +1743,231 @@ mod tests {
     }
 
     #[test]
+    fn scopes_local_and_vendor_sources_per_package() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.15",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "itoa",
+                    "src_path": "/vendor/itoa-1.0.15/src/lib.rs",
+                    "edition": "2021"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": []
+                },
+                {
+                  "pkg_id": "path+file:///workspace/crates/core#scope-core@0.1.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "scope_core",
+                    "src_path": "/workspace/crates/core/src/lib.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": [
+                    { "index": 0, "extern_crate_name": "itoa" }
+                  ]
+                },
+                {
+                  "pkg_id": "path+file:///workspace/crates/cli#scope-cli@0.1.0",
+                  "target": {
+                    "kind": ["bin"],
+                    "crate_types": ["bin"],
+                    "name": "scope_cli",
+                    "src_path": "/workspace/crates/cli/src/main.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": [
+                    { "index": 1, "extern_crate_name": "scope_core" }
+                  ]
+                }
+              ],
+              "roots": [2]
+            }"#,
+        )
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: Some(PathBuf::from("/vendor")),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("scopedWorkspaceSource \"cargo-unit-source-scope-core-0.1.0-"));
+        assert!(rendered.contains("\"crates/core\""));
+        assert!(rendered.contains("scopedWorkspaceSource \"cargo-unit-source-scope-cli-0.1.0-"));
+        assert!(rendered.contains("\"crates/cli\""));
+        assert!(rendered.contains("vendorSources.\"itoa-1.0.15\""));
+        assert!(rendered.contains("\"$src/src/lib.rs\""));
+        assert!(rendered.contains("\"$src/src/main.rs\""));
+        assert!(!rendered.contains("${src}/crates/core"));
+        assert!(!rendered.contains("${src}/crates/cli"));
+        assert!(!rendered.contains("${vendorDir}/itoa-1.0.15"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn widens_scoped_source_when_package_symlinks_escape_root() {
+        let workspace = std::env::temp_dir().join(format!(
+            "nix-cargo-unit-symlink-source-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(workspace.join("internal")).unwrap();
+        fs::create_dir_all(workspace.join("sibling/src")).unwrap();
+        fs::write(
+            workspace.join("internal/Cargo.toml"),
+            r#"[package]
+name = "internal"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        fs::write(workspace.join("internal/lib.rs"), "pub fn marker() {}\n").unwrap();
+        std::os::unix::fs::symlink("../sibling/src", workspace.join("internal/src")).unwrap();
+        let src_path = workspace.join("internal/lib.rs");
+        let pkg_id = format!("path+file://{}#internal@0.1.0", workspace.join("internal").display());
+        let graph: UnitGraph = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "units": [
+                {
+                    "pkg_id": pkg_id,
+                    "target": {
+                        "kind": ["lib"],
+                        "crate_types": ["lib"],
+                        "name": "internal",
+                        "src_path": src_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "build",
+                    "dependencies": []
+                }
+            ],
+            "roots": [0]
+        }))
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: workspace.clone(),
+                vendor_root: None,
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("scopedWorkspaceSource \"cargo-unit-source-internal-0.1.0-"));
+        assert!(rendered.contains("\"\""));
+        assert!(rendered.contains("export CARGO_MANIFEST_DIR=\"$src/internal\""));
+        assert!(rendered.contains("\"$src/internal/lib.rs\""));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn rejects_unscoped_local_sources() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "path+file:///repo/crates/alpha#alpha@0.1.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "alpha",
+                    "src_path": "/repo/crates/alpha/src/lib.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": []
+                }
+              ],
+              "roots": [0]
+            }"#,
+        )
+        .unwrap();
+
+        let error = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: None,
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("outside workspace root"));
+    }
+
+    #[test]
+    fn rejects_external_sources_without_vendor_root() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.15",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "itoa",
+                    "src_path": "/vendor/itoa-1.0.15/src/lib.rs",
+                    "edition": "2021"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": []
+                }
+              ],
+              "roots": [0]
+            }"#,
+        )
+        .unwrap();
+
+        let error = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: None,
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("needs --vendor-root"));
+    }
+
+    #[test]
     fn content_addressed_is_explicitly_opt_in() {
         let graph: UnitGraph = serde_json::from_str(
             r#"{
@@ -1279,5 +2006,298 @@ mod tests {
 
         assert!(rendered.contains("__contentAddressed = true"));
         assert!(rendered.contains("outputHashMode = \"recursive\""));
+    }
+
+    #[test]
+    fn empty_shell_env_values_do_not_close_generated_nix_strings() {
+        assert_eq!(shell_env_value(""), "\"\"");
+    }
+
+    #[test]
+    fn build_script_runs_receive_cargo_target_cfg_and_feature_environment() {
+        let workspace = std::env::temp_dir().join(format!(
+            "nix-cargo-unit-render-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(&workspace).unwrap();
+        fs::write(
+            workspace.join("Cargo.toml"),
+            r#"[package]
+name = "native"
+version = "0.1.0-alpha.1"
+links = "native_ffi"
+"#,
+        )
+        .unwrap();
+        let build_rs = workspace.join("build.rs");
+        fs::write(&build_rs, "fn main() {}\n").unwrap();
+        let build_rs_path = build_rs.to_string_lossy();
+        let pkg_id = format!("path+file://{}#native@0.1.0-alpha.1", workspace.display());
+        let graph: UnitGraph = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "units": [
+                {
+                    "pkg_id": pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-build",
+                        "src_path": build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "features": ["arch", "simd-support"],
+                    "mode": "build",
+                    "dependencies": []
+                },
+                {
+                    "pkg_id": pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-build",
+                        "src_path": build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "features": ["arch", "simd-support"],
+                    "mode": "run-custom-build",
+                    "platform": "x86_64-unknown-linux-gnu",
+                    "dependencies": [
+                        { "index": 0, "extern_crate_name": "build_script_build" }
+                    ]
+                }
+            ],
+            "roots": []
+        }))
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: workspace.clone(),
+                vendor_root: None,
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("export TARGET='x86_64-unknown-linux-gnu'"));
+        assert!(rendered.contains("export CARGO_PKG_VERSION_PRE='alpha.1'"));
+        assert!(rendered.contains("export CARGO_MANIFEST_LINKS='native_ffi'"));
+        assert!(rendered.contains("export CARGO_FEATURE_ARCH=1"));
+        assert!(rendered.contains("export CARGO_FEATURE_SIMD_SUPPORT=1"));
+        assert!(rendered.contains("\"$RUSTC\" --print cfg --target \"$TARGET\""));
+        assert!(rendered.contains("cargo_cfg_env=\"CARGO_CFG_$(printf '%s' \"$cargo_cfg_key\""));
+        assert!(rendered.contains("export \"$cargo_cfg_env=''${!cargo_cfg_env},$cargo_cfg_value\""));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn build_script_manifest_dir_uses_package_root_for_nested_entrypoints() {
+        let workspace = std::env::temp_dir().join(format!(
+            "nix-cargo-unit-nested-build-script-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        fs::create_dir_all(workspace.join("builder")).unwrap();
+        fs::write(
+            workspace.join("Cargo.toml"),
+            r#"[package]
+name = "nested-native"
+version = "0.1.0"
+links = "nested_native"
+"#,
+        )
+        .unwrap();
+        let build_rs = workspace.join("builder").join("main.rs");
+        fs::write(&build_rs, "fn main() {}\n").unwrap();
+        let build_rs_path = build_rs.to_string_lossy();
+        let pkg_id = format!(
+            "path+file://{}#nested-native@0.1.0",
+            workspace.display()
+        );
+        let graph: UnitGraph = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "units": [
+                {
+                    "pkg_id": pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-main",
+                        "src_path": build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "build",
+                    "dependencies": []
+                },
+                {
+                    "pkg_id": pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-main",
+                        "src_path": build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "run-custom-build",
+                    "dependencies": [
+                        { "index": 0, "extern_crate_name": "build_script_main" }
+                    ]
+                }
+            ],
+            "roots": []
+        }))
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: workspace.clone(),
+                vendor_root: None,
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("export CARGO_MANIFEST_DIR=\"$src\""));
+        assert!(!rendered.contains("export CARGO_MANIFEST_DIR=\"$src/builder\""));
+        assert!(rendered.contains("export CARGO_MANIFEST_LINKS='nested_native'"));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn build_script_runs_receive_dependency_metadata_environment() {
+        let workspace = std::env::temp_dir().join(format!(
+            "nix-cargo-unit-dependency-metadata-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or(0)
+        ));
+        let sys_root = workspace.join("native-sys");
+        let app_root = workspace.join("app");
+        fs::create_dir_all(&sys_root).unwrap();
+        fs::create_dir_all(&app_root).unwrap();
+        fs::write(
+            sys_root.join("Cargo.toml"),
+            r#"[package]
+name = "native-sys"
+version = "0.1.0"
+links = "native-ffi"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            app_root.join("Cargo.toml"),
+            r#"[package]
+name = "app"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        let sys_build_rs = sys_root.join("build.rs");
+        let app_build_rs = app_root.join("build.rs");
+        fs::write(&sys_build_rs, "fn main() {}\n").unwrap();
+        fs::write(&app_build_rs, "fn main() {}\n").unwrap();
+        let sys_build_rs_path = sys_build_rs.to_string_lossy();
+        let app_build_rs_path = app_build_rs.to_string_lossy();
+        let sys_pkg_id = format!(
+            "path+file://{}#native-sys@0.1.0",
+            sys_root.display()
+        );
+        let app_pkg_id = format!("path+file://{}#app@0.1.0", app_root.display());
+        let graph: UnitGraph = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "units": [
+                {
+                    "pkg_id": sys_pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-build",
+                        "src_path": sys_build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "build",
+                    "dependencies": []
+                },
+                {
+                    "pkg_id": sys_pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-build",
+                        "src_path": sys_build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "run-custom-build",
+                    "dependencies": [
+                        { "index": 0, "extern_crate_name": "build_script_build" }
+                    ]
+                },
+                {
+                    "pkg_id": app_pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-build",
+                        "src_path": app_build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "build",
+                    "dependencies": []
+                },
+                {
+                    "pkg_id": app_pkg_id,
+                    "target": {
+                        "kind": ["custom-build"],
+                        "crate_types": ["bin"],
+                        "name": "build-script-build",
+                        "src_path": app_build_rs_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "run-custom-build",
+                    "dependencies": [
+                        { "index": 2, "extern_crate_name": "build_script_build" },
+                        { "index": 1, "extern_crate_name": "native_sys" }
+                    ]
+                }
+            ],
+            "roots": []
+        }))
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: workspace.clone(),
+                vendor_root: None,
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("cargo_metadata_env=\"DEP_NATIVE_FFI_$(printf '%s' \"$cargo_metadata_key\""));
+        assert!(rendered.contains("export \"$cargo_metadata_env=$cargo_metadata_value\""));
+        fs::remove_dir_all(workspace).unwrap();
     }
 }
