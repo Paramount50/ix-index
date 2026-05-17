@@ -6,11 +6,15 @@ use std::io::Read as _;
 use std::path::PathBuf;
 
 use clap::Parser as _;
+use color_eyre::eyre::WrapErr as _;
 use model::UnitGraph;
 use render::{RenderOptions, render_units_nix};
 
 #[derive(Debug, clap::Parser)]
-#[command(about = "Render Cargo unit graphs as composable Nix derivations")]
+#[command(
+    version,
+    about = "Render Cargo unit graphs as composable Nix derivations"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -25,11 +29,11 @@ enum Command {
 #[derive(Debug, clap::Args)]
 struct RenderArgs {
     /// Canonical workspace root from cargo --unit-graph.
-    #[arg(long, default_value = ".")]
+    #[arg(long, default_value = ".", value_name = "PATH")]
     workspace_root: PathBuf,
 
     /// Cargo vendor directory used for registry/git crates.
-    #[arg(long)]
+    #[arg(long, value_name = "PATH")]
     vendor_root: Option<PathBuf>,
 
     /// Emit CA-derivation attributes on generated units.
@@ -37,19 +41,17 @@ struct RenderArgs {
     content_addressed: bool,
 
     /// Salt unit identity hashes with a Rust toolchain id.
-    #[arg(long)]
+    #[arg(long, value_name = "ID")]
     toolchain_id: Option<String>,
 }
 
 fn render(args: RenderArgs) -> color_eyre::Result<()> {
     let mut input = String::new();
-    std::io::stdin().read_to_string(&mut input)?;
-    let graph: UnitGraph = serde_json::from_str(&input)?;
-    color_eyre::eyre::ensure!(
-        graph.version == 1,
-        "unsupported cargo unit graph version {}",
-        graph.version
-    );
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .wrap_err("reading Cargo unit graph from stdin")?;
+    let graph: UnitGraph =
+        serde_json::from_str(&input).wrap_err("parsing Cargo unit graph JSON")?;
 
     let rendered = render_units_nix(
         &graph,
@@ -59,7 +61,8 @@ fn render(args: RenderArgs) -> color_eyre::Result<()> {
             content_addressed: args.content_addressed,
             toolchain_id: args.toolchain_id,
         },
-    )?;
+    )
+    .wrap_err("rendering Cargo unit graph as Nix")?;
     print!("{rendered}");
 
     Ok(())

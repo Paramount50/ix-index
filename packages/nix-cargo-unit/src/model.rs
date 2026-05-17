@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use sha2::Digest as _;
 
+use color_eyre::eyre::{Result as EyreResult, bail, ensure, eyre};
+
 #[derive(Debug, Deserialize)]
 pub struct UnitGraph {
     pub version: u32,
@@ -15,7 +17,7 @@ pub struct Unit {
     pub profile: Profile,
     #[serde(default)]
     pub features: Vec<String>,
-    pub mode: String,
+    pub mode: UnitMode,
     #[serde(default)]
     pub dependencies: Vec<Dependency>,
     #[serde(default)]
@@ -77,6 +79,46 @@ pub struct Dependency {
     pub public: bool,
     #[serde(default)]
     pub noprelude: bool,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum UnitMode {
+    Build,
+    Check,
+    Test,
+    Doc,
+    RunCustomBuild,
+    Other(String),
+}
+
+impl UnitMode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Build => "build",
+            Self::Check => "check",
+            Self::Test => "test",
+            Self::Doc => "doc",
+            Self::RunCustomBuild => "run-custom-build",
+            Self::Other(mode) => mode,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UnitMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mode = String::deserialize(deserializer)?;
+        Ok(match mode.as_str() {
+            "build" => Self::Build,
+            "check" => Self::Check,
+            "test" => Self::Test,
+            "doc" => Self::Doc,
+            "run-custom-build" => Self::RunCustomBuild,
+            _ => Self::Other(mode),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
@@ -197,6 +239,49 @@ fn default_true() -> bool {
     true
 }
 
+impl UnitGraph {
+    pub fn ensure_supported(&self) -> EyreResult<()> {
+        ensure!(
+            self.version == 1,
+            "unsupported cargo unit graph version {}",
+            self.version
+        );
+        self.validate()
+    }
+
+    pub fn validate(&self) -> EyreResult<()> {
+        for root in &self.roots {
+            if *root >= self.units.len() {
+                bail!(
+                    "root unit index {root} is outside the unit graph with {} units",
+                    self.units.len()
+                );
+            }
+        }
+
+        for (unit_index, unit) in self.units.iter().enumerate() {
+            for dependency in &unit.dependencies {
+                if dependency.index >= self.units.len() {
+                    bail!(
+                        "unit {unit_index} dependency {} points to missing unit {} in graph with {} units",
+                        dependency.extern_crate_name,
+                        dependency.index,
+                        self.units.len()
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn unit(&self, index: usize) -> EyreResult<&Unit> {
+        self.units
+            .get(index)
+            .ok_or_else(|| eyre!("unit index {index} is outside the unit graph"))
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct PackageId<'a> {
     pub name: &'a str,
@@ -233,6 +318,27 @@ pub fn parse_pkg_id(pkg_id: &str) -> Option<PackageId<'_>> {
     })
 }
 
+impl Target {
+    pub fn has_kind(&self, kind: &str) -> bool {
+        self.kind.iter().any(|candidate| candidate == kind)
+    }
+
+    pub fn has_crate_type(&self, crate_type: &str) -> bool {
+        self.crate_types
+            .iter()
+            .any(|candidate| candidate == crate_type)
+    }
+
+    pub fn has_library_kind(&self) -> bool {
+        self.kind.iter().any(|kind| {
+            matches!(
+                kind.as_str(),
+                "lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "proc-macro"
+            )
+        })
+    }
+}
+
 impl Unit {
     pub fn package_name(&self) -> &str {
         parse_pkg_id(&self.pkg_id)
@@ -247,38 +353,27 @@ impl Unit {
     }
 
     pub fn is_bin(&self) -> bool {
-        self.target.crate_types.iter().any(|kind| kind == "bin")
-            || self.target.kind.iter().any(|kind| kind == "bin")
+        self.target.has_crate_type("bin") || self.target.has_kind("bin")
     }
 
     pub fn is_proc_macro(&self) -> bool {
-        self.target
-            .crate_types
-            .iter()
-            .any(|kind| kind == "proc-macro")
-            || self.target.kind.iter().any(|kind| kind == "proc-macro")
+        self.target.has_crate_type("proc-macro") || self.target.has_kind("proc-macro")
     }
 
     pub fn is_library(&self) -> bool {
-        self.target.kind.iter().any(|kind| {
-            matches!(
-                kind.as_str(),
-                "lib" | "rlib" | "dylib" | "cdylib" | "staticlib" | "proc-macro"
-            )
-        })
+        self.target.has_library_kind()
     }
 
     pub fn is_custom_build_compile(&self) -> bool {
-        self.target.kind.iter().any(|kind| kind == "custom-build")
-            && self.mode != "run-custom-build"
+        self.target.has_kind("custom-build") && !self.is_run_custom_build()
     }
 
     pub fn is_run_custom_build(&self) -> bool {
-        self.mode == "run-custom-build"
+        self.mode == UnitMode::RunCustomBuild
     }
 
     pub fn is_test(&self) -> bool {
-        self.mode == "test" || self.target.kind.iter().any(|kind| kind == "test")
+        self.mode == UnitMode::Test || self.target.has_kind("test")
     }
 
     pub fn is_external(&self) -> bool {
@@ -361,7 +456,7 @@ fn write_unit_identity(hasher: &mut sha2::Sha256, unit: &Unit) {
         hasher.update(flag.as_bytes());
         hasher.update(b"\0");
     }
-    hasher.update(unit.mode.as_bytes());
+    hasher.update(unit.mode.as_str().as_bytes());
     hasher.update(b"\0");
     if let Some(platform) = &unit.platform {
         hasher.update(platform.as_bytes());
@@ -466,4 +561,64 @@ fn hex16(bytes: &[u8]) -> String {
         out.push(HEX[(byte & 0xf) as usize] as char);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unit_mode_preserves_unknown_cargo_values() {
+        let mode: UnitMode = serde_json::from_str(r#""future-mode""#).unwrap();
+
+        assert_eq!(mode.as_str(), "future-mode");
+    }
+
+    #[test]
+    fn validation_rejects_missing_root_units() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [],
+              "roots": [0]
+            }"#,
+        )
+        .unwrap();
+
+        let error = graph.ensure_supported().unwrap_err().to_string();
+
+        assert!(error.contains("root unit index 0"));
+    }
+
+    #[test]
+    fn validation_rejects_missing_dependency_units() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "hello",
+                    "src_path": "/workspace/src/lib.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "dev", "opt_level": "0" },
+                  "mode": "build",
+                  "dependencies": [
+                    { "index": 1, "extern_crate_name": "missing" }
+                  ]
+                }
+              ],
+              "roots": [0]
+            }"#,
+        )
+        .unwrap();
+
+        let error = graph.ensure_supported().unwrap_err().to_string();
+
+        assert!(error.contains("unit 0 dependency missing"));
+    }
 }

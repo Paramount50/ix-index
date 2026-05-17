@@ -43,6 +43,9 @@ let
       cargoExtraConfig,
       vendorDir,
     }:
+    let
+      cargoExtraConfigFile = pkgs.writeText "cargo-extra-config.toml" cargoExtraConfig;
+    in
     ''
       export CARGO_HOME="$TMPDIR/cargo-home"
       mkdir -p "$CARGO_HOME"
@@ -51,20 +54,19 @@ let
         sed 's|directory = "cargo-vendor-dir"|directory = "${vendorDir}"|' \
           "${vendorDir}/.cargo/config.toml" > "$CARGO_HOME/config.toml"
       else
-        cat > "$CARGO_HOME/config.toml" <<'EOF_VENDOR_CONFIG'
-      [source.crates-io]
-      replace-with = "vendored-sources"
-
-      [source.vendored-sources]
-      directory = "${vendorDir}"
-      EOF_VENDOR_CONFIG
+        {
+          printf '%s\n' '[source.crates-io]'
+          printf '%s\n' 'replace-with = "vendored-sources"'
+          printf '\n'
+          printf '%s\n' '[source.vendored-sources]'
+          printf '%s\n' 'directory = "${vendorDir}"'
+        } > "$CARGO_HOME/config.toml"
       fi
     ''
     + lib.optionalString (cargoExtraConfig != "") ''
 
-      cat >> "$CARGO_HOME/config.toml" <<'EOF_EXTRA_CARGO_CONFIG'
-      ${cargoExtraConfig}
-      EOF_EXTRA_CARGO_CONFIG
+      printf '\n' >> "$CARGO_HOME/config.toml"
+      cat ${cargoExtraConfigFile} >> "$CARGO_HOME/config.toml"
     '';
 
   commonArgs = args: {

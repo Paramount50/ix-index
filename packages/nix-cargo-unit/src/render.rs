@@ -22,12 +22,12 @@ struct PreparedGraph {
 }
 
 struct BuildScriptRun {
-    name: String,
     compile_index: usize,
     dependency_runs: Vec<usize>,
 }
 
 pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<String> {
+    graph.ensure_supported()?;
     let prepared = prepare_graph(graph, options)?;
     let mut out = String::new();
 
@@ -47,7 +47,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         write!(
             out,
             "    {} = mkUnit {};\n\n",
-            nix_attr(&build_script_run.name),
+            prepared.unit_attr(*run_index),
             render_build_script_run(graph, options, &prepared, *run_index, build_script_run)?
         )?;
     }
@@ -60,7 +60,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         write!(
             out,
             "    {} = mkUnit {};\n\n",
-            nix_attr(&prepared.names[index]),
+            prepared.unit_attr(index),
             render_rustc_unit(graph, options, &prepared, index)?
         )?;
     }
@@ -69,7 +69,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
     out.push_str("in\n");
     out.push_str("{\n");
     out.push_str("  inherit units;\n");
-    write!(out, "  roots = [ {} ];\n", render_roots(graph, &prepared))?;
+    writeln!(out, "  roots = [ {} ];", render_roots(graph, &prepared))?;
     write!(
         out,
         "  packages = {{\n{}  }};\n",
@@ -86,15 +86,21 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         render_root_entries(graph, &prepared, Unit::is_library)
     )?;
     if let Some(first_root) = graph.roots.first() {
-        writeln!(
-            out,
-            "  default = units.{};",
-            nix_attr(&prepared.names[*first_root])
-        )?;
+        writeln!(out, "  default = {};", prepared.unit_ref(*first_root))?;
     }
     out.push_str("}\n");
 
     Ok(out)
+}
+
+impl PreparedGraph {
+    fn unit_attr(&self, index: usize) -> String {
+        nix_attr(&self.names[index])
+    }
+
+    fn unit_ref(&self, index: usize) -> String {
+        format!("units.{}", self.unit_attr(index))
+    }
 }
 
 fn prepare_graph(graph: &UnitGraph, options: &RenderOptions) -> Result<PreparedGraph> {
@@ -130,10 +136,10 @@ fn prepare_graph(graph: &UnitGraph, options: &RenderOptions) -> Result<PreparedG
     let transitive_unit_deps = (0..graph.units.len())
         .map(|index| {
             let mut deps = BTreeSet::new();
-            collect_transitive_unit_deps(graph, index, &mut deps);
-            deps
+            collect_transitive_unit_deps(graph, index, &mut deps)?;
+            Ok(deps)
         })
-        .collect();
+        .collect::<Result<Vec<_>>>()?;
 
     let mut build_script_runs = BTreeMap::new();
     for (index, unit) in graph.units.iter().enumerate() {
@@ -169,7 +175,6 @@ fn prepare_graph(graph: &UnitGraph, options: &RenderOptions) -> Result<PreparedG
         build_script_runs.insert(
             index,
             BuildScriptRun {
-                name: names[index].clone(),
                 compile_index,
                 dependency_runs,
             },
@@ -194,18 +199,10 @@ fn compute_hash(
         return Ok(hash.clone());
     }
 
-    let unit = graph
-        .units
-        .get(index)
-        .ok_or_else(|| eyre!("dependency index {index} is outside the unit graph"))?;
+    let unit = graph.unit(index)?;
     let mut dependency_hashes = Vec::new();
     for dependency in &unit.dependencies {
-        let dependency_unit = graph.units.get(dependency.index).ok_or_else(|| {
-            eyre!(
-                "dependency index {} is outside the unit graph",
-                dependency.index
-            )
-        })?;
+        let dependency_unit = graph.unit(dependency.index)?;
         if dependency_unit.is_run_custom_build() {
             continue;
         }
@@ -223,18 +220,23 @@ fn compute_hash(
     Ok(hash)
 }
 
-fn collect_transitive_unit_deps(graph: &UnitGraph, index: usize, deps: &mut BTreeSet<usize>) {
-    if let Some(unit) = graph.units.get(index) {
-        for dependency in &unit.dependencies {
-            let dependency_unit = &graph.units[dependency.index];
-            if dependency_unit.is_run_custom_build() {
-                continue;
-            }
-            if deps.insert(dependency.index) {
-                collect_transitive_unit_deps(graph, dependency.index, deps);
-            }
+fn collect_transitive_unit_deps(
+    graph: &UnitGraph,
+    index: usize,
+    deps: &mut BTreeSet<usize>,
+) -> Result<()> {
+    let unit = graph.unit(index)?;
+    for dependency in &unit.dependencies {
+        let dependency_unit = graph.unit(dependency.index)?;
+        if dependency_unit.is_run_custom_build() {
+            continue;
+        }
+        if deps.insert(dependency.index) {
+            collect_transitive_unit_deps(graph, dependency.index, deps)?;
         }
     }
+
+    Ok(())
 }
 
 fn render_rustc_unit(
@@ -767,10 +769,10 @@ fn path_expr(options: &RenderOptions, path: &Path) -> String {
     if let Some(expr) = path_under(path, &options.workspace_root, "src") {
         return expr;
     }
-    if let Some(vendor_root) = &options.vendor_root {
-        if let Some(expr) = path_under(path, vendor_root, "vendorDir") {
-            return expr;
-        }
+    if let Some(vendor_root) = &options.vendor_root
+        && let Some(expr) = path_under(path, vendor_root, "vendorDir")
+    {
+        return expr;
     }
     if let Some(expr) = registry_path_expr(path) {
         return expr;
