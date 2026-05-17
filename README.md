@@ -2,6 +2,10 @@
 
 NixOS images and modules for [ix](https://ix.dev) VMs. Built with `-march=znver5` for AMD EPYC Gen 5.
 
+## Why a monorepo
+
+Images, modules, library helpers, presets, tests, and tooling live together so the repo can keep improving without freezing internal APIs for backward compatibility. When a better module shape or helper contract emerges, the same change can update every in-repo caller, fixture, and preset instead of carrying old interfaces indefinitely.
+
 ## Building
 
 Images always target Linux. The flake exposes the same Linux image derivations under both `packages.x86_64-linux` and `packages.aarch64-darwin`, so macOS users can run the normal short form:
