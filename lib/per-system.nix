@@ -117,6 +117,9 @@ in
       inherit (repoPackages) oci-image-builder;
       minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
     }
+    // lib.optionalAttrs (repoPackages ? ix) {
+      inherit (repoPackages) ix;
+    }
     // lib.optionalAttrs (system == ix.system) {
       inherit (repoPackages) tonbo-artifacts;
     };

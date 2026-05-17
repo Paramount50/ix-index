@@ -3,11 +3,16 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    ixCliX86_64Linux = {
+      url = "https://ix.dev/cli/linux-x86_64/ix";
+      flake = false;
+    };
   };
 
   outputs =
     {
       nixpkgs,
+      ixCliX86_64Linux,
       ...
     }:
     let
@@ -24,6 +29,7 @@
         imagePresets.claudeCodeDemo = ./images/presets/claude-code-demo;
         minecraftMods = ./images/games/minecraft/mods;
         packages = {
+          ix = ./packages/ix;
           minecraftHotReloadAgent = ./packages/minecraft-hot-reload-agent;
           minecraftRcon = ./packages/minecraft-rcon;
           minecraftSyncManaged = ./packages/minecraft-sync-managed;
@@ -39,6 +45,7 @@
 
       ix = import ./lib {
         inherit nixpkgs paths;
+        cliArtifacts.x86_64-linux = ixCliX86_64Linux;
       };
       devSystems = [
         "x86_64-linux"

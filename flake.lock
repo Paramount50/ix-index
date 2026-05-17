@@ -1,5 +1,17 @@
 {
   "nodes": {
+    "ixCliX86_64Linux": {
+      "flake": false,
+      "locked": {
+        "narHash": "sha256-gB5DlidOeq/KhGXsvZl+xDMCpxP+WgZZmK4xvTlKrRg=",
+        "type": "file",
+        "url": "https://ix.dev/cli/linux-x86_64/ix"
+      },
+      "original": {
+        "type": "file",
+        "url": "https://ix.dev/cli/linux-x86_64/ix"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1777578337,
@@ -18,6 +30,7 @@
     },
     "root": {
       "inputs": {
+        "ixCliX86_64Linux": "ixCliX86_64Linux",
         "nixpkgs": "nixpkgs"
       }
     }
