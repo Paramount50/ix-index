@@ -60,9 +60,9 @@ rustPlatform.buildRustPackage {
   meta = {
     description = "Clippy tuned for LLM-assisted codebases";
     homepage = "https://github.com/indexable-inc/clippy";
-    license = with lib.licenses; [
-      asl20
-      mit
+    license = [
+      lib.licenses.asl20
+      lib.licenses.mit
     ];
     mainProgram = "clippy-driver";
   };

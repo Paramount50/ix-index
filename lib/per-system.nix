@@ -24,8 +24,6 @@ let
     meta = { inherit description; };
   };
 
-  pythonWithPydantic = pkgs.python3.withPackages (ps: [ ps.pydantic ]);
-
   lint = ix.writeNushellApplication pkgs {
     name = "lint";
     runtimeInputs = [
@@ -57,12 +55,6 @@ let
   updateMods = ix.writePythonApplication pkgs {
     name = "update-mods";
     src = paths.tools.updateMods;
-  };
-
-  ixFleet = ix.writePythonApplication pkgs {
-    name = "ix-fleet";
-    src = paths.tools.ixFleet;
-    python = pythonWithPydantic;
   };
 
   ixShellSyncIgnored = ix.writePythonApplication pkgs {
@@ -132,6 +124,7 @@ in
 
       inherit (repoPackages)
         hyperion
+        ix-fleet
         minecraft-nbt
         minecraft-sync-managed
         llm-clippy
@@ -152,7 +145,7 @@ in
     lint = mkApp lint "Run all Nix formatting and lint checks";
     bench-filesystem = mkApp benchFilesystem "Benchmark file-system behavior from inside an ix VM";
     update-mods = mkApp updateMods "Regenerate Minecraft mod catalogs";
-    ix-fleet = mkApp ixFleet "Render ix fleet plans and commands";
+    ix-fleet = mkApp repoPackages.ix-fleet "Render ix fleet plans and commands";
     ix-shell-sync-ignored = mkApp ixShellSyncIgnored "Copy git-ignored files into an ix shell workspace";
     nix-cargo-unit = mkApp repoPackages.nix-cargo-unit "Render Cargo unit graphs as Nix derivations";
     python-mcp-server = mkApp repoPackages.python-mcp-server "Run a Python MCP server";

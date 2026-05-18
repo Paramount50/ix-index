@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 from __future__ import annotations
 
 import argparse
@@ -568,7 +567,3 @@ def run() -> None:
     ) as error:
         print(f"ix-fleet: {error}", file=sys.stderr)
         raise SystemExit(1) from error
-
-
-if __name__ == "__main__":
-    run()

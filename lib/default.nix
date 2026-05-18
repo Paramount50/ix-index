@@ -522,6 +522,9 @@ let
         hyperion = (pkgsWithRustOverlayFor pkgs).callPackage paths.packages.hyperion {
           ix = ixForPackages;
         };
+        ix-fleet = pkgs.callPackage paths.packages.ixFleet {
+          ix = ixForPackages;
+        };
         minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
           ix = ixForPackages;
         };
@@ -627,14 +630,17 @@ let
   */
   mkFleetFor =
     hostSystem:
+    let
+      hostPkgs = nixpkgs.legacyPackages.${hostSystem};
+    in
     import ./fleet.nix {
       inherit
         lib
         evalImageConfig
         writeNushellApplication
         ;
-      ixFleetScript = paths.tools.ixFleet;
-      pkgs = nixpkgs.legacyPackages.${hostSystem};
+      pkgs = hostPkgs;
+      ixFleet = (packageSetFor hostPkgs).ix-fleet;
     };
 
   mkFleet = mkFleetFor system;

@@ -25,14 +25,6 @@ ix up
 - [`bukkit.nix`](bukkit.nix), [`paper.nix`](paper.nix), and
   [`spigot.nix`](spigot.nix) hold loader config files.
 
-The plugin URLs and hashes come from
-[`images/games/minecraft/plugins/paper/manifest.json`](../../images/games/minecraft/plugins/paper/manifest.json).
-Regenerate the catalog from the repo root with:
-
-```bash
-nix run .#update-mods -- --manifest images/games/minecraft/plugins/paper/manifest.json
-```
-
 The world border is applied after startup through local RCON. RCON stays off the
 firewall by default; ix uses it to apply the border and reload managed Paper
 plugins during a switch.

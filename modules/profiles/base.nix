@@ -58,7 +58,9 @@ in
         description = "Shell executed after entering the image workspace.";
       };
     };
+  };
 
+  config = lib.mkIf config.ix.profiles.base.enable {
     # Cubic halves cwnd on any loss, so a residential last-mile at
     # 30 ms and a couple percent loss caps a single TCP flow far
     # below the path's real capacity. BBR models bottleneck bandwidth
@@ -79,9 +81,7 @@ in
       "net.ipv4.tcp_congestion_control" = "bbr";
       "net.core.default_qdisc" = "fq";
     };
-  };
 
-  config = lib.mkIf config.ix.profiles.base.enable {
     environment.systemPackages =
       builtins.attrValues {
         inherit (pkgs)

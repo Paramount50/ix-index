@@ -280,10 +280,12 @@ let
       };
 
   replaceWorkspaceValues = pkgs.writers.writePython3 "replace-workspace-values" {
-    libraries = with pkgs.python3Packages; [
-      tomli
-      tomli-w
-    ];
+    libraries = builtins.attrValues {
+      inherit (pkgs.python3Packages)
+        tomli
+        tomli-w
+        ;
+    };
     flakeIgnore = [
       "E501"
       "W503"

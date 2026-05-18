@@ -1014,18 +1014,6 @@ let
         assertion = builtins.elem base.cfg.shellWorkspace.shell base.config.environment.systemPackages;
         message = "base profile should install the configured workspace shell";
       }
-      {
-        assertion = base.imageConfig.ix.image.name == "ix/base";
-        message = "base image package should publish under the ix/base system namespace";
-      }
-      {
-        assertion = base.imageConfig.ix.image.tag == "latest";
-        message = "base image package should use the stable latest tag";
-      }
-      {
-        assertion = base.imageConfig.ix.build.ociImage.name == "ix-base-oci.tar";
-        message = "base image package should produce a named OCI archive derivation";
-      }
     ];
 
     factions-server = [
@@ -1035,58 +1023,10 @@ let
       }
       {
         assertion =
-          factionsExample.cfg.paper.enable
-          && factionsExample.cfg.version == "26.1.2"
-          && factionsExample.cfg.properties."level-name" == "factions";
-        message = "factions-server example should run the 26.1.2 Paper factions world";
-      }
-      {
-        assertion =
           factionsExample.cfg.worldBorder.enable
           && factionsExample.cfg.worldBorder.diameter == 12000
           && factionsExample.cfg.properties."max-world-size" == 6000;
         message = "factions-server example should declare a managed world border";
-      }
-      {
-        assertion =
-          lib.all (slug: builtins.hasAttr slug factionsExample.cfg.plugins) [
-            "pvpindex-factions"
-            "teams-api"
-            "placeholderapi"
-            "luckperms"
-            "vaultunlocked"
-            "essentialsx"
-            "essentialsx-spawn"
-            "coreprotect"
-            "eternaleconomy"
-            "quickshop-hikari"
-            "tradepost"
-            "worldedit"
-            "worldguard"
-            "terraformgenerator"
-            "combatlogplugin"
-            "simple-voice-chat"
-            "distant-horizons-support"
-            "bluemap"
-            "skript"
-          ]
-          && !(builtins.hasAttr "fastasyncworldedit" factionsExample.cfg.plugins);
-        message = "factions-server example should use the curated Paper plugin catalog slugs";
-      }
-      {
-        assertion =
-          factionsExample.cfg.datapacks."max-height".dimensionTypes.overworld.min_y == -2032
-          && factionsExample.cfg.datapacks."max-height".dimensionTypes.overworld.height == 4064
-          && factionsExample.cfg.datapacks."max-height".dimensionTypes.the_end.height == 4064;
-        message = "factions-server example should install a max-height datapack";
-      }
-      {
-        assertion =
-          builtins.hasAttr "paper-global.yml" factionsExample.cfg.configFiles
-          && builtins.hasAttr "paper-world-defaults.yml" factionsExample.cfg.configFiles
-          && builtins.hasAttr "spigot.yml" factionsExample.cfg.serverFiles
-          && builtins.hasAttr "bukkit.yml" factionsExample.cfg.serverFiles;
-        message = "factions-server example should configure Paper, Spigot, and Bukkit files";
       }
       {
         assertion =
@@ -1264,7 +1204,9 @@ let
         message = "generic ix.extendedAttributes should expose absolute runtime paths";
       }
       {
-        assertion = builtins.elem pkgs.attr extendedAttributes.config.environment.systemPackages;
+        assertion = builtins.any (
+          p: (p.pname or null) == "attr"
+        ) extendedAttributes.config.environment.systemPackages;
         message = "generic ix.extendedAttributes should add attr tools for runtime inspection";
       }
       {

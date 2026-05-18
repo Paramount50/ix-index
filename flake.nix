@@ -43,6 +43,7 @@
         packages = {
           ix = ./packages/ix;
           hyperion = ./packages/hyperion;
+          ixFleet = ./packages/ix-fleet;
           minecraftHotReloadAgent = ./packages/minecraft-hot-reload-agent;
           minecraftNbt = ./packages/minecraft-nbt;
           minecraftRcon = ./packages/minecraft-rcon;
@@ -55,7 +56,6 @@
           tonboArtifacts = ./packages/tonbo-artifacts;
         };
         tools = {
-          ixFleet = ./tools/ix-fleet.py;
           ixShellSyncIgnored = ./tools/ix-shell-sync-ignored.py;
           updateMods = ./tools/update-mods.py;
         };

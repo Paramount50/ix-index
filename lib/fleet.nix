@@ -11,7 +11,7 @@
   lib,
   pkgs,
   evalImageConfig,
-  ixFleetScript,
+  ixFleet,
   writeNushellApplication,
 }:
 {
@@ -187,7 +187,6 @@ let
   };
 
   plan = pkgs.writeText "ix-fleet-plan.json" (builtins.toJSON planValue);
-  python = pkgs.python3.withPackages (ps: [ ps.pydantic ]);
   userLocalBinPath = ''
     let home = ($env.HOME? | default "")
     if $home != "" {
@@ -200,11 +199,11 @@ let
     sub:
     writeNushellApplication pkgs {
       name = if sub == null then "ix-fleet" else "ix-fleet-${sub}";
-      runtimeInputs = [ python ];
+      runtimeInputs = [ ixFleet ];
       text = ''
         def --wrapped main [...args] {
           ${userLocalBinPath}
-          exec python3 ${ixFleetScript} --plan ${plan} ${lib.optionalString (sub != null) "${sub} "}...$args
+          exec ${lib.getExe ixFleet} --plan ${plan} ${lib.optionalString (sub != null) "${sub} "}...$args
         }
       '';
     };
