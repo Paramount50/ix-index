@@ -961,6 +961,12 @@ in
       type = types.port;
       default = 25565;
     };
+
+    openFirewall = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Whether to open the Minecraft Java port in the firewall.";
+    };
   };
 
   config = mkIf cfg.enable {
@@ -1050,10 +1056,8 @@ in
       };
     };
 
-    networking.firewall.allowedTCPPorts = [
-      cfg.port
-    ]
-    ++ lib.optionals cfg.rcon.openFirewall [ rconPort ];
+    networking.firewall.allowedTCPPorts =
+      lib.optionals cfg.openFirewall [ cfg.port ] ++ lib.optionals cfg.rcon.openFirewall [ rconPort ];
     environment.etc = {
       "minecraft/managed-dropins".source = managed.dropins;
       "minecraft/managed-datapacks".source = managed.datapacks;

@@ -9,6 +9,8 @@
 {
   base = ./profiles/base.nix;
   extended-attributes = ./profiles/extended-attributes.nix;
+  floodgate = ./services/floodgate.nix;
+  geyser = ./services/geyser.nix;
   git-clone = ./services/git-clone.nix;
   hyperion = ./services/hyperion.nix;
   minestom = ./services/minestom.nix;
@@ -16,6 +18,7 @@
   postgresql = ./services/postgresql.nix;
   remote-desktop = ./services/remote-desktop.nix;
   resource-monitor = ./services/resource-monitor;
+  velocity = ./services/velocity.nix;
 
   minecraft = {
     runtime = ./services/minecraft;

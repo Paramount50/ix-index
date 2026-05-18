@@ -848,6 +848,31 @@ let
       };
     };
 
+  survivalExample =
+    let
+      fleet = import ../examples/survival-server {
+        index = {
+          lib = ix;
+        };
+      };
+      config = fleet.nodes.survival;
+    in
+    {
+      inherit fleet config;
+      inherit (config.services)
+        floodgate
+        geyser
+        minecraft
+        velocity
+        ;
+      managed = {
+        minecraftConfig = config.environment.etc."minecraft/managed-config".source;
+        minecraftServerFiles = config.environment.etc."minecraft/managed-server-files".source;
+        velocityConfig = config.environment.etc."velocity/managed-config".source;
+        velocityPlugins = config.environment.etc."velocity/managed-plugins".source;
+      };
+    };
+
   dailyScraperExample =
     let
       fleet = import ../examples/python-daily-scraper {
@@ -1067,6 +1092,68 @@ let
           && claims.simple-voice-chat.protocol == "udp"
           && claims.simple-voice-chat.port == 24454;
         message = "factions-server example should register every service listener in ix.networking.portClaims";
+      }
+    ];
+
+    survival-server = [
+      {
+        assertion = survivalExample.config.ix.image.tag == "survival-server";
+        message = "survival-server example should set a stable replacement image tag";
+      }
+      {
+        assertion =
+          survivalExample.velocity.enable
+          && survivalExample.velocity.servers.survival == "127.0.0.1:25566"
+          && survivalExample.velocity.try == [ "survival" ]
+          && survivalExample.velocity.forwarding.mode == "modern";
+        message = "survival-server example should route Velocity to the local Paper backend";
+      }
+      {
+        assertion =
+          survivalExample.geyser.enable
+          && survivalExample.geyser.remote.authType == "floodgate"
+          && survivalExample.floodgate.enable;
+        message = "survival-server example should enable Geyser with Floodgate auth";
+      }
+      {
+        assertion =
+          survivalExample.minecraft.paper.enable
+          && survivalExample.minecraft.version == "26.1.2"
+          && survivalExample.minecraft.port == 25566
+          && !survivalExample.minecraft.openFirewall
+          && !survivalExample.minecraft.properties."online-mode";
+        message = "survival-server example should keep Paper behind the proxy";
+      }
+      {
+        assertion =
+          let
+            ports = survivalExample.config.networking.firewall.allowedTCPPorts;
+          in
+          builtins.elem 25565 ports
+          && !(builtins.elem 25566 ports)
+          && !(builtins.elem survivalExample.minecraft.rcon.port ports);
+        message = "survival-server example should expose Velocity while keeping backend and RCON private";
+      }
+      {
+        assertion = builtins.elem 19132 survivalExample.config.networking.firewall.allowedUDPPorts;
+        message = "survival-server example should expose Geyser's Bedrock UDP listener";
+      }
+      {
+        assertion =
+          let
+            claims = survivalExample.config.ix.networking.portClaims;
+          in
+          lib.all (claim: builtins.hasAttr claim claims) [
+            "velocity"
+            "minecraft"
+            "minecraft-rcon"
+            "geyser"
+          ]
+          && claims.velocity.port == 25565
+          && claims.minecraft.port == 25566
+          && claims.geyser.protocol == "udp"
+          && claims.geyser.port == 19132;
+        message = "survival-server example should register proxy, backend, RCON, and Bedrock listeners";
       }
     ];
 
@@ -1928,6 +2015,21 @@ let
       grep -q 'optimize-explosions: true' ${factionsExample.managed.config}/paper-world-defaults.yml
       grep -q 'allow-piston-duplication: true' ${factionsExample.managed.config}/paper-global.yml
       grep -q 'worldborder set 12000' ${factionsExample.service.serviceConfig.ExecStart}
+    '';
+
+    survival-server = ''
+      test -L ${survivalExample.managed.velocityPlugins}/Geyser-Velocity.jar
+      test -L ${survivalExample.managed.velocityPlugins}/floodgate-velocity.jar
+      grep -q "bind = '0.0.0.0:25565'" ${survivalExample.managed.velocityConfig}/velocity.toml
+      grep -q "player-info-forwarding-mode = 'modern'" ${survivalExample.managed.velocityConfig}/velocity.toml
+      grep -q "survival = '127.0.0.1:25566'" ${survivalExample.managed.velocityConfig}/velocity.toml
+      grep -q 'auth-type: floodgate' ${survivalExample.managed.velocityConfig}/plugins/geyser/config.yml
+      grep -q 'port: 19132' ${survivalExample.managed.velocityConfig}/plugins/geyser/config.yml
+      grep -q 'send-floodgate-data: false' ${survivalExample.managed.velocityConfig}/plugins/floodgate/proxy-config.yml
+      grep -q 'enabled: true' ${survivalExample.managed.minecraftConfig}/paper-global.yml
+      grep -q 'secret: ix-survival-example-forwarding-secret-change-me' ${survivalExample.managed.minecraftConfig}/paper-global.yml
+      grep -q '^server-port=25566$' ${survivalExample.managed.minecraftServerFiles}/server.properties
+      grep -q '^online-mode=false$' ${survivalExample.managed.minecraftServerFiles}/server.properties
     '';
 
     extended-attributes = ''
