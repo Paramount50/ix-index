@@ -28,6 +28,9 @@ let
     cargoExtraConfig = args.cargoExtraConfig or "";
     vendorDir = args.vendorDir or null;
     vendorSources = args.vendorSources or null;
+    # Maps exact Cargo.lock source strings to already-fetched source trees.
+    # This keeps private Git dependencies reproducible without requiring
+    # sandboxed fetchers to see a developer SSH agent or GitHub credentials.
     sourceOverrides = args.sourceOverrides or { };
     outputHashes = args.outputHashes or { };
     contentAddressed = args.contentAddressed or false;
