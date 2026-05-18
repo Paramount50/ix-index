@@ -29,6 +29,18 @@ in
       type = types.str;
       default = "/var/lib/postgresql/18";
     };
+
+    sharedBuffersMiB = mkOption {
+      type = types.ints.positive;
+      default = 256;
+      description = ''
+        Postgres `shared_buffers` in MiB. Drives both the rendered
+        server setting and the kernel's `vm.nr_hugepages` reservation
+        so the two stay coherent. Override this single value to
+        resize the buffer cache: the matching hugepage pool moves
+        with it.
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
@@ -39,6 +51,30 @@ in
     };
 
     networking.firewall.allowedTCPPorts = [ cfg.port ];
+
+    # `services.postgresql.settings.huge_pages = "on"` (below) makes
+    # postmaster refuse to start without a sufficient pool of 2 MiB
+    # hugepages. Reserve them at boot, sized from `sharedBuffersMiB`
+    # plus headroom for `wal_buffers` (64 MiB) and per-connection
+    # mappings. Pages reserved here are locked out of the regular
+    # page cache for the lifetime of the boot.
+    #
+    # `vm.swappiness = 1` keeps the kernel from paging shared_buffers
+    # out under memory pressure: PG's own buffer manager tracks hot
+    # pages better than the kernel, and swapping a hot page turns a
+    # sub-millisecond hit into a disk read. PG community guidance
+    # for dedicated DB hosts is 1-10.
+    #
+    # `vm.dirty_{background_,}ratio` bound the dirty-page cache so a
+    # checkpoint flush does not stall client I/O behind tens of GiB
+    # of accumulated dirty WAL. The values match the conservative
+    # end of the PG community recommendation for WAL-heavy NVMe.
+    boot.kernel.sysctl = {
+      "vm.nr_hugepages" = (cfg.sharedBuffersMiB / 2) + 32;
+      "vm.swappiness" = 1;
+      "vm.dirty_background_ratio" = 5;
+      "vm.dirty_ratio" = 10;
+    };
 
     services.postgresql = {
       enable = true;
@@ -54,7 +90,7 @@ in
         max_connections = "200";
 
         # memory
-        shared_buffers = "256MB";
+        shared_buffers = "${toString cfg.sharedBuffersMiB}MB";
         effective_cache_size = "768MB";
         work_mem = "4MB";
         maintenance_work_mem = "128MB";
@@ -86,7 +122,8 @@ in
         # logging
         log_min_duration_statement = "1000"; # log queries over 1s
 
-        # EPYC supports 2MB and 1GB huge pages
+        # EPYC supports 2MB and 1GB huge pages. Hugepage pool is sized
+        # from `sharedBuffersMiB` in the `boot.kernel.sysctl` block above.
         huge_pages = "on";
 
         # JIT
