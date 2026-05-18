@@ -4,6 +4,11 @@
     tag = "1.21.11-fabric";
   };
 
+  # The status canary reaches Minecraft through ix port-forwarding and does
+  # not expose a guest-managed north-south port. Keeping the NixOS firewall
+  # unit off removes boot work from the five-minute lifecycle probe.
+  networking.firewall.enable = false;
+
   services.minecraft = {
     enable = true;
     version = "1.21.11";
