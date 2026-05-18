@@ -274,6 +274,8 @@ let
     else
       {
         url = builtins.elemAt parts 0;
+        refType = builtins.elemAt parts 2;
+        ref = builtins.elemAt parts 3;
         sha = builtins.elemAt parts 4;
       };
 
@@ -391,10 +393,23 @@ let
   vendorConfigScript =
     {
       cargoExtraConfig,
+      cargoLock,
       vendorDir,
     }:
     let
       cargoExtraConfigFile = pkgs.writeText "cargo-extra-config.toml" cargoExtraConfig;
+      gitSources = lib.unique (
+        map (pkg: parseGitSource pkg.source // { inherit (pkg) source; }) (gitPackages cargoLock)
+      );
+      gitSourceConfig = lib.concatMapStringsSep "\n" (git: ''
+        printf '\n'
+        printf '%s\n' ${lib.escapeShellArg ''[source."${git.source}"]''}
+        printf '%s\n' ${lib.escapeShellArg "git = ${builtins.toJSON git.url}"}
+        ${lib.optionalString (git.refType != null) ''
+          printf '%s\n' ${lib.escapeShellArg "${git.refType} = ${builtins.toJSON git.ref}"}
+        ''}
+        printf '%s\n' 'replace-with = "vendored-sources"'
+      '') gitSources;
     in
     ''
       export CARGO_HOME="$TMPDIR/cargo-home"
@@ -412,6 +427,10 @@ let
           printf '%s\n' 'directory = "${vendorDir}"'
         } > "$CARGO_HOME/config.toml"
       fi
+
+      {
+        ${gitSourceConfig}
+      } >> "$CARGO_HOME/config.toml"
     ''
     + lib.optionalString (cargoExtraConfig != "") ''
 
@@ -524,7 +543,7 @@ let
       )
       ''
         ${vendorConfigScript {
-          inherit (args) cargoExtraConfig vendorDir;
+          inherit (args) cargoExtraConfig cargoLock vendorDir;
         }}
 
         cd ${args.src}
@@ -565,7 +584,7 @@ let
       )
       ''
         ${vendorConfigScript {
-          inherit (args) cargoExtraConfig vendorDir;
+          inherit (args) cargoExtraConfig cargoLock vendorDir;
         }}
 
         export CARGO_TARGET_DIR="$TMPDIR/cargo-target"

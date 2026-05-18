@@ -112,7 +112,7 @@ let
       ''
         ${rust.vendorConfigScript {
           inherit vendorDir;
-          inherit (args) cargoExtraConfig;
+          inherit (args) cargoExtraConfig cargoLock;
         }}
 
         export CARGO_TARGET_DIR="$TMPDIR/cargo-target"
