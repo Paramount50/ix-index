@@ -189,7 +189,7 @@ let
     inherit uvLockFor;
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
-  rustNightlyChannel = "nightly-2026-05-04";
+  rustNightlyChannel = "nightly-2026-05-17";
   pkgsWithRustOverlayFor =
     pkgs: if builtins.hasAttr "rust-bin" pkgs then pkgs else pkgs.extend rust-overlay.overlays.default;
   rustNightlyToolchainFor =

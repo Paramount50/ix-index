@@ -282,10 +282,42 @@ let
       );
     in
     workspace.binaries.${binary} or workspace.default;
+
+  /**
+    Build several binary targets from one workspace unit graph.
+
+    Use this when a system closure needs many binaries from the same Cargo
+    workspace. One `cargo build --unit-graph` invocation resolves all selected
+    roots, then callers can select individual binaries from the rendered graph.
+  */
+  buildBinaries =
+    {
+      binaries,
+      cargoArgs ? [ ],
+      ...
+    }@args:
+    let
+      workspace = buildWorkspace (
+        builtins.removeAttrs args [
+          "binaries"
+          "cargoArgs"
+        ]
+        // {
+          cargoArgs =
+            lib.concatMap (binary: [
+              "--bin"
+              binary
+            ]) binaries
+            ++ cargoArgs;
+        }
+      );
+    in
+    lib.genAttrs binaries (binary: workspace.binaries.${binary} or workspace.default);
 in
 {
   inherit
     buildBinary
+    buildBinaries
     buildPackage
     buildWorkspace
     auditCargoLock

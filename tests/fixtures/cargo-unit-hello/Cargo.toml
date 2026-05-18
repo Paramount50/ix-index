@@ -11,3 +11,7 @@ path = "src/lib.rs"
 [[bin]]
 name = "cargo-unit-hello"
 path = "src/main.rs"
+
+[[bin]]
+name = "cargo-unit-goodbye"
+path = "src/goodbye.rs"

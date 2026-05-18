@@ -501,6 +501,15 @@ let
 
   cargoUnitHello = cargoUnitWorkspace.binaries.cargo-unit-hello;
 
+  cargoUnitBinaries = ix.cargoUnit.buildBinaries {
+    src = cargoUnitFixture;
+    workspaceRoot = ./fixtures/cargo-unit-hello;
+    binaries = [
+      "cargo-unit-goodbye"
+      "cargo-unit-hello"
+    ];
+  };
+
   cargoUnitTestWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
     workspaceRoot = ./fixtures/cargo-unit-hello;
@@ -1666,6 +1675,13 @@ let
         message = "cargo-unit package outputs should be wrapped by policy checks by default";
       }
       {
+        assertion = builtins.all (binary: builtins.hasAttr binary cargoUnitBinaries) [
+          "cargo-unit-goodbye"
+          "cargo-unit-hello"
+        ];
+        message = "cargo-unit should build several binary roots from one workspace graph";
+      }
+      {
         assertion = builtins.hasAttr "cargo_unit_hello" cargoUnitTestWorkspace.tests;
         message = "cargo-unit workspaces should expose test targets as separate checks";
       }
@@ -1984,6 +2000,8 @@ let
 
     ${cargoUnitHello}/bin/cargo-unit-hello > cargo-unit-hello.out
     grep -q 'hello from cargo-unit' cargo-unit-hello.out
+    ${cargoUnitBinaries.cargo-unit-goodbye}/bin/cargo-unit-goodbye > cargo-unit-goodbye.out
+    grep -q 'goodbye from cargo-unit' cargo-unit-goodbye.out
     test -d ${cargoUnitTestWorkspace.tests.cargo_unit_hello}
 
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
