@@ -48,9 +48,12 @@ let
       "hyperion-proxy"
     ];
     outputHashes = {
-      "bvh-0.1.0" = "sha256-QjsyP9XdR53JDNFC8IX1qgTlJQZmanAZU+246QG4v9s=";
-      "divan-0.1.21" = "sha256-WmzYLzLwXUGuX0K151Kh+fEV6nJJQLq/vb4ijXu01Vg=";
-      "valence_anvil-0.1.0" = "sha256-rpuJSz8KxEwG5qeT4HYVtTxHJ24nrYZJwDurv+mjPxM=";
+      "git+https://github.com/TestingPlant/bvh-data#9bffb03a4b894a7884c9ec0da986bdde732ac704" =
+        "sha256-QjsyP9XdR53JDNFC8IX1qgTlJQZmanAZU+246QG4v9s=";
+      "git+https://github.com/TestingPlant/valence?branch=feat-bytes#fb792dcb6669b64c5dc2366eb3d074b293def046" =
+        "sha256-rpuJSz8KxEwG5qeT4HYVtTxHJ24nrYZJwDurv+mjPxM=";
+      "git+https://github.com/nvzqz/divan#bca5c9676a35751d0a8164df7d79bda70f23286b" =
+        "sha256-WmzYLzLwXUGuX0K151Kh+fEV6nJJQLq/vb4ijXu01Vg=";
     };
     nativeBuildInputs = [
       pkg-config

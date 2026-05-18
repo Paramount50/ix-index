@@ -118,6 +118,77 @@ let
 
   nativeBuildInputsForPolicy = policy: lib.optionals policy.linker.useMold [ pkgs.mold ];
 
+  cargoLockPackages =
+    cargoLock: (builtins.fromTOML (builtins.readFile (cargoLockFile cargoLock))).package or [ ];
+
+  dependencyPackages = cargoLock: builtins.filter (pkg: pkg ? source) (cargoLockPackages cargoLock);
+
+  gitPackages =
+    cargoLock: builtins.filter (pkg: lib.hasPrefix "git+" pkg.source) (dependencyPackages cargoLock);
+
+  packageSourceKey = pkg: "${pkg.source}#${pkg.name}@${pkg.version}";
+
+  duplicateGitNameVersions =
+    cargoLock:
+    let
+      packagesByNameVersion = builtins.groupBy (pkg: "${pkg.name}-${pkg.version}") (
+        gitPackages cargoLock
+      );
+      duplicates = lib.filterAttrs (_: packages: builtins.length packages > 1) packagesByNameVersion;
+    in
+    builtins.attrNames duplicates;
+
+  checkedGitOutputHashes =
+    cargoLock: outputHashes:
+    let
+      expectedSources = builtins.listToAttrs (
+        map (pkg: lib.nameValuePair pkg.source true) (gitPackages cargoLock)
+      );
+      missing = builtins.filter (name: !(builtins.hasAttr name outputHashes)) (
+        builtins.attrNames expectedSources
+      );
+      unused = builtins.filter (name: !(builtins.hasAttr name expectedSources)) (
+        builtins.attrNames outputHashes
+      );
+    in
+    assert lib.assertMsg (missing == [ ]) ''
+      outputHashes is missing hashes for git source strings in Cargo.lock: ${lib.concatStringsSep ", " missing}
+      Key each git hash by the exact Cargo.lock source string, for example:
+      outputHashes."git+https://github.com/owner/repo#rev" = "sha256-...";
+    '';
+    assert lib.assertMsg (unused == [ ]) ''
+      outputHashes contains keys that are not git source strings in Cargo.lock: ${lib.concatStringsSep ", " unused}
+      Key each git hash by the exact Cargo.lock source string, for example:
+      outputHashes."git+https://github.com/owner/repo#rev" = "sha256-...";
+    '';
+    outputHashes;
+
+  gitHashForPackage =
+    outputHashes: pkg:
+    outputHashes.${pkg.source} or (throw ''
+      No hash was found while vendoring the git dependency ${pkg.name}-${pkg.version}.
+      Add outputHashes."${pkg.source}".
+    '');
+
+  importCargoLockOutputHashes =
+    {
+      cargoLock,
+      outputHashes,
+    }:
+    let
+      checkedOutputHashes = checkedGitOutputHashes cargoLock outputHashes;
+      duplicateNameVersions = duplicateGitNameVersions cargoLock;
+    in
+    assert lib.assertMsg (duplicateNameVersions == [ ]) ''
+      Cargo.lock contains multiple git dependencies with the same name-version: ${lib.concatStringsSep ", " duplicateNameVersions}
+      nixpkgs importCargoLock accepts name-version keyed git hashes, so cargo-unit cannot generate an aggregate vendor dir for this lock without losing source identity.
+    '';
+    builtins.listToAttrs (
+      map (
+        pkg: lib.nameValuePair "${pkg.name}-${pkg.version}" (gitHashForPackage checkedOutputHashes pkg)
+      ) (gitPackages cargoLock)
+    );
+
   exportRustFlagsScript =
     policy:
     let
@@ -175,7 +246,7 @@ let
     else
       pkgs.rustPlatform.importCargoLock {
         lockFile = cargoLockFile cargoLock;
-        inherit outputHashes;
+        outputHashes = importCargoLockOutputHashes { inherit cargoLock outputHashes; };
       };
 
   registryDownloadUrls = {
@@ -219,33 +290,8 @@ let
       vendorSources
     else
       let
-        lock = builtins.fromTOML (builtins.readFile (cargoLockFile cargoLock));
-        dependencyPackages = builtins.filter (pkg: pkg ? source) (lock.package or [ ]);
-        gitPackages = builtins.filter (pkg: lib.hasPrefix "git+" pkg.source) dependencyPackages;
-        packageSourceKey = pkg: "${pkg.source}#${pkg.name}@${pkg.version}";
-        gitShasByNameVersion = builtins.listToAttrs (
-          map (
-            pkg:
-            let
-              git = parseGitSource pkg.source;
-            in
-            {
-              name = "${pkg.name}-${pkg.version}";
-              value = git.sha;
-            }
-          ) gitPackages
-        );
-        gitOutputHashes = lib.mapAttrs' (
-          nameVersion: hash:
-          let
-            unusedHash = throw "A hash was specified for ${nameVersion}, but there is no corresponding git dependency.";
-            rev = gitShasByNameVersion.${nameVersion} or unusedHash;
-          in
-          {
-            name = rev;
-            value = hash;
-          }
-        ) outputHashes;
+        packages = dependencyPackages cargoLock;
+        checkedOutputHashes = checkedGitOutputHashes cargoLock outputHashes;
         registryPackageSource =
           pkg: source: checksum:
           let
@@ -264,14 +310,10 @@ let
           pkg:
           let
             git = parseGitSource pkg.source;
-            missingHash = throw ''
-              No hash was found while vendoring the git dependency ${pkg.name}-${pkg.version}.
-              Add outputHashes."${pkg.name}-${pkg.version}" for the git tree at ${pkg.source}.
-            '';
             tree = pkgs.fetchgit {
               inherit (git) url;
               rev = git.sha;
-              sha256 = gitOutputHashes.${git.sha} or missingHash;
+              sha256 = gitHashForPackage checkedOutputHashes pkg;
             };
           in
           pkgs.runCommand "${pkg.name}-${pkg.version}"
@@ -331,8 +373,8 @@ let
           else
             throw "Cannot create a package-shaped vendor source for ${pkg.name}-${pkg.version} from ${source}";
       in
-      builtins.deepSeq gitOutputHashes (
-        builtins.listToAttrs (builtins.filter (entry: entry != null) (map packageSource dependencyPackages))
+      builtins.deepSeq checkedOutputHashes (
+        builtins.listToAttrs (builtins.filter (entry: entry != null) (map packageSource packages))
       );
 
   vendorConfigScript =

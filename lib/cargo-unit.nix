@@ -127,6 +127,7 @@ let
       };
       unitGraphJson = rawArgs.unitGraphJson or (generateUnitGraph rawArgs);
       toolchainId = builtins.baseNameOf (builtins.toString args.rustToolchain);
+      cargoLockForRender = rust.cargoLockFile args.cargoLock;
       renderFlags = [
         "render"
         "--workspace-root"
@@ -142,9 +143,10 @@ let
     pkgs.runCommand "cargo-units.nix"
       {
         nativeBuildInputs = [ nixCargoUnit ];
+        inherit cargoLockForRender;
       }
       ''
-        nix-cargo-unit ${lib.escapeShellArgs renderFlags} < ${unitGraphJson} > "$out"
+        nix-cargo-unit ${lib.escapeShellArgs renderFlags} --cargo-lock "$cargoLockForRender" < ${unitGraphJson} > "$out"
       '';
 
   /**
@@ -175,6 +177,9 @@ let
     vendored package directory. A source edit in `crates/api` does not change
     the Nix input for `crates/worker`, `itoa`, or `ryu`; a `Cargo.lock` update
     for one transitive crate leaves unrelated vendored crate derivations alone.
+    Git dependency `outputHashes` are keyed by the exact `Cargo.lock` source
+    string, including the locked rev, so multi-package git repos share one
+    tree hash without losing package identity.
     Pass `workspaceRoot = ./.` for local workspaces so `src` can stay a filtered
     build input while package scopes are carved from the real checkout root.
     Rendering fails when a unit path cannot be tied back to `src` or `vendorDir`.

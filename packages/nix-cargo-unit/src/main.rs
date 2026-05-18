@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use clap::Parser as _;
 use color_eyre::eyre::WrapErr as _;
 use model::UnitGraph;
-use render::{render_units_nix, RenderOptions};
+use render::{render_units_nix, CargoLockSources, RenderOptions};
 
 #[derive(Debug, clap::Parser)]
 #[command(
@@ -36,6 +36,10 @@ struct RenderArgs {
     #[arg(long, value_name = "PATH")]
     vendor_root: Option<PathBuf>,
 
+    /// Cargo.lock used to resolve exact registry, sparse, and git source identities.
+    #[arg(long, value_name = "PATH")]
+    cargo_lock: PathBuf,
+
     /// Emit CA-derivation attributes on generated units.
     #[arg(long)]
     content_addressed: bool,
@@ -56,12 +60,14 @@ fn render(args: RenderArgs) -> color_eyre::Result<()> {
         .wrap_err("reading Cargo unit graph from stdin")?;
     let graph: UnitGraph =
         serde_json::from_str(&input).wrap_err("parsing Cargo unit graph JSON")?;
+    let cargo_lock_sources = CargoLockSources::from_path(&args.cargo_lock)?;
 
     let rendered = render_units_nix(
         &graph,
         &RenderOptions {
             workspace_root: args.workspace_root,
             vendor_root: args.vendor_root,
+            cargo_lock_sources,
             content_addressed: args.content_addressed,
             toolchain_id: args.toolchain_id,
             deny_unused_crate_dependencies: args.deny_unused_crate_dependencies,

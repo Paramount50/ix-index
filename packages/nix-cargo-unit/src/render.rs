@@ -4,7 +4,8 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use askama::Template as _;
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{eyre, Result, WrapErr as _};
+use serde::Deserialize;
 use sha2::Digest as _;
 
 use crate::model::{Unit, UnitGraph};
@@ -13,9 +14,118 @@ use crate::shell;
 pub struct RenderOptions {
     pub workspace_root: PathBuf,
     pub vendor_root: Option<PathBuf>,
+    pub cargo_lock_sources: CargoLockSources,
     pub content_addressed: bool,
     pub toolchain_id: Option<String>,
     pub deny_unused_crate_dependencies: bool,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CargoLockSources {
+    packages: Vec<CargoLockPackage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoLock {
+    #[serde(default)]
+    package: Vec<CargoLockPackageEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoLockPackageEntry {
+    name: String,
+    version: String,
+    source: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct CargoLockPackage {
+    name: String,
+    version: String,
+    source: String,
+}
+
+impl CargoLockSources {
+    pub fn from_path(path: &Path) -> Result<Self> {
+        let lock = fs::read_to_string(path)
+            .wrap_err_with(|| format!("reading Cargo.lock source map from {}", path.display()))?;
+        Self::parse(&lock)
+            .wrap_err_with(|| format!("parsing Cargo.lock source map from {}", path.display()))
+    }
+
+    fn parse(lock: &str) -> Result<Self> {
+        let lock: CargoLock = toml::from_str(lock)?;
+        let packages = lock
+            .package
+            .into_iter()
+            .filter_map(|package| {
+                let CargoLockPackageEntry {
+                    name,
+                    version,
+                    source,
+                } = package;
+                source.map(|source| CargoLockPackage {
+                    name,
+                    version,
+                    source,
+                })
+            })
+            .collect();
+
+        Ok(Self { packages })
+    }
+
+    fn source_for_unit(&self, unit: &Unit) -> Result<String> {
+        let unit_source = external_source_from_pkg_id(&unit.pkg_id).ok_or_else(|| {
+            eyre!(
+                "external unit {} {} has package id without a registry, sparse, or git source: {}",
+                unit.package_name(),
+                unit.package_version(),
+                unit.pkg_id
+            )
+        })?;
+
+        let matches: Vec<_> = self
+            .packages
+            .iter()
+            .filter(|package| {
+                package.name == unit.package_name()
+                    && package.version == unit.package_version()
+                    && cargo_lock_source_matches_pkg_id(&unit_source, &package.source)
+            })
+            .collect();
+
+        match matches.as_slice() {
+            [package] => Ok(package.source.clone()),
+            [] => Err(eyre!(
+                "external unit {} {} has no matching Cargo.lock source for package id {}",
+                unit.package_name(),
+                unit.package_version(),
+                unit.pkg_id
+            )),
+            packages => Err(eyre!(
+                "external unit {} {} matches multiple Cargo.lock sources: {}",
+                unit.package_name(),
+                unit.package_version(),
+                packages
+                    .iter()
+                    .map(|package| package.source.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
+}
+
+fn cargo_lock_source_matches_pkg_id(pkg_id_source: &str, cargo_lock_source: &str) -> bool {
+    if pkg_id_source == cargo_lock_source {
+        return true;
+    }
+
+    pkg_id_source.starts_with("git+")
+        && cargo_lock_source
+            .rsplit_once('#')
+            .is_some_and(|(source_without_rev, _)| source_without_rev == pkg_id_source)
 }
 
 struct PreparedGraph {
@@ -1263,7 +1373,7 @@ fn source_entry_for_unit(unit: &Unit, options: &RenderOptions) -> Result<SourceE
             SourceScope::Package => SourceBase::VendorPackage,
             SourceScope::Closure => SourceBase::VendorClosure,
         };
-        let source_key = vendor_source_key(unit)?;
+        let source_key = vendor_source_key(unit, &options.cargo_lock_sources)?;
 
         return Ok(SourceEntry {
             name: source_name(base, unit, &source_key, &scoped.relative),
@@ -1418,15 +1528,8 @@ fn local_source_key(unit: &Unit) -> String {
     format!("path#{}@{}", unit.package_name(), unit.package_version())
 }
 
-fn vendor_source_key(unit: &Unit) -> Result<String> {
-    let source = external_source_from_pkg_id(&unit.pkg_id).ok_or_else(|| {
-        eyre!(
-            "external unit {} {} has package id without a registry or git source: {}",
-            unit.package_name(),
-            unit.package_version(),
-            unit.pkg_id
-        )
-    })?;
+fn vendor_source_key(unit: &Unit, cargo_lock_sources: &CargoLockSources) -> Result<String> {
+    let source = cargo_lock_sources.source_for_unit(unit)?;
     Ok(format!(
         "{}#{}@{}",
         source,
@@ -1745,6 +1848,19 @@ impl Attrs {
 mod tests {
     use super::*;
 
+    fn cargo_lock_sources(packages: &[(&str, &str, &str)]) -> CargoLockSources {
+        CargoLockSources {
+            packages: packages
+                .iter()
+                .map(|(name, version, source)| CargoLockPackage {
+                    name: (*name).to_string(),
+                    version: (*version).to_string(),
+                    source: (*source).to_string(),
+                })
+                .collect(),
+        }
+    }
+
     #[test]
     fn renders_one_derivation_per_build_unit() {
         let graph: UnitGraph = serde_json::from_str(
@@ -1776,6 +1892,7 @@ mod tests {
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: Some("rustc-test".to_string()),
                 deny_unused_crate_dependencies: true,
@@ -1830,6 +1947,7 @@ mod tests {
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -1903,6 +2021,11 @@ mod tests {
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: Some(PathBuf::from("/vendor")),
+                cargo_lock_sources: cargo_lock_sources(&[(
+                    "serde",
+                    "1.0.0",
+                    "registry+https://github.com/rust-lang/crates.io-index",
+                )]),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: true,
@@ -1979,6 +2102,11 @@ mod tests {
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: Some(PathBuf::from("/vendor")),
+                cargo_lock_sources: cargo_lock_sources(&[(
+                    "itoa",
+                    "1.0.15",
+                    "registry+https://github.com/rust-lang/crates.io-index",
+                )]),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2045,6 +2173,14 @@ mod tests {
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: Some(PathBuf::from("/vendor")),
+                cargo_lock_sources: cargo_lock_sources(&[
+                    (
+                        "itoa",
+                        "1.0.15",
+                        "registry+https://github.com/rust-lang/crates.io-index",
+                    ),
+                    ("itoa", "1.0.15", "sparse+https://example.invalid/index/"),
+                ]),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2057,6 +2193,51 @@ mod tests {
         ));
         assert!(rendered
             .contains("vendorSources.\"sparse+https://example.invalid/index/#itoa@1.0.15\""));
+    }
+
+    #[test]
+    fn git_vendor_sources_use_locked_source_identity() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "git+https://github.com/shepmaster/snafu.git#snafu@0.9.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "snafu",
+                    "src_path": "/vendor/snafu/src/lib.rs",
+                    "edition": "2021"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": []
+                }
+              ],
+              "roots": [0]
+            }"#,
+        )
+        .unwrap();
+
+        let locked_source =
+            "git+https://github.com/shepmaster/snafu.git#1f8e75f56390c421a198871916100c6316d23d4f";
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: Some(PathBuf::from("/vendor")),
+                cargo_lock_sources: cargo_lock_sources(&[("snafu", "0.9.0", locked_source)]),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains(&format!("vendorSources.\"{locked_source}#snafu@0.9.0\"")));
+        assert!(!rendered
+            .contains("vendorSources.\"git+https://github.com/shepmaster/snafu.git#snafu@0.9.0\""));
     }
 
     #[cfg(unix)]
@@ -2112,6 +2293,7 @@ version = "0.1.0"
             &RenderOptions {
                 workspace_root: workspace.clone(),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2158,6 +2340,7 @@ version = "0.1.0"
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2199,6 +2382,7 @@ version = "0.1.0"
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2240,6 +2424,7 @@ version = "0.1.0"
             &RenderOptions {
                 workspace_root: PathBuf::from("/workspace"),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: true,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2323,6 +2508,7 @@ links = "native_ffi"
             &RenderOptions {
                 workspace_root: workspace.clone(),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2405,6 +2591,7 @@ links = "nested_native"
             &RenderOptions {
                 workspace_root: workspace.clone(),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
@@ -2526,6 +2713,7 @@ version = "0.1.0"
             &RenderOptions {
                 workspace_root: workspace.clone(),
                 vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
