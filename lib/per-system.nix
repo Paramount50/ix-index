@@ -108,6 +108,28 @@ in
       inherit (tests) imageTests;
     })
     // {
+      base =
+        let
+          package = ix.mkImage {
+            modules = [
+              {
+                ix.image = {
+                  name = "ix/base";
+                  tag = "latest";
+                };
+              }
+            ];
+          };
+        in
+        package
+        // {
+          passthru = (package.passthru or { }) // {
+            tests = (package.passthru.tests or { }) // {
+              eval = tests.imageTests.base;
+            };
+          };
+        };
+
       inherit (repoPackages)
         hyperion
         minecraft-nbt

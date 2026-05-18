@@ -976,9 +976,17 @@ let
   base =
     let
       config = evalConfig [ ];
+      imageConfig = evalConfig [
+        {
+          ix.image = {
+            name = "ix/base";
+            tag = "latest";
+          };
+        }
+      ];
     in
     {
-      inherit config;
+      inherit config imageConfig;
       cfg = config.ix.profiles.base;
     };
 
@@ -1005,6 +1013,18 @@ let
       {
         assertion = builtins.elem base.cfg.shellWorkspace.shell base.config.environment.systemPackages;
         message = "base profile should install the configured workspace shell";
+      }
+      {
+        assertion = base.imageConfig.ix.image.name == "ix/base";
+        message = "base image package should publish under the ix/base system namespace";
+      }
+      {
+        assertion = base.imageConfig.ix.image.tag == "latest";
+        message = "base image package should use the stable latest tag";
+      }
+      {
+        assertion = base.imageConfig.ix.build.ociImage.name == "ix-base-oci.tar";
+        message = "base image package should produce a named OCI archive derivation";
       }
     ];
 
