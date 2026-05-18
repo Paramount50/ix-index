@@ -3,7 +3,6 @@
 {
   nixpkgs,
   paths,
-  cliArtifacts ? { },
 }:
 let
   inherit (nixpkgs) lib;
@@ -304,25 +303,19 @@ let
   packageSetFor =
     pkgs:
     let
-      packageSystem = pkgs.stdenv.hostPlatform.system;
       ixForPackages = ixSpecialArgs // {
         inherit pkgs;
       };
-      basePackages = {
-        minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
-          ix = ixForPackages;
-        };
-        nix-cargo-unit = pkgs.callPackage paths.packages.nixCargoUnit { };
-        oci-image-builder = pkgs.callPackage paths.packages.ociImageBuilder { };
-        tonbo-artifacts = pkgs.callPackage paths.packages.tonboArtifacts { };
-      };
-      cliPackages = lib.optionalAttrs (builtins.hasAttr packageSystem cliArtifacts) {
-        ix = pkgs.callPackage paths.packages.ix {
-          src = cliArtifacts.${packageSystem};
-        };
-      };
     in
-    basePackages // cliPackages;
+    {
+      ix = pkgs.callPackage paths.packages.ix { };
+      minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
+        ix = ixForPackages;
+      };
+      nix-cargo-unit = pkgs.callPackage paths.packages.nixCargoUnit { };
+      oci-image-builder = pkgs.callPackage paths.packages.ociImageBuilder { };
+      tonbo-artifacts = pkgs.callPackage paths.packages.tonboArtifacts { };
+    };
 
   /**
     Cross-cutting helpers handed to every module through `specialArgs.ix`.

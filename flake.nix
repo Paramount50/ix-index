@@ -3,26 +3,11 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    ixCliX86_64Linux = {
-      url = "https://ix.dev/cli/linux-x86_64/ix";
-      flake = false;
-    };
-    ixCliAarch64Darwin = {
-      url = "https://ix.dev/cli/darwin-arm64/ix";
-      flake = false;
-    };
-    ixCliX86_64Darwin = {
-      url = "https://ix.dev/cli/darwin-x86_64/ix";
-      flake = false;
-    };
   };
 
   outputs =
     {
       nixpkgs,
-      ixCliAarch64Darwin,
-      ixCliX86_64Linux,
-      ixCliX86_64Darwin,
       ...
     }:
     let
@@ -57,11 +42,6 @@
 
       ix = import ./lib {
         inherit nixpkgs paths;
-        cliArtifacts = {
-          aarch64-darwin = ixCliAarch64Darwin;
-          x86_64-linux = ixCliX86_64Linux;
-          x86_64-darwin = ixCliX86_64Darwin;
-        };
       };
       devSystems = [
         "x86_64-linux"
