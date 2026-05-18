@@ -662,7 +662,6 @@ let
         inherit src;
         cargoLock = lockFile;
         workspaceRoot = src;
-        allowAggregateWorkspaceSource = true;
         policy = cargoUnitRealWorkspacePolicy;
       };
       buildWorkspace = ix.cargoUnit.buildWorkspace (commonArgs // { cargoArgs = buildArgs; });

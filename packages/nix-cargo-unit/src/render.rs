@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -39,41 +39,44 @@ struct SourceEntry {
     scope: SourceScope,
     root: PathBuf,
     relative: String,
+    include_relatives: Vec<String>,
     source_key: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SourceBase {
     Workspace,
+    WorkspaceClosure,
     VendorPackage,
-    VendorAggregate,
+    VendorClosure,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SourceScope {
     Package,
-    WidenedWorkspace,
-    WidenedVendor,
+    Closure,
 }
 
 struct ScopedSourceRoot {
     root: PathBuf,
     scope: SourceScope,
+    relative: String,
+    include_relatives: Vec<String>,
 }
 
 impl SourceBase {
     const fn label(self) -> &'static str {
         match self {
-            Self::Workspace => "workspace",
-            Self::VendorPackage | Self::VendorAggregate => "vendor",
+            Self::Workspace | Self::WorkspaceClosure => "workspace",
+            Self::VendorPackage | Self::VendorClosure => "vendor",
         }
     }
 
     const fn audit_label(self) -> &'static str {
         match self {
-            Self::Workspace => "workspace",
+            Self::Workspace | Self::WorkspaceClosure => "workspace",
             Self::VendorPackage => "vendor-package",
-            Self::VendorAggregate => "vendor-aggregate",
+            Self::VendorClosure => "vendor-closure",
         }
     }
 }
@@ -82,8 +85,7 @@ impl SourceScope {
     const fn audit_label(self) -> &'static str {
         match self {
             Self::Package => "package",
-            Self::WidenedWorkspace => "widened-workspace",
-            Self::WidenedVendor => "widened-vendor",
+            Self::Closure => "closure",
         }
     }
 }
@@ -96,11 +98,16 @@ impl SourceEntry {
                 nix_attr(&self.name),
                 nix_attr(&self.relative)
             ),
-            SourceBase::VendorPackage => format!("vendorSources.{}", nix_attr(&self.source_key)),
-            SourceBase::VendorAggregate => format!(
-                "scopedAggregateVendorSource {} {}",
+            SourceBase::WorkspaceClosure => format!(
+                "scopedWorkspaceClosureSource {} {}",
                 nix_attr(&self.name),
-                nix_attr(&self.relative)
+                nix_string_list(&self.include_relatives)
+            ),
+            SourceBase::VendorPackage => format!("vendorSources.{}", nix_attr(&self.source_key)),
+            SourceBase::VendorClosure => format!(
+                "scopedVendorClosureSource {} {}",
+                nix_attr(&self.name),
+                nix_string_list(&self.include_relatives)
             ),
         }
     }
@@ -203,11 +210,12 @@ fn render_source_audit_entries(prepared: &PreparedGraph) -> String {
     for (key, source) in &prepared.source_entries {
         let _ = writeln!(
             entries,
-            "    {} = {{ base = {}; scope = {}; relative = {}; sourceKey = {}; }};",
+            "    {} = {{ base = {}; scope = {}; relative = {}; includeRelatives = {}; sourceKey = {}; }};",
             nix_attr(key),
             nix_attr(source.base.audit_label()),
             nix_attr(source.scope.audit_label()),
             nix_attr(&source.relative),
+            nix_string_list(&source.include_relatives),
             nix_attr(&source.source_key),
         );
     }
@@ -1250,50 +1258,38 @@ fn source_entry_for_unit(unit: &Unit, options: &RenderOptions) -> Result<SourceE
             )
         })?;
         let scoped = vendored_source_root_for_unit(unit, vendor_root)?;
-        let relative = relative_path_string(&scoped.root, vendor_root).map_err(|_| {
-            eyre!(
-                "external unit {} {} source root {} is outside vendor root {}",
-                unit.package_name(),
-                unit.package_version(),
-                scoped.root.display(),
-                vendor_root.display()
-            )
-        })?;
 
         let base = match scoped.scope {
             SourceScope::Package => SourceBase::VendorPackage,
-            SourceScope::WidenedVendor => SourceBase::VendorAggregate,
-            SourceScope::WidenedWorkspace => {
-                return Err(eyre!(
-                    "external unit {} {} unexpectedly widened to a workspace source",
-                    unit.package_name(),
-                    unit.package_version()
-                ));
-            }
+            SourceScope::Closure => SourceBase::VendorClosure,
         };
         let source_key = vendor_source_key(unit)?;
 
         return Ok(SourceEntry {
-            name: source_name(base, unit, &source_key, &relative),
+            name: source_name(base, unit, &source_key, &scoped.relative),
             base,
             scope: scoped.scope,
             root: scoped.root,
-            relative,
+            relative: scoped.relative,
+            include_relatives: scoped.include_relatives,
             source_key,
         });
     }
 
     let scoped = local_source_root_for_unit(unit, &options.workspace_root)?;
-    let relative = relative_path_string(&scoped.root, &options.workspace_root)?;
 
     let source_key = local_source_key(unit);
 
     Ok(SourceEntry {
-        name: source_name(SourceBase::Workspace, unit, &source_key, &relative),
-        base: SourceBase::Workspace,
+        name: source_name(SourceBase::Workspace, unit, &source_key, &scoped.relative),
+        base: match scoped.scope {
+            SourceScope::Package => SourceBase::Workspace,
+            SourceScope::Closure => SourceBase::WorkspaceClosure,
+        },
         scope: scoped.scope,
         root: scoped.root,
-        relative,
+        relative: scoped.relative,
+        include_relatives: scoped.include_relatives,
         source_key,
     })
 }
@@ -1311,20 +1307,23 @@ fn local_source_root_for_unit(unit: &Unit, workspace_root: &Path) -> Result<Scop
         )
     })?;
 
-    if source_tree_has_symlink_escape(&package_root, &package_root)? {
-        // Some workspaces publish package directories with symlinks back to
-        // siblings. serde_derive_internals/src is one example. Package-only
-        // scoping would preserve a broken symlink, so the source boundary has
-        // to widen to the workspace root for those crates.
+    let package_relative = relative_path_string(&package_root, workspace_root)?;
+    let include_relatives = source_closure_relatives(&package_root, workspace_root)?;
+
+    if include_relatives.len() > 1 || include_relatives.first() != Some(&package_relative) {
         return Ok(ScopedSourceRoot {
             root: workspace_root.to_path_buf(),
-            scope: SourceScope::WidenedWorkspace,
+            scope: SourceScope::Closure,
+            relative: package_relative,
+            include_relatives,
         });
     }
 
     Ok(ScopedSourceRoot {
         root: package_root,
         scope: SourceScope::Package,
+        relative: package_relative.clone(),
+        include_relatives: vec![package_relative],
     })
 }
 
@@ -1351,19 +1350,23 @@ fn vendored_source_root_for_unit(unit: &Unit, vendor_root: &Path) -> Result<Scop
         ))?,
     };
 
-    if source_tree_has_symlink_escape(&crate_root, &crate_root)? {
-        // Vendored crates are usually self-contained. When a crate ships
-        // symlinks to sibling directories, the compiler needs the full vendor
-        // root so those symlinks stay valid.
+    let crate_relative = relative_path_string(&crate_root, vendor_root)?;
+    let include_relatives = source_closure_relatives(&crate_root, vendor_root)?;
+
+    if include_relatives.len() > 1 || include_relatives.first() != Some(&crate_relative) {
         return Ok(ScopedSourceRoot {
             root: vendor_root.to_path_buf(),
-            scope: SourceScope::WidenedVendor,
+            scope: SourceScope::Closure,
+            relative: crate_relative,
+            include_relatives,
         });
     }
 
     Ok(ScopedSourceRoot {
         root: crate_root,
         scope: SourceScope::Package,
+        relative: crate_relative.clone(),
+        include_relatives: vec![crate_relative],
     })
 }
 
@@ -1502,16 +1505,36 @@ fn hex16(bytes: &[u8]) -> String {
     out
 }
 
-fn source_tree_has_symlink_escape(root: &Path, boundary: &Path) -> Result<bool> {
-    if !root.exists() {
-        return Ok(false);
-    }
-    let boundary = normalize_path(boundary);
+fn source_closure_relatives(root: &Path, source_boundary: &Path) -> Result<Vec<String>> {
+    let source_boundary = normalize_path(source_boundary);
+    let mut included_roots = BTreeSet::from([normalize_path(root)]);
+    let mut queue = VecDeque::from([normalize_path(root)]);
 
-    source_tree_has_symlink_escape_inner(root, &boundary)
+    while let Some(scan_root) = queue.pop_front() {
+        collect_source_closure_roots(
+            &scan_root,
+            &source_boundary,
+            &mut included_roots,
+            &mut queue,
+        )?;
+    }
+
+    included_roots
+        .iter()
+        .map(|path| relative_path_string(path, &source_boundary))
+        .collect()
 }
 
-fn source_tree_has_symlink_escape_inner(root: &Path, boundary: &Path) -> Result<bool> {
+fn collect_source_closure_roots(
+    root: &Path,
+    source_boundary: &Path,
+    included_roots: &mut BTreeSet<PathBuf>,
+    queue: &mut VecDeque<PathBuf>,
+) -> Result<()> {
+    if !root.exists() || !root.is_dir() {
+        return Ok(());
+    }
+
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
@@ -1523,15 +1546,33 @@ fn source_tree_has_symlink_escape_inner(root: &Path, boundary: &Path) -> Result<
             } else {
                 path.parent().unwrap_or(root).join(target)
             };
-            if !normalize_path(&target).starts_with(boundary) {
-                return Ok(true);
+
+            let target = normalize_path(&target);
+            if !target.starts_with(source_boundary) {
+                return Err(eyre!(
+                    "source symlink {} points outside source boundary {} to {}",
+                    path.display(),
+                    source_boundary.display(),
+                    target.display()
+                ));
             }
-        } else if file_type.is_dir() && source_tree_has_symlink_escape_inner(&path, boundary)? {
-            return Ok(true);
+
+            if !path_is_covered_by_roots(&target, included_roots) {
+                if target.is_dir() {
+                    queue.push_back(target.clone());
+                }
+                included_roots.insert(target);
+            }
+        } else if file_type.is_dir() {
+            collect_source_closure_roots(&path, source_boundary, included_roots, queue)?;
         }
     }
 
-    Ok(false)
+    Ok(())
+}
+
+fn path_is_covered_by_roots(path: &Path, roots: &BTreeSet<PathBuf>) -> bool {
+    roots.iter().any(|root| path.starts_with(root))
 }
 
 fn normalize_path(path: &Path) -> PathBuf {
@@ -1646,6 +1687,17 @@ fn render_test_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
 
 fn nix_attr(value: &str) -> String {
     serde_json::to_string(value).expect("serialize Nix string")
+}
+
+fn nix_string_list(values: &[String]) -> String {
+    format!(
+        "[ {} ]",
+        values
+            .iter()
+            .map(|value| nix_attr(value))
+            .collect::<Vec<_>>()
+            .join(" ")
+    )
 }
 
 struct Attrs {
@@ -2009,7 +2061,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn widens_scoped_source_when_package_symlinks_escape_root() {
+    fn builds_filtered_source_closure_when_package_symlinks_escape_root() {
         let workspace = std::env::temp_dir().join(format!(
             "nix-cargo-unit-symlink-source-test-{}",
             std::time::SystemTime::now()
@@ -2067,8 +2119,10 @@ version = "0.1.0"
         )
         .unwrap();
 
-        assert!(rendered.contains("scopedWorkspaceSource \"cargo-unit-source-internal-0.1.0-"));
-        assert!(rendered.contains("\"\""));
+        assert!(
+            rendered.contains("scopedWorkspaceClosureSource \"cargo-unit-source-internal-0.1.0-")
+        );
+        assert!(rendered.contains("[ \"internal\" \"sibling/src\" ]"));
         assert!(rendered.contains("export CARGO_MANIFEST_DIR=\"$src/internal\""));
         assert!(rendered.contains("\"$src/internal/lib.rs\""));
         fs::remove_dir_all(workspace).unwrap();

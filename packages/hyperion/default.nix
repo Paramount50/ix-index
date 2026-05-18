@@ -41,7 +41,6 @@ let
     # The build source is a patched upstream derivation, so there is no
     # repo-local workspace root for cargo-unit to rescan per package.
     workspaceRoot = src;
-    allowAggregateWorkspaceSource = true;
     cargoArgs = [
       "--package"
       "bedwars"

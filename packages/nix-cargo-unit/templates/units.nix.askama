@@ -4,10 +4,8 @@
   rustToolchain,
   src,
   workspaceRoot,
-  allowAggregateWorkspaceSource ? false,
   vendorDir ? null,
   vendorSources ? {},
-  allowAggregateVendorSource ? false,
   extraNativeBuildInputs ? [],
   extraEnv ? {},
   extraPolicyChecks ? {},
@@ -15,15 +13,47 @@
 }:
 
 let
+  sourceRootPath =
+    root:
+    if builtins.hasContext (builtins.toString root) then
+      builtins.toString root
+    else
+      root;
+
+  sourceRelativePath =
+    root: path:
+    let
+      rootString = builtins.toString root;
+      pathString = builtins.toString path;
+      prefix = rootString + "/";
+    in
+    if pathString == rootString then "" else pkgs.lib.removePrefix prefix pathString;
+
+  sourceIncludesPath =
+    relative: include:
+    include == ""
+    || relative == ""
+    || relative == include
+    || pkgs.lib.hasPrefix (include + "/") relative
+    || pkgs.lib.hasPrefix (relative + "/") include;
+
+  sourceClosureFilter =
+    root: includes: path: type:
+    let
+      relative = sourceRelativePath root path;
+    in
+    builtins.any (include: sourceIncludesPath relative include) includes;
+
+  scopedClosureSource =
+    root: name: includes:
+    builtins.path {
+      inherit name;
+      path = sourceRootPath root;
+      filter = sourceClosureFilter root includes;
+    };
+
   scopedWorkspaceSource =
     name: relative:
-    assert pkgs.lib.assertMsg (
-      allowAggregateWorkspaceSource || !builtins.hasContext (builtins.toString workspaceRoot)
-    ) ''
-      nix-cargo-unit cannot scope workspace sources from a context-bearing source root.
-      Pass workspaceRoot = ./path/to/workspace for local checkouts.
-      Patched or fetched aggregate sources must set allowAggregateWorkspaceSource = true explicitly.
-    '';
     builtins.path {
       inherit name;
       # Use a package-shaped source root for each local unit so one workspace
@@ -36,17 +66,14 @@ let
       filter = path: type: true;
     };
 
-  scopedAggregateVendorSource =
-    name: relative:
-    assert pkgs.lib.assertMsg allowAggregateVendorSource ''
-      nix-cargo-unit has no package-shaped vendor source for ${relative}.
-      Add it to vendorSources. Set allowAggregateVendorSource = true only for an audited aggregate vendor build.
+  scopedWorkspaceClosureSource = name: includes: scopedClosureSource workspaceRoot name includes;
+
+  scopedVendorClosureSource =
+    name: includes:
+    assert pkgs.lib.assertMsg (vendorDir != null) ''
+      nix-cargo-unit needs vendorDir to build a filtered vendor source closure.
     '';
-    builtins.path {
-      inherit name;
-      path = builtins.toString vendorDir + pkgs.lib.optionalString (relative != "") "/${relative}";
-      filter = path: type: true;
-    };
+    scopedClosureSource vendorDir name includes;
 
   sources = {
 {{ source_entries }}  };

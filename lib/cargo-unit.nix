@@ -17,46 +17,39 @@ let
         profile
       ];
 
-  commonArgs =
-    args:
-    let
-      allowAggregateWorkspaceSource = args.allowAggregateWorkspaceSource or false;
-    in
-    {
-      inherit (args) src;
-      cargoLock = args.cargoLock or (args.src + "/Cargo.lock");
-      cargoArgs = args.cargoArgs or [ "--workspace" ];
-      profile = args.profile or "release";
-      rustToolchain = args.rustToolchain or rust.defaultRustToolchain;
-      nativeBuildInputs = args.nativeBuildInputs or [ ];
-      env = args.env or { };
-      cargoExtraConfig = args.cargoExtraConfig or "";
-      vendorDir = args.vendorDir or null;
-      vendorSources = args.vendorSources or null;
-      inherit allowAggregateWorkspaceSource;
-      allowAggregateVendorSource = args.allowAggregateVendorSource or false;
-      outputHashes = args.outputHashes or { };
-      contentAddressed = args.contentAddressed or false;
-      policy =
-        let
-          rawPolicy = args.policy or { };
-          rawCargoAudit = rawPolicy.cargoAudit or { };
-          resolved = rust.resolvePolicy rawPolicy;
-        in
-        resolved
-        // {
-          cargoAudit = resolved.cargoAudit // {
-            enable = rawCargoAudit.enable or true;
-          };
+  commonArgs = args: {
+    inherit (args) src;
+    cargoLock = args.cargoLock or (args.src + "/Cargo.lock");
+    cargoArgs = args.cargoArgs or [ "--workspace" ];
+    profile = args.profile or "release";
+    rustToolchain = args.rustToolchain or rust.defaultRustToolchain;
+    nativeBuildInputs = args.nativeBuildInputs or [ ];
+    env = args.env or { };
+    cargoExtraConfig = args.cargoExtraConfig or "";
+    vendorDir = args.vendorDir or null;
+    vendorSources = args.vendorSources or null;
+    outputHashes = args.outputHashes or { };
+    contentAddressed = args.contentAddressed or false;
+    policy =
+      let
+        rawPolicy = args.policy or { };
+        rawCargoAudit = rawPolicy.cargoAudit or { };
+        resolved = rust.resolvePolicy rawPolicy;
+      in
+      resolved
+      // {
+        cargoAudit = resolved.cargoAudit // {
+          enable = rawCargoAudit.enable or true;
         };
-    };
+      };
+  };
 
   workspaceRootFor =
     args:
     args.workspaceRoot or (throw ''
       cargoUnit.buildWorkspace requires workspaceRoot = ./path/to/workspace.
       Use workspaceRoot for the real checkout root that package-shaped sources can be carved from.
-      Fetched or patched aggregate sources must pass workspaceRoot = src and allowAggregateWorkspaceSource = true explicitly.
+      Fetched or patched sources pass workspaceRoot = src.
     '');
 
   renderCargoArgs =
@@ -212,8 +205,6 @@ let
       units = import unitsNix {
         inherit pkgs vendorDir vendorSources;
         inherit (args)
-          allowAggregateVendorSource
-          allowAggregateWorkspaceSource
           src
           rustToolchain
           ;
