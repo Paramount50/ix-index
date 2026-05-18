@@ -492,7 +492,7 @@ let
 
   cargoUnitWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
-    workspaceSourceRoot = ./fixtures/cargo-unit-hello;
+    workspaceRoot = ./fixtures/cargo-unit-hello;
     cargoArgs = [
       "--bin"
       "cargo-unit-hello"
@@ -503,7 +503,7 @@ let
 
   cargoUnitTestWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
-    workspaceSourceRoot = ./fixtures/cargo-unit-hello;
+    workspaceRoot = ./fixtures/cargo-unit-hello;
     cargoArgs = [
       "--workspace"
       "--tests"
@@ -512,7 +512,7 @@ let
 
   cargoUnitPolicyDisabledWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
-    workspaceSourceRoot = ./fixtures/cargo-unit-hello;
+    workspaceRoot = ./fixtures/cargo-unit-hello;
     cargoArgs = [
       "--bin"
       "cargo-unit-hello"
@@ -560,12 +560,12 @@ let
     {
       name,
       src,
-      workspaceSourceRoot ? ./fixtures/cargo-unit-workspace-scope,
+      workspaceRoot ? ./fixtures/cargo-unit-workspace-scope,
     }:
     ix.cargoUnit.buildWorkspace {
       pname = "cargo-unit-workspace-scope-${name}";
       inherit src;
-      inherit workspaceSourceRoot;
+      inherit workspaceRoot;
       cargoArgs = [ "--workspace" ];
       policy = cargoUnitScopePolicy;
     };
@@ -578,7 +578,7 @@ let
     alphaChanged = cargoUnitScopeWorkspace {
       name = "alpha-changed";
       src = cargoUnitScopeAlphaChangedFixture;
-      workspaceSourceRoot = ./fixtures/cargo-unit-workspace-scope-alpha-changed;
+      workspaceRoot = ./fixtures/cargo-unit-workspace-scope-alpha-changed;
     };
     lockChanged = cargoUnitScopeWorkspace {
       name = "lock-changed";
@@ -661,6 +661,7 @@ let
         pname = "cargo-unit-real-workspace-${name}";
         inherit src;
         cargoLock = lockFile;
+        workspaceRoot = src;
         allowAggregateWorkspaceSource = true;
         policy = cargoUnitRealWorkspacePolicy;
       };
@@ -1696,6 +1697,21 @@ let
       {
         assertion = cargoUnitScope.base.ryu.drvPath == cargoUnitScope.lockChanged.ryu.drvPath;
         message = "cargo-unit should keep unrelated locked dependency derivations stable when another transitive dependency changes";
+      }
+      {
+        assertion = builtins.any (
+          source: source.base == "workspace" && source.scope == "package" && source.relative == "crates/alpha"
+        ) (builtins.attrValues cargoUnitScopeWorkspaces.base.sourceAudit);
+        message = "cargo-unit source audit should record package-shaped workspace sources";
+      }
+      {
+        assertion = builtins.any (
+          source:
+          source.base == "vendor-package"
+          && source.scope == "package"
+          && source.sourceKey == "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.18"
+        ) (builtins.attrValues cargoUnitScopeWorkspaces.base.sourceAudit);
+        message = "cargo-unit source audit should record full dependency source identity";
       }
       {
         assertion = repoPackages.minecraft-nbt.passthru.policyChecks ? cargoMachete;

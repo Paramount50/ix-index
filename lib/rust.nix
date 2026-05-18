@@ -222,6 +222,7 @@ let
         lock = builtins.fromTOML (builtins.readFile (cargoLockFile cargoLock));
         dependencyPackages = builtins.filter (pkg: pkg ? source) (lock.package or [ ]);
         gitPackages = builtins.filter (pkg: lib.hasPrefix "git+" pkg.source) dependencyPackages;
+        packageSourceKey = pkg: "${pkg.source}#${pkg.name}@${pkg.version}";
         gitShasByNameVersion = builtins.listToAttrs (
           map (
             pkg:
@@ -265,7 +266,7 @@ let
             git = parseGitSource pkg.source;
             missingHash = throw ''
               No hash was found while vendoring the git dependency ${pkg.name}-${pkg.version}.
-              Add outputHashes."${pkg.name}-${pkg.version}".
+              Add outputHashes."${pkg.name}-${pkg.version}" for the git tree at ${pkg.source}.
             '';
             tree = pkgs.fetchgit {
               inherit (git) url;
@@ -324,9 +325,9 @@ let
             assert lib.assertMsg (checksum != null) ''
               Package ${pkg.name} ${pkg.version} is missing a Cargo.lock checksum.
             '';
-            lib.nameValuePair "${pkg.name}-${pkg.version}" (registryPackageSource pkg source checksum)
+            lib.nameValuePair (packageSourceKey pkg) (registryPackageSource pkg source checksum)
           else if lib.hasPrefix "git+" source then
-            lib.nameValuePair "${pkg.name}-${pkg.version}" (gitPackageSource pkg)
+            lib.nameValuePair (packageSourceKey pkg) (gitPackageSource pkg)
           else
             throw "Cannot create a package-shaped vendor source for ${pkg.name}-${pkg.version} from ${source}";
       in

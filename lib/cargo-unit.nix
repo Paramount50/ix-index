@@ -17,35 +17,47 @@ let
         profile
       ];
 
-  commonArgs = args: {
-    inherit (args) src;
-    cargoLock = args.cargoLock or (args.src + "/Cargo.lock");
-    cargoArgs = args.cargoArgs or [ "--workspace" ];
-    profile = args.profile or "release";
-    rustToolchain = args.rustToolchain or rust.defaultRustToolchain;
-    nativeBuildInputs = args.nativeBuildInputs or [ ];
-    env = args.env or { };
-    cargoExtraConfig = args.cargoExtraConfig or "";
-    vendorDir = args.vendorDir or null;
-    vendorSources = args.vendorSources or null;
-    workspaceSourceRoot = args.workspaceSourceRoot or args.src;
-    allowAggregateWorkspaceSource = args.allowAggregateWorkspaceSource or false;
-    allowAggregateVendorSource = args.allowAggregateVendorSource or false;
-    outputHashes = args.outputHashes or { };
-    contentAddressed = args.contentAddressed or false;
-    policy =
-      let
-        rawPolicy = args.policy or { };
-        rawCargoAudit = rawPolicy.cargoAudit or { };
-        resolved = rust.resolvePolicy rawPolicy;
-      in
-      resolved
-      // {
-        cargoAudit = resolved.cargoAudit // {
-          enable = rawCargoAudit.enable or true;
+  commonArgs =
+    args:
+    let
+      allowAggregateWorkspaceSource = args.allowAggregateWorkspaceSource or false;
+    in
+    {
+      inherit (args) src;
+      cargoLock = args.cargoLock or (args.src + "/Cargo.lock");
+      cargoArgs = args.cargoArgs or [ "--workspace" ];
+      profile = args.profile or "release";
+      rustToolchain = args.rustToolchain or rust.defaultRustToolchain;
+      nativeBuildInputs = args.nativeBuildInputs or [ ];
+      env = args.env or { };
+      cargoExtraConfig = args.cargoExtraConfig or "";
+      vendorDir = args.vendorDir or null;
+      vendorSources = args.vendorSources or null;
+      inherit allowAggregateWorkspaceSource;
+      allowAggregateVendorSource = args.allowAggregateVendorSource or false;
+      outputHashes = args.outputHashes or { };
+      contentAddressed = args.contentAddressed or false;
+      policy =
+        let
+          rawPolicy = args.policy or { };
+          rawCargoAudit = rawPolicy.cargoAudit or { };
+          resolved = rust.resolvePolicy rawPolicy;
+        in
+        resolved
+        // {
+          cargoAudit = resolved.cargoAudit // {
+            enable = rawCargoAudit.enable or true;
+          };
         };
-      };
-  };
+    };
+
+  workspaceRootFor =
+    args:
+    args.workspaceRoot or (throw ''
+      cargoUnit.buildWorkspace requires workspaceRoot = ./path/to/workspace.
+      Use workspaceRoot for the real checkout root that package-shaped sources can be carved from.
+      Fetched or patched aggregate sources must pass workspaceRoot = src and allowAggregateWorkspaceSource = true explicitly.
+    '');
 
   renderCargoArgs =
     args:
@@ -170,9 +182,11 @@ let
     vendored package directory. A source edit in `crates/api` does not change
     the Nix input for `crates/worker`, `itoa`, or `ryu`; a `Cargo.lock` update
     for one transitive crate leaves unrelated vendored crate derivations alone.
+    Pass `workspaceRoot = ./.` for local workspaces so `src` can stay a filtered
+    build input while package scopes are carved from the real checkout root.
     Rendering fails when a unit path cannot be tied back to `src` or `vendorDir`.
 
-    Returns the generated attrset with `units`, `roots`, `checkedRoots`,
+    Returns the generated attrset with `sourceAudit`, `units`, `roots`, `checkedRoots`,
     `packages`, `binaries`, `libraries`, `default`, `policyChecks`, plus the
     intermediate `unitGraphJson`, `unitsNix`, and `vendorDir` derivations for
     inspection.
@@ -181,6 +195,7 @@ let
     rawArgs:
     let
       args = commonArgs rawArgs;
+      workspaceRoot = workspaceRootFor rawArgs;
       vendorDir = rust.resolveVendorDir {
         inherit (args) cargoLock outputHashes vendorDir;
       };
@@ -201,8 +216,8 @@ let
           allowAggregateWorkspaceSource
           src
           rustToolchain
-          workspaceSourceRoot
           ;
+        inherit workspaceRoot;
         extraNativeBuildInputs = args.nativeBuildInputs ++ rust.nativeBuildInputsForPolicy args.policy;
         extraEnv = args.env;
         extraRustcArgs = rust.rustcArgsForPolicy args.policy;

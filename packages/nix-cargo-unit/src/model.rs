@@ -1,6 +1,6 @@
+use color_eyre::eyre::{bail, ensure, eyre, Result as EyreResult};
 use serde::Deserialize;
 use sha2::Digest as _;
-use color_eyre::eyre::{Result as EyreResult, bail, ensure, eyre};
 
 #[derive(Debug, Deserialize)]
 pub struct UnitGraph {
@@ -284,9 +284,12 @@ pub struct PackageId<'a> {
 }
 
 pub fn parse_pkg_id(pkg_id: &str) -> Option<PackageId<'_>> {
-    if pkg_id.starts_with("path+") || pkg_id.starts_with("registry+") || pkg_id.starts_with("git+")
+    if pkg_id.starts_with("path+")
+        || pkg_id.starts_with("registry+")
+        || pkg_id.starts_with("git+")
+        || pkg_id.starts_with("sparse+")
     {
-        let (scheme_loc, fragment) = pkg_id.split_once('#')?;
+        let (scheme_loc, fragment) = pkg_id.rsplit_once('#')?;
         if let Some((name, version)) = fragment.split_once('@') {
             return Some(PackageId { name, version });
         }
@@ -294,7 +297,8 @@ pub fn parse_pkg_id(pkg_id: &str) -> Option<PackageId<'_>> {
         let location = scheme_loc
             .strip_prefix("git+")
             .or_else(|| scheme_loc.strip_prefix("path+file://"))
-            .or_else(|| scheme_loc.strip_prefix("registry+"))?;
+            .or_else(|| scheme_loc.strip_prefix("registry+"))
+            .or_else(|| scheme_loc.strip_prefix("sparse+"))?;
         let name = location
             .rsplit('/')
             .next()
@@ -625,6 +629,14 @@ mod tests {
     }
 
     #[test]
+    fn sparse_package_ids_parse_as_registry_packages() {
+        let package = parse_pkg_id("sparse+https://index.crates.io/#serde@1.0.228").unwrap();
+
+        assert_eq!(package.name, "serde");
+        assert_eq!(package.version, "1.0.228");
+    }
+
+    #[test]
     fn path_package_identity_ignores_absolute_source_roots() {
         let left: Unit = serde_json::from_str(
             r#"{
@@ -659,6 +671,9 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(left.identity_hash(&[], None), right.identity_hash(&[], None));
+        assert_eq!(
+            left.identity_hash(&[], None),
+            right.identity_hash(&[], None)
+        );
     }
 }

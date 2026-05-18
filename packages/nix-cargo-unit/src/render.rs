@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use askama::Template as _;
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{eyre, Result};
 use sha2::Digest as _;
 
 use crate::model::{Unit, UnitGraph};
@@ -36,8 +36,10 @@ struct BuildScriptRun {
 struct SourceEntry {
     name: String,
     base: SourceBase,
+    scope: SourceScope,
     root: PathBuf,
     relative: String,
+    source_key: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,11 +49,41 @@ enum SourceBase {
     VendorAggregate,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SourceScope {
+    Package,
+    WidenedWorkspace,
+    WidenedVendor,
+}
+
+struct ScopedSourceRoot {
+    root: PathBuf,
+    scope: SourceScope,
+}
+
 impl SourceBase {
     const fn label(self) -> &'static str {
         match self {
             Self::Workspace => "workspace",
             Self::VendorPackage | Self::VendorAggregate => "vendor",
+        }
+    }
+
+    const fn audit_label(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::VendorPackage => "vendor-package",
+            Self::VendorAggregate => "vendor-aggregate",
+        }
+    }
+}
+
+impl SourceScope {
+    const fn audit_label(self) -> &'static str {
+        match self {
+            Self::Package => "package",
+            Self::WidenedWorkspace => "widened-workspace",
+            Self::WidenedVendor => "widened-vendor",
         }
     }
 }
@@ -64,7 +96,7 @@ impl SourceEntry {
                 nix_attr(&self.name),
                 nix_attr(&self.relative)
             ),
-            SourceBase::VendorPackage => format!("vendorSources.{}", nix_attr(&self.relative)),
+            SourceBase::VendorPackage => format!("vendorSources.{}", nix_attr(&self.source_key)),
             SourceBase::VendorAggregate => format!(
                 "scopedAggregateVendorSource {} {}",
                 nix_attr(&self.name),
@@ -78,6 +110,7 @@ impl SourceEntry {
 #[template(path = "units.nix.askama", escape = "none")]
 struct UnitsNixTemplate {
     source_entries: String,
+    source_audit_entries: String,
     unit_entries: String,
     policy_check_entries: String,
     roots: String,
@@ -94,6 +127,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
     let prepared = prepare_graph(graph, options)?;
     let template = UnitsNixTemplate {
         source_entries: render_source_entries(&prepared),
+        source_audit_entries: render_source_audit_entries(&prepared),
         unit_entries: render_unit_entries(graph, options, &prepared)?,
         policy_check_entries: render_policy_check_entries(graph, options, &prepared)?,
         roots: render_roots(graph, &prepared),
@@ -160,6 +194,22 @@ fn render_source_entries(prepared: &PreparedGraph) -> String {
     let mut entries = String::new();
     for (key, source) in &prepared.source_entries {
         let _ = writeln!(entries, "    {} = {};", nix_attr(key), source.nix_expr());
+    }
+    entries
+}
+
+fn render_source_audit_entries(prepared: &PreparedGraph) -> String {
+    let mut entries = String::new();
+    for (key, source) in &prepared.source_entries {
+        let _ = writeln!(
+            entries,
+            "    {} = {{ base = {}; scope = {}; relative = {}; sourceKey = {}; }};",
+            nix_attr(key),
+            nix_attr(source.base.audit_label()),
+            nix_attr(source.scope.audit_label()),
+            nix_attr(&source.relative),
+            nix_attr(&source.source_key),
+        );
     }
     entries
 }
@@ -1056,7 +1106,9 @@ fn package_manifest_string(manifest: &str, key: &str) -> Option<String> {
 fn parse_manifest_string(value: &str) -> Option<String> {
     if value.starts_with('"') {
         serde_json::from_str(value).ok()
-    } else if let Some(stripped) = value.strip_prefix('\'').and_then(|inner| inner.strip_suffix('\''))
+    } else if let Some(stripped) = value
+        .strip_prefix('\'')
+        .and_then(|inner| inner.strip_suffix('\''))
     {
         Some(stripped.to_string())
     } else {
@@ -1197,45 +1249,58 @@ fn source_entry_for_unit(unit: &Unit, options: &RenderOptions) -> Result<SourceE
                 unit.package_version()
             )
         })?;
-        let root = vendored_source_root_for_unit(unit, vendor_root)?;
-        let relative = relative_path_string(&root, vendor_root).map_err(|_| {
+        let scoped = vendored_source_root_for_unit(unit, vendor_root)?;
+        let relative = relative_path_string(&scoped.root, vendor_root).map_err(|_| {
             eyre!(
                 "external unit {} {} source root {} is outside vendor root {}",
                 unit.package_name(),
                 unit.package_version(),
-                root.display(),
+                scoped.root.display(),
                 vendor_root.display()
             )
         })?;
 
-        let base = if relative.is_empty() {
-            SourceBase::VendorAggregate
-        } else {
-            SourceBase::VendorPackage
+        let base = match scoped.scope {
+            SourceScope::Package => SourceBase::VendorPackage,
+            SourceScope::WidenedVendor => SourceBase::VendorAggregate,
+            SourceScope::WidenedWorkspace => {
+                return Err(eyre!(
+                    "external unit {} {} unexpectedly widened to a workspace source",
+                    unit.package_name(),
+                    unit.package_version()
+                ));
+            }
         };
+        let source_key = vendor_source_key(unit)?;
 
         return Ok(SourceEntry {
-            name: source_name(base, unit, &relative),
+            name: source_name(base, unit, &source_key, &relative),
             base,
-            root,
+            scope: scoped.scope,
+            root: scoped.root,
             relative,
+            source_key,
         });
     }
 
-    let root = local_source_root_for_unit(unit, &options.workspace_root)?;
-    let relative = relative_path_string(&root, &options.workspace_root)?;
+    let scoped = local_source_root_for_unit(unit, &options.workspace_root)?;
+    let relative = relative_path_string(&scoped.root, &options.workspace_root)?;
+
+    let source_key = local_source_key(unit);
 
     Ok(SourceEntry {
-        name: source_name(SourceBase::Workspace, unit, &relative),
+        name: source_name(SourceBase::Workspace, unit, &source_key, &relative),
         base: SourceBase::Workspace,
-        root,
+        scope: scoped.scope,
+        root: scoped.root,
         relative,
+        source_key,
     })
 }
 
-fn local_source_root_for_unit(unit: &Unit, workspace_root: &Path) -> Result<PathBuf> {
-    let package_root = local_package_root_from_pkg_id(&unit.pkg_id)
-        .unwrap_or_else(|| crate_root_for_unit(unit));
+fn local_source_root_for_unit(unit: &Unit, workspace_root: &Path) -> Result<ScopedSourceRoot> {
+    let package_root =
+        local_package_root_from_pkg_id(&unit.pkg_id).unwrap_or_else(|| crate_root_for_unit(unit));
     relative_path_string(&package_root, workspace_root).map_err(|_| {
         eyre!(
             "local unit {} {} source root {} is outside workspace root {}",
@@ -1251,13 +1316,19 @@ fn local_source_root_for_unit(unit: &Unit, workspace_root: &Path) -> Result<Path
         // siblings. serde_derive_internals/src is one example. Package-only
         // scoping would preserve a broken symlink, so the source boundary has
         // to widen to the workspace root for those crates.
-        return Ok(workspace_root.to_path_buf());
+        return Ok(ScopedSourceRoot {
+            root: workspace_root.to_path_buf(),
+            scope: SourceScope::WidenedWorkspace,
+        });
     }
 
-    Ok(package_root)
+    Ok(ScopedSourceRoot {
+        root: package_root,
+        scope: SourceScope::Package,
+    })
 }
 
-fn vendored_source_root_for_unit(unit: &Unit, vendor_root: &Path) -> Result<PathBuf> {
+fn vendored_source_root_for_unit(unit: &Unit, vendor_root: &Path) -> Result<ScopedSourceRoot> {
     let source = Path::new(&unit.target.src_path);
     let relative = source.strip_prefix(vendor_root).map_err(|_| {
         eyre!(
@@ -1284,10 +1355,16 @@ fn vendored_source_root_for_unit(unit: &Unit, vendor_root: &Path) -> Result<Path
         // Vendored crates are usually self-contained. When a crate ships
         // symlinks to sibling directories, the compiler needs the full vendor
         // root so those symlinks stay valid.
-        return Ok(vendor_root.to_path_buf());
+        return Ok(ScopedSourceRoot {
+            root: vendor_root.to_path_buf(),
+            scope: SourceScope::WidenedVendor,
+        });
     }
 
-    Ok(crate_root)
+    Ok(ScopedSourceRoot {
+        root: crate_root,
+        scope: SourceScope::Package,
+    })
 }
 
 fn relative_path_string(path: &Path, root: &Path) -> Result<String> {
@@ -1295,12 +1372,13 @@ fn relative_path_string(path: &Path, root: &Path) -> Result<String> {
     Ok(relative.to_string_lossy().into_owned())
 }
 
-fn source_name(base: SourceBase, unit: &Unit, relative: &str) -> String {
+fn source_name(base: SourceBase, unit: &Unit, source_key: &str, relative: &str) -> String {
     let hash = stable_hash(&format!(
-        "{}\0{}\0{}\0{}",
+        "{}\0{}\0{}\0{}\0{}",
         base.label(),
         unit.package_name(),
         unit.package_version(),
+        source_key,
         relative
     ));
     format!(
@@ -1331,6 +1409,48 @@ fn stable_hash(value: &str) -> String {
     hasher.update(value.as_bytes());
     let digest = hasher.finalize();
     hex16(&digest[..8])
+}
+
+fn local_source_key(unit: &Unit) -> String {
+    format!("path#{}@{}", unit.package_name(), unit.package_version())
+}
+
+fn vendor_source_key(unit: &Unit) -> Result<String> {
+    let source = external_source_from_pkg_id(&unit.pkg_id).ok_or_else(|| {
+        eyre!(
+            "external unit {} {} has package id without a registry or git source: {}",
+            unit.package_name(),
+            unit.package_version(),
+            unit.pkg_id
+        )
+    })?;
+    Ok(format!(
+        "{}#{}@{}",
+        source,
+        unit.package_name(),
+        unit.package_version()
+    ))
+}
+
+fn external_source_from_pkg_id(pkg_id: &str) -> Option<String> {
+    if pkg_id.starts_with("registry+")
+        || pkg_id.starts_with("git+")
+        || pkg_id.starts_with("sparse+")
+    {
+        let (source, _) = pkg_id.rsplit_once('#')?;
+        return Some(source.to_string());
+    }
+
+    let (_, rest) = pkg_id.split_once(" (")?;
+    let source = rest.strip_suffix(')')?;
+    if source.starts_with("registry+")
+        || source.starts_with("git+")
+        || source.starts_with("sparse+")
+    {
+        Some(source.to_string())
+    } else {
+        None
+    }
 }
 
 fn local_package_root_from_pkg_id(pkg_id: &str) -> Option<PathBuf> {
@@ -1386,7 +1506,12 @@ fn source_tree_has_symlink_escape(root: &Path, boundary: &Path) -> Result<bool> 
     if !root.exists() {
         return Ok(false);
     }
+    let boundary = normalize_path(boundary);
 
+    source_tree_has_symlink_escape_inner(root, &boundary)
+}
+
+fn source_tree_has_symlink_escape_inner(root: &Path, boundary: &Path) -> Result<bool> {
     for entry in fs::read_dir(root)? {
         let entry = entry?;
         let path = entry.path();
@@ -1401,7 +1526,7 @@ fn source_tree_has_symlink_escape(root: &Path, boundary: &Path) -> Result<bool> 
             if !normalize_path(&target).starts_with(boundary) {
                 return Ok(true);
             }
-        } else if file_type.is_dir() && source_tree_has_symlink_escape(&path, boundary)? {
+        } else if file_type.is_dir() && source_tree_has_symlink_escape_inner(&path, boundary)? {
             return Ok(true);
         }
     }
@@ -1813,12 +1938,73 @@ mod tests {
         assert!(rendered.contains("\"crates/core\""));
         assert!(rendered.contains("scopedWorkspaceSource \"cargo-unit-source-scope-cli-0.1.0-"));
         assert!(rendered.contains("\"crates/cli\""));
-        assert!(rendered.contains("vendorSources.\"itoa-1.0.15\""));
+        assert!(rendered.contains(
+            "vendorSources.\"registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.15\""
+        ));
+        assert!(rendered.contains("sourceAudit = {"));
+        assert!(rendered.contains("base = \"vendor-package\";"));
         assert!(rendered.contains("\"$src/src/lib.rs\""));
         assert!(rendered.contains("\"$src/src/main.rs\""));
         assert!(!rendered.contains("${src}/crates/core"));
         assert!(!rendered.contains("${src}/crates/cli"));
         assert!(!rendered.contains("${vendorDir}/itoa-1.0.15"));
+    }
+
+    #[test]
+    fn vendor_sources_are_keyed_by_full_package_identity() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.15",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "itoa",
+                    "src_path": "/vendor/crates-io-itoa/src/lib.rs",
+                    "edition": "2021"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": []
+                },
+                {
+                  "pkg_id": "sparse+https://example.invalid/index/#itoa@1.0.15",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "itoa",
+                    "src_path": "/vendor/example-itoa/src/lib.rs",
+                    "edition": "2021"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": []
+                }
+              ],
+              "roots": [0, 1]
+            }"#,
+        )
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: Some(PathBuf::from("/vendor")),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains(
+            "vendorSources.\"registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.15\""
+        ));
+        assert!(rendered
+            .contains("vendorSources.\"sparse+https://example.invalid/index/#itoa@1.0.15\""));
     }
 
     #[cfg(unix)]
@@ -1844,7 +2030,10 @@ version = "0.1.0"
         fs::write(workspace.join("internal/lib.rs"), "pub fn marker() {}\n").unwrap();
         std::os::unix::fs::symlink("../sibling/src", workspace.join("internal/src")).unwrap();
         let src_path = workspace.join("internal/lib.rs");
-        let pkg_id = format!("path+file://{}#internal@0.1.0", workspace.join("internal").display());
+        let pkg_id = format!(
+            "path+file://{}#internal@0.1.0",
+            workspace.join("internal").display()
+        );
         let graph: UnitGraph = serde_json::from_value(serde_json::json!({
             "version": 1,
             "units": [
@@ -2120,10 +2309,7 @@ links = "nested_native"
         let build_rs = workspace.join("builder").join("main.rs");
         fs::write(&build_rs, "fn main() {}\n").unwrap();
         let build_rs_path = build_rs.to_string_lossy();
-        let pkg_id = format!(
-            "path+file://{}#nested-native@0.1.0",
-            workspace.display()
-        );
+        let pkg_id = format!("path+file://{}#nested-native@0.1.0", workspace.display());
         let graph: UnitGraph = serde_json::from_value(serde_json::json!({
             "version": 1,
             "units": [
@@ -2214,10 +2400,7 @@ version = "0.1.0"
         fs::write(&app_build_rs, "fn main() {}\n").unwrap();
         let sys_build_rs_path = sys_build_rs.to_string_lossy();
         let app_build_rs_path = app_build_rs.to_string_lossy();
-        let sys_pkg_id = format!(
-            "path+file://{}#native-sys@0.1.0",
-            sys_root.display()
-        );
+        let sys_pkg_id = format!("path+file://{}#native-sys@0.1.0", sys_root.display());
         let app_pkg_id = format!("path+file://{}#app@0.1.0", app_root.display());
         let graph: UnitGraph = serde_json::from_value(serde_json::json!({
             "version": 1,
@@ -2296,7 +2479,8 @@ version = "0.1.0"
         )
         .unwrap();
 
-        assert!(rendered.contains("cargo_metadata_env=\"DEP_NATIVE_FFI_$(printf '%s' \"$cargo_metadata_key\""));
+        assert!(rendered
+            .contains("cargo_metadata_env=\"DEP_NATIVE_FFI_$(printf '%s' \"$cargo_metadata_key\""));
         assert!(rendered.contains("export \"$cargo_metadata_env=$cargo_metadata_value\""));
         fs::remove_dir_all(workspace).unwrap();
     }

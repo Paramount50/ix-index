@@ -36,10 +36,11 @@ let
     inherit pname src rustToolchain;
     # The checked-in lock matches the patched workspace above. Upstream's full
     # lock keeps a removed tool's second Valence branch, which collides in
-    # cargo-unit's name-version keyed vendor hash map.
+    # nixpkgs' name-version keyed git output hash map.
     cargoLock = ./Cargo.lock;
     # The build source is a patched upstream derivation, so there is no
     # repo-local workspace root for cargo-unit to rescan per package.
+    workspaceRoot = src;
     allowAggregateWorkspaceSource = true;
     cargoArgs = [
       "--package"
