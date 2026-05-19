@@ -254,12 +254,24 @@ in
       firewall.enable = lib.mkDefault true;
     };
 
-    # Bound the journal so a long-running VM that catches one tcpdump-style
-    # spam burst does not fill its disk with rotated journal files. Override
-    # per image when an operator actually needs the historical depth.
-    services.journald.extraConfig = lib.mkDefault ''
-      SystemMaxUse=1G
-    '';
+    services = {
+      # Bound the journal so a long-running VM that catches one tcpdump-style
+      # spam burst does not fill its disk with rotated journal files.
+      # Override per image when an operator actually needs the historical
+      # depth.
+      journald.extraConfig = lib.mkDefault ''
+        SystemMaxUse=1G
+      '';
+
+      # Varlink multiplexer for JSON user/group records. On-demand activated,
+      # so the cost when nothing queries it is negligible. Having it on means
+      # operator-side `userdbctl user/group` works out of the box, services
+      # that adopt `DynamicUser=true` get proper cgroup accounting through a
+      # synthesized record, and the eventual NFTSet=/cgroup-id integration
+      # over the nftables backend already enabled here can hook into real
+      # user/group identities without another platform-wide flip.
+      userdbd.enable = true;
+    };
 
     # Modern Nix configuration for any in-VM nix invocation.
     #
