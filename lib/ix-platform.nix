@@ -301,6 +301,21 @@ in
       userdbd.enable = true;
     };
 
+    # Capture native crashes (JVM segfault, Rust panics in extern, anything
+    # that takes SIGSEGV/SIGABRT) into /var/lib/systemd/coredump where
+    # `coredumpctl list/info/gdb` can find them. Without this, a crashed
+    # service shows `signal=SEGV` in the journal and the dump goes to
+    # /dev/null. MaxUse caps a crash-looping service rather than saving
+    # disk — disk autoscales to ~1 PiB, the cap is just defence in depth.
+    systemd.coredump = {
+      enable = true;
+      extraConfig = ''
+        Storage=external
+        Compress=yes
+        MaxUse=5G
+      '';
+    };
+
     # Modern Nix configuration for any in-VM nix invocation.
     #
     # experimental-features: nix CLI, flakes, the `|>` pipe operator,
