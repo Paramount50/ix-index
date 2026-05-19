@@ -128,17 +128,101 @@ in
           enableZshIntegration = true;
           enableFishIntegration = true;
         };
-        # Git baseline. main as the initial branch matches every modern
-        # forge default; pull.rebase keeps history linear on an operator
-        # box where merge commits add noise; autoSetupRemote means a
-        # plain `git push` on a new branch sets upstream without the
-        # explicit -u dance every time.
+        # Generic git defaults for any operator working in an ix VM.
+        # Identity (user.name/email), commit signing, GPG/SSH agent
+        # paths, and per-host credential helpers stay out of here: those
+        # are personal and belong in the operator's own dotfiles, not
+        # baked into every image.
         git = {
           enable = true;
+          # delta replaces git's pager for diffs and the interactive
+          # add/checkout selection screens. Side-by-side rendering and
+          # syntax highlighting make review usable over an SSH session.
+          delta = {
+            enable = true;
+            options = {
+              navigate = true;
+              side-by-side = true;
+              features = "interactive";
+            };
+          };
+          aliases = {
+            # Compact log: subject + short hash, one per line.
+            lg = "log --pretty=format:'%s %C(dim)%h%C(reset)'";
+            # Pull rebase then push, the recovery move after a rejected push.
+            sync = "!git pull --rebase && git push";
+            # Delete local branches whose remote-tracking branch is gone.
+            cleanup = "!git fetch --prune && git branch -vv | grep \": gone]\" | grep -v \"\\\\*\" | awk \"{print \\$1}\" | xargs -r git branch -d";
+          };
           extraConfig = {
             init.defaultBranch = "main";
             pull.rebase = true;
-            push.autoSetupRemote = true;
+            push = {
+              autoSetupRemote = true;
+              default = "simple";
+              followTags = true;
+            };
+            fetch = {
+              prune = true;
+              writeCommitGraph = true;
+              negotiationAlgorithm = "skipping";
+              parallel = 0;
+            };
+            rebase = {
+              autoSquash = true;
+              autoStash = true;
+              updateRefs = true;
+            };
+            rerere = {
+              enabled = true;
+              autoupdate = true;
+            };
+            merge = {
+              # zdiff3 includes the common ancestor in conflict markers
+              # so the operator can see what both sides changed against.
+              conflictstyle = "zdiff3";
+              ff = "only";
+              renormalize = true;
+            };
+            diff = {
+              algorithm = "histogram";
+              statNameWidth = 500;
+              statGraphWidth = 500;
+            };
+            log = {
+              date = "relative";
+              decorate = "auto";
+            };
+            blame.coloring = "highlightRecent";
+            column.worktree = "auto";
+            branch.sort = "-committerdate";
+            tag.sort = "-version:refname";
+            status.aheadBehind = true;
+            advice = {
+              statusHints = false;
+              addEmptyPathspec = false;
+            };
+            core = {
+              commitGraph = true;
+              multiPackIndex = true;
+              untrackedcache = true;
+              preloadindex = true;
+            };
+            gc = {
+              writeCommitGraph = true;
+              auto = 256;
+            };
+            index = {
+              threads = 0;
+              version = 4;
+            };
+            checkout.workers = 0;
+            feature.manyFiles = true;
+            submodule = {
+              recurse = true;
+              fetchJobs = 16;
+            };
+            maintenance.auto = true;
           };
         };
       };
