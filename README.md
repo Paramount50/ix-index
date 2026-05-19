@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/logo.svg" width="80" alt="ix" />
+  <img src="assets/logo.svg" width="80" alt="index" />
 </p>
 
 # Index
 
-`index` builds ready-to-run [ix](https://ix.dev/) VM images from NixOS modules.
-Every image targets AMD EPYC Gen 5 (`znver5`) and ships as an OCI archive.
+`index` builds ready-to-run VM images from NixOS modules. Every image targets
+AMD EPYC Gen 5 (`znver5`) and ships as an OCI archive.
 
 Use it for runnable images and reusable service modules.
 
