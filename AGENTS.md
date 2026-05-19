@@ -128,6 +128,8 @@ Images are not stacked at runtime. ix runs one image. Layering is purely a build
 
 ix VMs implicitly have snapshots and effectively unbounded disk. Fleet and stateful-service designs should lean on those primitives: take snapshots before destructive or data-format-changing operations, prefer in-place NixOS/system switches for stateful nodes, and do not design around fixed-root-disk exhaustion as a primary constraint.
 
+A VM in this repo is not necessarily a sealed appliance. Many of these images are SSH'd into and used as interactive dev machines, where a human reads `man`, browses `/etc`, tabs through Nushell completions, and reaches for `--help`. That is not universal: a pure backend service node (an internal Velocity proxy, a Postgres VM with no shell traffic) is fine to slim aggressively. Default toward keeping the on-host ergonomics that an operator would expect from a normal NixOS box; opt into closure-shrinking knobs (`documentation.enable = false`, `environment.noXlibs = true`, `programs.command-not-found.enable = false`) per image when the image is genuinely headless.
+
 ## Trust model
 
 Assume the agent running inside a VM has root and a goal it is optimizing for. It can install packages, edit `/etc`, restart services, flip `networking.firewall.enable`, and overwrite anything reachable from inside the guest. What it does not have by default: host API credentials, the ix CLI's host-side authority, registry-write tokens, or any secret you do not mount in. Design follows from that asymmetry. Anything that must hold against a misbehaving in-VM process belongs outside the VM, where the agent cannot reach it.
