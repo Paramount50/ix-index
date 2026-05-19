@@ -295,6 +295,10 @@ in
         ripgrep
         strace
         tcpdump
+        # Pane and tab multiplexer for one session. Connection survival
+        # across SSH drops is handled by ix itself (AGENTS.md "VM
+        # assumptions"), so zellij is shipped for splits, not reattach.
+        zellij
         zstd
         ;
     };
