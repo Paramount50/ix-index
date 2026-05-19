@@ -2,7 +2,7 @@
 
 ## Workflow
 
-Commit and push after making changes by default.
+Commit and push after making changes by default. Prefer atomic commits: one logical change per commit, with a succinct subject and only the body the change actually needs.
 
 Contributor setup and local checks are in @CONTRIBUTING.md.
 
