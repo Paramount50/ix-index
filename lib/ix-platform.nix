@@ -294,6 +294,12 @@ in
         options = "--delete-older-than 30d";
       };
       optimise.automatic = true;
+      # Keep ad-hoc nix work an operator runs over SSH from starving the
+      # service workload (Minecraft tick rate, Postgres queries). The
+      # daemon still makes progress; the kernel just deprioritizes it
+      # whenever the real service wants CPU or disk.
+      daemonCPUSchedPolicy = "idle";
+      daemonIOSchedClass = "idle";
     };
 
     system.stateVersion = "25.05";
