@@ -6,8 +6,7 @@ on:
     - cron: "23 * * * *"
 
 permissions:
-  actions: read
-  contents: write
+  contents: read
 
 concurrency:
   group: promote-main
@@ -16,6 +15,9 @@ concurrency:
 jobs:
   promote-main:
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
     env:
       DEVELOPMENT_BRANCH: development
       PROMOTED_BRANCH: main
