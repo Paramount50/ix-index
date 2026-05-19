@@ -130,7 +130,7 @@ Images are not stacked at runtime. ix runs one image. Layering is purely a build
 
 ## VM assumptions
 
-ix VMs implicitly have snapshots and effectively unbounded disk. Fleet and stateful-service designs should lean on those primitives: take snapshots before destructive or data-format-changing operations, prefer in-place NixOS/system switches for stateful nodes, and do not design around fixed-root-disk exhaustion as a primary constraint.
+ix VMs implicitly have snapshots and effectively unbounded disk: the per-VM disk autoscales up to ~1 PiB on demand, so caps on journal size, coredump retention, GC roots, and similar bookkeeping exist to bound a misbehaving service rather than to save space. Fleet and stateful-service designs should lean on those primitives: take snapshots before destructive or data-format-changing operations, prefer in-place NixOS/system switches for stateful nodes, and do not design around fixed-root-disk exhaustion as a primary constraint.
 
 These are proper VMs, not containers in the resource-constrained sense. A given node can have hundreds of GiB of RAM, many cores, and large attached disk, and the fleet autoscales node sizes to the workload. Design for that envelope: a few tens of MiB of closure for an extra dev tool, a long-running `determinate-nixd` helper, or an in-image cache is rounding error against a 256 GiB RAM Minecraft host. The container-shaped flags (`boot.isContainer = true`, shared linux-ix kernel) are about runtime model, not about being squeezed for resources. Image authors should pick conveniences and operator ergonomics that hold up at this scale rather than micro-optimizing closures.
 
