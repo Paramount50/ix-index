@@ -192,6 +192,15 @@ in
           lldb
           lsof
           ncdu
+          # nh wraps nixos-rebuild/home-manager/darwin-rebuild with a
+          # build tree (via nom), pre-activation diffs (via dix), and
+          # confirmation prompts. nix-output-monitor is shipped
+          # separately so plain `nom nix build .#foo` works outside nh.
+          # nix-tree is the interactive TUI for exploring a derivation's
+          # dependency graph.
+          nh
+          nix-output-monitor
+          nix-tree
           pv
           strace
           tcpdump
