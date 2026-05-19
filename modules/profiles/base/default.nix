@@ -231,38 +231,66 @@ in
             maintenance.auto = true;
           };
         };
+        # Neovim with a curated plugin set. defaultEditor wires EDITOR
+        # via HM's home.sessionVariables; vi/vim aliases mean muscle
+        # memory from any other Unix box lands on nvim. init.lua ships
+        # the base options (numbers, leader, undo, soft wrap, ...) and
+        # each plugin's setup() lives in its own plugins/<name>.lua so
+        # the file is editable as ordinary Lua. treesitter ships every
+        # grammar (cross-tenant dedup makes this free, see AGENTS.md).
+        neovim = {
+          enable = true;
+          defaultEditor = true;
+          viAlias = true;
+          vimAlias = true;
+          extraLuaConfig = builtins.readFile ./nvim/init.lua;
+          plugins = with pkgs.vimPlugins; [
+            {
+              plugin = nvim-treesitter.withAllGrammars;
+              type = "lua";
+              config = builtins.readFile ./nvim/plugins/treesitter.lua;
+            }
+            plenary-nvim
+            {
+              plugin = telescope-nvim;
+              type = "lua";
+              config = builtins.readFile ./nvim/plugins/telescope.lua;
+            }
+            {
+              plugin = gitsigns-nvim;
+              type = "lua";
+              config = builtins.readFile ./nvim/plugins/gitsigns.lua;
+            }
+            {
+              plugin = which-key-nvim;
+              type = "lua";
+              config = builtins.readFile ./nvim/plugins/which-key.lua;
+            }
+            {
+              plugin = oil-nvim;
+              type = "lua";
+              config = builtins.readFile ./nvim/plugins/oil.lua;
+            }
+            {
+              plugin = kanagawa-nvim;
+              type = "lua";
+              config = builtins.readFile ./nvim/plugins/kanagawa.lua;
+            }
+          ];
+        };
       };
     };
 
+    # Ship every common operator shell so an SSH session can chsh into
+    # whatever the operator already knows. bash is implicit in NixOS;
+    # zsh and fish get their NixOS modules so /etc/shells registration
+    # and system-wide completion paths are wired without per-image
+    # setup. Nushell is the platform default user shell (see
+    # lib/ix-platform.nix) and lands as the login shell directly,
+    # since Home Manager owns its config files via the root attrset.
     programs = {
-      # Ship every common operator shell so an SSH session can chsh into
-      # whatever the operator already knows. bash is implicit in NixOS;
-      # zsh and fish get their NixOS modules so /etc/shells registration
-      # and system-wide completion paths are wired without per-image
-      # setup. Nushell is the platform default user shell (see
-      # lib/ix-platform.nix) and lands as the login shell directly,
-      # since Home Manager owns its config files via the root attrset.
       zsh.enable = true;
       fish.enable = true;
-
-      # Neovim is the default $EDITOR system-wide (defaultEditor exports
-      # EDITOR for both interactive and service contexts). vi/vim aliases
-      # mean muscle memory from any other Unix box lands on nvim. Helix
-      # and micro ride along as alternatives the operator can choose.
-      # init.lua next to this module ships reasonable defaults (numbers,
-      # space leader, persistent undo, soft wrap, truecolor); plugins
-      # stay out of the base profile.
-      neovim = {
-        enable = true;
-        defaultEditor = true;
-        viAlias = true;
-        vimAlias = true;
-        configure.customRC = ''
-          lua << EOF
-          ${builtins.readFile ./nvim/init.lua}
-          EOF
-        '';
-      };
     };
 
     environment.systemPackages = builtins.attrValues {
