@@ -3,8 +3,11 @@ name: Check
 on:
   push:
     branches:
+      - development
       - main
   pull_request:
+    branches:
+      - development
 
 permissions:
   contents: read

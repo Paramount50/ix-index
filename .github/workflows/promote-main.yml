@@ -1,0 +1,134 @@
+name: Promote main
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "23 * * * *"
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: promote-main
+  cancel-in-progress: false
+
+jobs:
+  promote-main:
+    runs-on: ubuntu-latest
+    env:
+      DEVELOPMENT_BRANCH: development
+      PROMOTED_BRANCH: main
+      MINIMUM_AGE_HOURS: "6"
+    steps:
+      - name: Checkout development
+        uses: actions/checkout@v6
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Install Determinate Nix
+        uses: DeterminateSystems/determinate-nix-action@v3
+        with:
+          # Every image in this repo pins `nixpkgs.hostPlatform.gcc.arch =
+          # "znver5"`, which marks each derivation as needing the
+          # `gccarch-znver5` system feature. GitHub runners don't advertise
+          # that feature by default, so flake-check fails with
+          # `missing system features ... Required features: {gccarch-znver5}`
+          # before evaluating any image.
+          extra-conf: |
+            extra-system-features = gccarch-znver5
+
+      - name: Select checked development commit
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin \
+            "$DEVELOPMENT_BRANCH:refs/remotes/origin/$DEVELOPMENT_BRANCH" \
+            "$PROMOTED_BRANCH:refs/remotes/origin/$PROMOTED_BRANCH"
+
+          cutoff="$(date -u -d "$MINIMUM_AGE_HOURS hours ago" '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "Looking for successful development check runs completed before $cutoff"
+
+          gh run list \
+            --workflow check.yml \
+            --branch "$DEVELOPMENT_BRANCH" \
+            --event push \
+            --status success \
+            --limit 50 \
+            --json databaseId,headSha,updatedAt > runs.json
+
+          export CUTOFF="$cutoff"
+          candidate_data="$(
+            python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime
+
+          cutoff = datetime.fromisoformat(os.environ["CUTOFF"].replace("Z", "+00:00"))
+          with open("runs.json", encoding="utf-8") as handle:
+              runs = json.load(handle)
+
+          for run in runs:
+              updated_at = datetime.fromisoformat(run["updatedAt"].replace("Z", "+00:00"))
+              if updated_at <= cutoff:
+                  print(run["headSha"])
+                  print(run["updatedAt"])
+                  print(run["databaseId"])
+                  break
+          PY
+          )"
+
+          if [ -z "$candidate_data" ]; then
+            echo "No successful development check run is old enough yet."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          mapfile -t candidate_lines <<< "$candidate_data"
+          candidate="${candidate_lines[0]}"
+          checked_at="${candidate_lines[1]}"
+          run_id="${candidate_lines[2]}"
+
+          if ! git cat-file -e "$candidate^{commit}"; then
+            echo "Candidate $candidate from check run $run_id is missing from the fetched repository."
+            exit 1
+          fi
+
+          if ! git merge-base --is-ancestor "$candidate" "origin/$DEVELOPMENT_BRANCH"; then
+            echo "Candidate $candidate is no longer on origin/$DEVELOPMENT_BRANCH."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          current_main="$(git rev-parse "origin/$PROMOTED_BRANCH")"
+          if [ "$candidate" = "$current_main" ]; then
+            echo "$PROMOTED_BRANCH already points at $candidate."
+            echo "promote=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! git merge-base --is-ancestor "origin/$PROMOTED_BRANCH" "$candidate"; then
+            echo "origin/$PROMOTED_BRANCH is not an ancestor of $candidate; refusing non-fast-forward promotion."
+            exit 1
+          fi
+
+          echo "Selected $candidate from check run $run_id, completed at $checked_at."
+          echo "promote=true" >> "$GITHUB_OUTPUT"
+          echo "candidate=$candidate" >> "$GITHUB_OUTPUT"
+
+      - name: Check candidate
+        if: steps.select.outputs.promote == 'true'
+        run: |
+          set -euo pipefail
+          git checkout --detach "${{ steps.select.outputs.candidate }}"
+          nix flake check -L
+
+      - name: Fast-forward main
+        if: steps.select.outputs.promote == 'true'
+        run: |
+          set -euo pipefail
+          git push origin "${{ steps.select.outputs.candidate }}:refs/heads/$PROMOTED_BRANCH"

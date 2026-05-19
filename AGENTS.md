@@ -6,7 +6,15 @@ Commit and push after making changes by default.
 
 Contributor setup and local checks are in @CONTRIBUTING.md.
 
-Work directly in the main checkout on `main` unless the user asks for a branch or separate worktree. Pull before starting, then commit and push straight to `main` after checks pass.
+Work directly in the shared checkout on `development` unless the user asks for a branch or separate worktree. Pull before starting, then commit and push to `development` after checks pass.
+
+### Branch model
+
+`development` is the GitHub default branch. PRs target `development`; routine work lands there after local checks and review.
+
+`main` is the promoted consumer branch. Pin examples, downstream flakes, and image consumers to `main` when they need a commit that has passed the cache gate. Human changes should flow through `development`.
+
+A scheduled workflow fast-forwards `main` from `development`. It selects the newest successful `Check` workflow run on `development` that completed at least 6 hours earlier, re-runs `nix flake check`, then pushes `main` to that commit. The 6-hour pause is a supply-chain speed bump: a lockfile can pin a compromised artifact before GitHub, Modrinth, crates.io, npm, or an upstream maintainer has reacted. The pause gives takedowns, advisories, and cache churn time to show up before consumers follow the branch. Keep using the 24-hour dependency-intake default for routine third-party bumps; the branch delay is the final gate for already-merged development commits.
 
 When a commit actually fixes a tracked GitHub issue, include an auto-closing keyword in the commit body, for example `Fixes #123`, `Closes #123`, or `Resolves #123`. Use `Refs #123` only for related work, policy docs, investigation, or partial cleanup that should not close the issue.
 

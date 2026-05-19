@@ -23,7 +23,7 @@ jobs:
       - name: Update flake.lock
         uses: DeterminateSystems/update-flake-lock@v28
         with:
-          base: main
+          base: development
           branch: update-flake-lock
           commit-msg: "flake.lock: update"
           pr-title: "Update Nix flake inputs"
