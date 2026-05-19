@@ -82,17 +82,27 @@ in
       "net.core.default_qdisc" = "fq";
     };
 
-    # System-wide Nushell config. The two settings worth the file are
-    # banner-off and SQLite history; everything else stays at Nushell
-    # defaults. NixOS does not have a `programs.nushell` module (that one
-    # lives in Home Manager, which this repo intentionally does not use),
-    # so the config goes through /etc and a tmpfiles symlink into root's
-    # config dir, which is where Nushell's normal lookup finds it.
-    environment.etc."nushell/config.nu".source = ./config.nu;
-    systemd.tmpfiles.rules = [
-      "d /root/.config/nushell 0755 root root -"
-      "L+ /root/.config/nushell/config.nu - - - - /etc/nushell/config.nu"
-    ];
+    # Per-tool config for root lives in Home Manager (used here as a
+    # NixOS module per AGENTS.md). Nushell's config.nu ships as a real
+    # `.nu` file next to this module; HM writes it to the right XDG path
+    # under /root/.config/nushell/ and follow-up tool integrations
+    # (atuin, zoxide, starship) hang off the same root user attrset.
+    home-manager.users.root = {
+      home.stateVersion = "25.05";
+      programs.nushell = {
+        enable = true;
+        configFile.source = ./config.nu;
+      };
+    };
+
+    # Ship every common operator shell so an SSH session can chsh into
+    # whatever the operator already knows. bash is implicit in NixOS;
+    # zsh and fish get their NixOS modules so /etc/shells registration
+    # and system-wide completion paths are wired without per-image setup.
+    # Nushell is the platform default user shell (see lib/ix-platform.nix)
+    # and is registered via the workspace wrapper below.
+    programs.zsh.enable = true;
+    programs.fish.enable = true;
 
     environment.systemPackages =
       builtins.attrValues {
