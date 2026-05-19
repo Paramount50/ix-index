@@ -237,6 +237,7 @@ in
       # rule is recorded in `ix/AGENTS.md` under "Architecture that must not
       # drift". Tracking the ix-side north-south primitive in
       # https://github.com/indexable-inc/index/issues/41.
+      nftables.enable = true;
       firewall.enable = lib.mkDefault true;
     };
     system.stateVersion = "25.05";
