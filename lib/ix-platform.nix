@@ -246,6 +246,14 @@ in
       nftables.enable = true;
       firewall.enable = lib.mkDefault true;
     };
+
+    # Bound the journal so a long-running VM that catches one tcpdump-style
+    # spam burst does not fill its disk with rotated journal files. Override
+    # per image when an operator actually needs the historical depth.
+    services.journald.extraConfig = lib.mkDefault ''
+      SystemMaxUse=1G
+    '';
+
     system.stateVersion = "25.05";
   };
 }
