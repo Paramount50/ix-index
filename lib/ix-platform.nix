@@ -288,6 +288,7 @@ in
           "git-hashing"
         ];
         allow-import-from-derivation = lib.mkDefault true;
+        warn-dirty = false;
       };
       gc = {
         automatic = true;
