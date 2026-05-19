@@ -44,10 +44,12 @@
         packages = {
           ix = ./packages/ix;
           ixFleet = ./packages/ix-fleet;
-          minecraftHotReloadAgent = ./packages/minecraft-hot-reload-agent;
-          minecraftNbt = ./packages/minecraft-nbt;
-          minecraftRcon = ./packages/minecraft-rcon;
-          minecraftSyncManaged = ./packages/minecraft-sync-managed;
+          minecraft = {
+            hotReloadAgent = ./packages/minecraft/hot-reload-agent;
+            nbt = ./packages/minecraft/nbt;
+            rcon = ./packages/minecraft/rcon;
+            syncManaged = ./packages/minecraft/sync-managed;
+          };
           llmClippy = ./packages/llm-clippy;
           mcProbe = ./packages/mc-probe;
           minestom.servers.hello = ./packages/minestom/servers/hello;

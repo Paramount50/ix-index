@@ -152,8 +152,8 @@ let
       };
     in
     {
-      minecraft-hot-reload-agent = final.callPackage paths.packages.minecraftHotReloadAgent { };
-      minecraft-rcon = final.callPackage paths.packages.minecraftRcon {
+      minecraft-hot-reload-agent = final.callPackage paths.packages.minecraft.hotReloadAgent { };
+      minecraft-rcon = final.callPackage paths.packages.minecraft.rcon {
         writePythonApplication = writePythonApplication final;
       };
       oci-image-builder = checkedOciImageBuilder.passthru.unchecked or checkedOciImageBuilder;
@@ -545,7 +545,7 @@ let
         minestom.helloServerJar = pkgs.callPackage paths.packages.minestom.servers.hello {
           ix = ixForPackages;
         };
-        minecraft-nbt = pkgs.callPackage paths.packages.minecraftNbt {
+        minecraft-nbt = pkgs.callPackage paths.packages.minecraft.nbt {
           inherit pkgs;
           ix = ixForPackages;
         };
@@ -553,7 +553,7 @@ let
         mc-probe = pkgs.callPackage paths.packages.mcProbe {
           ix = ixForPackages;
         };
-        minecraft-sync-managed = pkgs.callPackage paths.packages.minecraftSyncManaged {
+        minecraft-sync-managed = pkgs.callPackage paths.packages.minecraft.syncManaged {
           inherit pkgs;
           ix = ixForPackages;
         };
