@@ -2,7 +2,9 @@
 
 ## Workflow
 
-Commit and push after making changes by default. Prefer atomic commits: one logical change per commit, with a succinct subject and only the body the change actually needs.
+Commit and push after making changes by default.
+
+One logical change per commit: a refactor, a behavior change, a doc note, and an unrelated fix each get their own commit. Bundling a mechanical fixup (formatter run, lint-required rename) with the change that triggered it is fine; bundling two independent policy changes is not. Subjects are imperative, lowercased, no trailing period, with an optional `scope: ` prefix that names the touched layer (`platform:`, `AGENTS:`, `minecraft:`). Bodies are for the *why* the diff cannot show: motivation, tradeoffs, the constraint that survives an obvious-looking refactor. Skip the body when the subject already says everything; never write a body that just paraphrases the diff. Avoid `fix stuff`, `WIP`, `address review feedback` (name the feedback), and mixed-concern subjects like `format + add feature`.
 
 Contributor setup and local checks are in @CONTRIBUTING.md.
 
