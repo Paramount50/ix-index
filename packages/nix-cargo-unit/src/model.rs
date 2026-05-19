@@ -12,6 +12,8 @@ pub struct UnitGraph {
     pub version: u32,
     pub units: Vec<Unit>,
     pub roots: Vec<usize>,
+    #[serde(default)]
+    pub root_sets: Vec<Vec<usize>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -295,6 +297,7 @@ impl UnitGraph {
             version: 1,
             units: Vec::new(),
             roots: Vec::new(),
+            root_sets: Vec::new(),
         };
         let mut merged_by_hash = BTreeMap::new();
 
@@ -317,12 +320,17 @@ impl UnitGraph {
                 )?;
             }
 
+            let mut root_set = Vec::new();
             for root in graph.roots {
                 let merged_root = index_map[root].expect("root unit was merged");
                 if !merged.roots.contains(&merged_root) {
                     merged.roots.push(merged_root);
                 }
+                if !root_set.contains(&merged_root) {
+                    root_set.push(merged_root);
+                }
             }
+            merged.root_sets.push(root_set);
         }
 
         merged.validate()?;
@@ -345,6 +353,17 @@ impl UnitGraph {
                     "root unit index {root} is outside the unit graph with {} units",
                     self.units.len()
                 );
+            }
+        }
+
+        for root_set in &self.root_sets {
+            for root in root_set {
+                if *root >= self.units.len() {
+                    bail!(
+                        "root set unit index {root} is outside the unit graph with {} units",
+                        self.units.len()
+                    );
+                }
             }
         }
 

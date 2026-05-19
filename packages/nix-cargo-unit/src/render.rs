@@ -238,6 +238,7 @@ struct UnitsNixTemplate {
     binary_entries: String,
     library_entries: String,
     test_entries: String,
+    target_set_entries: String,
     default_entry: String,
 }
 
@@ -255,6 +256,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         binary_entries: render_root_entries(graph, &prepared, Unit::is_bin),
         library_entries: render_root_entries(graph, &prepared, Unit::is_library),
         test_entries: render_test_entries(graph, &prepared),
+        target_set_entries: render_target_sets(graph, &prepared),
         default_entry: render_default_entry(graph, &prepared),
     };
 
@@ -1749,23 +1751,27 @@ fn ensure_source_contains_unit(source: &SourceEntry, unit: &Unit) -> Result<()> 
 }
 
 fn render_roots(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
-    graph
-        .roots
+    render_unit_refs(&graph.roots, prepared)
+}
+
+fn render_unit_refs(roots: &[usize], prepared: &PreparedGraph) -> String {
+    roots
         .iter()
         .map(|index| format!("units.{}", nix_attr(&prepared.names[*index])))
         .collect::<Vec<_>>()
         .join(" ")
 }
 
-fn render_root_entries(
-    graph: &UnitGraph,
+fn render_root_entries_for(
+    roots: &[usize],
+    units: &[Unit],
     prepared: &PreparedGraph,
     include: impl Fn(&Unit) -> bool,
 ) -> String {
     let mut entries = String::new();
     let mut seen = BTreeSet::new();
-    for index in &graph.roots {
-        let unit = &graph.units[*index];
+    for index in roots {
+        let unit = &units[*index];
         if !include(unit) || !seen.insert(unit.target.name.clone()) {
             continue;
         }
@@ -1777,6 +1783,14 @@ fn render_root_entries(
         );
     }
     entries
+}
+
+fn render_root_entries(
+    graph: &UnitGraph,
+    prepared: &PreparedGraph,
+    include: impl Fn(&Unit) -> bool,
+) -> String {
+    render_root_entries_for(&graph.roots, &graph.units, prepared, include)
 }
 
 fn render_checked_roots(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
@@ -1793,11 +1807,33 @@ fn render_checked_roots(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
         .join(" ")
 }
 
-fn render_test_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
+fn render_target_sets(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
+    let root_sets = if graph.root_sets.is_empty() {
+        vec![graph.roots.clone()]
+    } else {
+        graph.root_sets.clone()
+    };
+
+    root_sets
+        .iter()
+        .map(|roots| {
+            format!(
+                "    {{\n      roots = [ {} ];\n      binaries = {{\n{}      }};\n      libraries = {{\n{}      }};\n      tests = {{\n{}      }};\n    }}",
+                render_unit_refs(roots, prepared),
+                render_root_entries_for(roots, &graph.units, prepared, Unit::is_bin),
+                render_root_entries_for(roots, &graph.units, prepared, Unit::is_library),
+                render_test_entries_for(roots, &graph.units, prepared),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_test_entries_for(roots: &[usize], units: &[Unit], prepared: &PreparedGraph) -> String {
     let mut entries = String::new();
     let mut seen = BTreeSet::new();
-    for index in &graph.roots {
-        let unit = &graph.units[*index];
+    for index in roots {
+        let unit = &units[*index];
         if !unit.is_test() {
             continue;
         }
@@ -1818,6 +1854,10 @@ fn render_test_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
     }
 
     entries
+}
+
+fn render_test_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
+    render_test_entries_for(&graph.roots, &graph.units, prepared)
 }
 
 fn nix_attr(value: &str) -> String {
@@ -1991,6 +2031,67 @@ mod tests {
         assert!(rendered.contains("\"hello\" = pkgs.runCommand \"cargo-unit-test-hello\""));
         assert!(rendered.contains("RUST_TEST_THREADS"));
         assert!(rendered.contains("/bin/hello"));
+    }
+
+    #[test]
+    fn exposes_root_sets_for_namespaced_target_outputs() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["bin"],
+                    "crate_types": ["bin"],
+                    "name": "hello",
+                    "src_path": "/workspace/src/main.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "features": [],
+                  "mode": "build",
+                  "dependencies": [],
+                  "platform": "x86_64-unknown-linux-musl"
+                },
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["bin"],
+                    "crate_types": ["bin"],
+                    "name": "hello",
+                    "src_path": "/workspace/src/main.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "features": [],
+                  "mode": "build",
+                  "dependencies": [],
+                  "platform": "aarch64-apple-darwin"
+                }
+              ],
+              "roots": [0, 1],
+              "root_sets": [[0], [1]]
+            }"#,
+        )
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("targetSets = ["));
+        assert_eq!(rendered.matches("binaries = {").count(), 3);
+        assert_eq!(rendered.matches("\"hello\" = withPolicyChecks units.").count(), 4);
     }
 
     #[test]

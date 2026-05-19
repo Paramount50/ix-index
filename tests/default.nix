@@ -493,22 +493,10 @@ let
   cargoUnitWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
     workspaceRoot = ./fixtures/cargo-unit-hello;
-  };
-
-  cargoUnitHello = cargoUnitWorkspace.binaries.cargo-unit-hello;
-
-  cargoUnitBinaries = ix.cargoUnit.buildBinaries {
-    src = cargoUnitFixture;
-    workspaceRoot = ./fixtures/cargo-unit-hello;
-    binaries = [
-      "cargo-unit-goodbye"
-      "cargo-unit-hello"
+    cargoTargetNames = [
+      "build"
+      "test"
     ];
-  };
-
-  cargoUnitTestWorkspace = ix.cargoUnit.buildWorkspace {
-    src = cargoUnitFixture;
-    workspaceRoot = ./fixtures/cargo-unit-hello;
     cargoTargets = [
       [ "--workspace" ]
       [
@@ -516,6 +504,15 @@ let
         "--tests"
       ]
     ];
+  };
+
+  cargoUnitHello = cargoUnitWorkspace.binaries.cargo-unit-hello;
+
+  cargoUnitBinaries = {
+    inherit (cargoUnitWorkspace.targetSets.build.binaries)
+      cargo-unit-goodbye
+      cargo-unit-hello
+      ;
   };
 
   cargoUnitPolicyDisabledWorkspace = ix.cargoUnit.buildWorkspace {
@@ -1884,8 +1881,14 @@ let
         message = "cargo-unit should build several binary roots from one workspace graph";
       }
       {
-        assertion = builtins.hasAttr "cargo_unit_hello" cargoUnitTestWorkspace.tests;
+        assertion = builtins.hasAttr "cargo_unit_hello" cargoUnitWorkspace.targetSets.test.tests;
         message = "cargo-unit workspaces should expose test targets as separate checks";
+      }
+      {
+        assertion =
+          cargoUnitWorkspace.targetSets.build.binaries.cargo-unit-hello.drvPath
+          == cargoUnitWorkspace.binaries.cargo-unit-hello.drvPath;
+        message = "cargo-unit should expose named target-set outputs without losing aggregate outputs";
       }
       {
         assertion = cargoUnitPolicyDisabledWorkspace.policyChecks == { };
@@ -2252,7 +2255,7 @@ let
     grep -q 'hello from cargo-unit' cargo-unit-hello.out
     ${cargoUnitBinaries.cargo-unit-goodbye}/bin/cargo-unit-goodbye > cargo-unit-goodbye.out
     grep -q 'goodbye from cargo-unit' cargo-unit-goodbye.out
-    test -d ${cargoUnitTestWorkspace.tests.cargo_unit_hello}
+    test -d ${cargoUnitWorkspace.targetSets.test.tests.cargo_unit_hello}
 
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
     test -d ${bunSite.bunNodeModules}/node_modules/clsx

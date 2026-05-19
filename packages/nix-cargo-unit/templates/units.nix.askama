@@ -122,4 +122,7 @@ in
 {{ library_entries }}  };
   tests = {
 {{ test_entries }}  };
+  targetSets = [
+{{ target_set_entries }}
+  ];
 {{ default_entry }}}

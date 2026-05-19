@@ -29,6 +29,7 @@ let
         throw "cargoUnit.buildWorkspace requires at least one cargoTargets entry"
       else
         targets;
+    cargoTargetNames = args.cargoTargetNames or null;
     profile = args.profile or "release";
     rustToolchain = args.rustToolchain or rust.defaultRustToolchain;
     nativeBuildInputs = args.nativeBuildInputs or [ ];
@@ -283,10 +284,24 @@ let
           }
         );
       };
+      targetSetNames =
+        if args.cargoTargetNames == null then
+          map (index: builtins.toString index) (lib.range 0 ((builtins.length args.cargoTargets) - 1))
+        else if builtins.length args.cargoTargetNames == builtins.length args.cargoTargets then
+          args.cargoTargetNames
+        else
+          throw "cargoUnit.buildWorkspace requires cargoTargetNames to match cargoTargets length";
+      namedTargetSets = lib.listToAttrs (
+        lib.imap1 (
+          targetIndex: targetName:
+          lib.nameValuePair targetName (builtins.elemAt units.targetSets (targetIndex - 1))
+        ) targetSetNames
+      );
     in
     units
     // {
       inherit unitGraphJson unitsNix vendorDir;
+      targetSets = namedTargetSets;
       inherit (args) policy;
     };
 
