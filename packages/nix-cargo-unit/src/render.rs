@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use askama::Template as _;
-use color_eyre::eyre::{eyre, Result, WrapErr as _};
+use color_eyre::eyre::{Result, WrapErr as _, eyre};
 use serde::Deserialize;
 use sha2::Digest as _;
 
@@ -972,6 +972,7 @@ fn render_build_script_run(
     Ok(attrs.render())
 }
 
+#[allow(clippy::too_many_lines)]
 fn render_build_script_run_phase(
     graph: &UnitGraph,
     prepared: &PreparedGraph,
@@ -1020,7 +1021,7 @@ fn render_build_script_run_phase(
             "false"
         })
     )?;
-    script.push_str("export NUM_JOBS=''${NIX_BUILD_CORES:-1}\n");
+    script.push_str(concat!("export NUM_JOBS=''", "${NIX_BUILD_CORES:-1}\n"));
     script.push_str(&cargo_package_exports(run_unit));
     script.push_str(&cargo_manifest_links_export(run_unit));
     append_cargo_feature_exports(&mut script, run_unit);
@@ -1257,13 +1258,11 @@ fn package_manifest_string(manifest: &str, key: &str) -> Option<String> {
 fn parse_manifest_string(value: &str) -> Option<String> {
     if value.starts_with('"') {
         serde_json::from_str(value).ok()
-    } else if let Some(stripped) = value
-        .strip_prefix('\'')
-        .and_then(|inner| inner.strip_suffix('\''))
-    {
-        Some(stripped.to_string())
     } else {
-        None
+        value
+            .strip_prefix('\'')
+            .and_then(|inner| inner.strip_suffix('\''))
+            .map(std::string::ToString::to_string)
     }
 }
 
@@ -1279,7 +1278,6 @@ fn cargo_feature_env_name(feature: &str) -> String {
         match byte {
             b'a'..=b'z' => env_name.push(char::from(byte.to_ascii_uppercase())),
             b'A'..=b'Z' | b'0'..=b'9' | b'_' => env_name.push(char::from(byte)),
-            b'-' => env_name.push('_'),
             _ => env_name.push('_'),
         }
     }
@@ -1623,7 +1621,7 @@ fn percent_decode_path(path: &str) -> Option<String> {
     String::from_utf8(out).ok()
 }
 
-fn hex_value(byte: u8) -> Option<u8> {
+const fn hex_value(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
@@ -2225,8 +2223,10 @@ mod tests {
         assert!(rendered.contains(
             "vendorSources.\"registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.15\""
         ));
-        assert!(rendered
-            .contains("vendorSources.\"sparse+https://example.invalid/index/#itoa@1.0.15\""));
+        assert!(
+            rendered
+                .contains("vendorSources.\"sparse+https://example.invalid/index/#itoa@1.0.15\"")
+        );
     }
 
     #[test]
@@ -2270,8 +2270,11 @@ mod tests {
         .unwrap();
 
         assert!(rendered.contains(&format!("vendorSources.\"{locked_source}#snafu@0.9.0\"")));
-        assert!(!rendered
-            .contains("vendorSources.\"git+https://github.com/shepmaster/snafu.git#snafu@0.9.0\""));
+        assert!(
+            !rendered.contains(
+                "vendorSources.\"git+https://github.com/shepmaster/snafu.git#snafu@0.9.0\""
+            )
+        );
     }
 
     #[test]
@@ -2325,8 +2328,7 @@ mod tests {
             "nix-cargo-unit-symlink-source-test-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |duration| duration.as_nanos())
         ));
         fs::create_dir_all(workspace.join("internal")).unwrap();
         fs::create_dir_all(workspace.join("sibling/src")).unwrap();
@@ -2553,8 +2555,10 @@ version = "0.1.0"
         )
         .unwrap();
 
-        assert!(rendered
-            .contains("if [ \"''${CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER+x}\" = x ]; then"));
+        assert!(
+            rendered
+                .contains("if [ \"''${CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER+x}\" = x ]; then")
+        );
         assert!(rendered.contains(
             "rustc_args+=( -C \"linker=''${CARGO_TARGET_X86_64_APPLE_DARWIN_LINKER}\" )"
         ));
@@ -2632,8 +2636,7 @@ version = "0.1.0"
             "nix-cargo-unit-render-test-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |duration| duration.as_nanos())
         ));
         fs::create_dir_all(&workspace).unwrap();
         fs::write(
@@ -2708,7 +2711,9 @@ links = "native_ffi"
         assert!(rendered.contains("export CARGO_FEATURE_SIMD_SUPPORT=1"));
         assert!(rendered.contains("\"$RUSTC\" --print cfg --target \"$TARGET\""));
         assert!(rendered.contains("cargo_cfg_env=\"CARGO_CFG_$(printf '%s' \"$cargo_cfg_key\""));
-        assert!(rendered.contains("export \"$cargo_cfg_env=''${!cargo_cfg_env},$cargo_cfg_value\""));
+        assert!(
+            rendered.contains("export \"$cargo_cfg_env=''${!cargo_cfg_env},$cargo_cfg_value\"")
+        );
         fs::remove_dir_all(workspace).unwrap();
     }
 
@@ -2718,8 +2723,7 @@ links = "native_ffi"
             "nix-cargo-unit-nested-build-script-test-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |duration| duration.as_nanos())
         ));
         fs::create_dir_all(workspace.join("builder")).unwrap();
         fs::write(
@@ -2791,13 +2795,13 @@ links = "nested_native"
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn build_script_runs_receive_dependency_metadata_environment() {
         let workspace = std::env::temp_dir().join(format!(
             "nix-cargo-unit-dependency-metadata-test-{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .map(|duration| duration.as_nanos())
-                .unwrap_or(0)
+                .map_or(0, |duration| duration.as_nanos())
         ));
         let sys_root = workspace.join("native-sys");
         let app_root = workspace.join("app");
@@ -2906,8 +2910,11 @@ version = "0.1.0"
         )
         .unwrap();
 
-        assert!(rendered
-            .contains("cargo_metadata_env=\"DEP_NATIVE_FFI_$(printf '%s' \"$cargo_metadata_key\""));
+        assert!(
+            rendered.contains(
+                "cargo_metadata_env=\"DEP_NATIVE_FFI_$(printf '%s' \"$cargo_metadata_key\""
+            )
+        );
         assert!(rendered.contains("export \"$cargo_metadata_env=$cargo_metadata_value\""));
         fs::remove_dir_all(workspace).unwrap();
     }

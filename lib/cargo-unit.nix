@@ -21,6 +21,14 @@ let
     inherit (args) src;
     cargoLock = args.cargoLock or (args.src + "/Cargo.lock");
     cargoArgs = args.cargoArgs or [ "--workspace" ];
+    cargoTargets =
+      let
+        targets = args.cargoTargets or [ (args.cargoArgs or [ "--workspace" ]) ];
+      in
+      if targets == [ ] then
+        throw "cargoUnit.buildWorkspace requires at least one cargoTargets entry"
+      else
+        targets;
     profile = args.profile or "release";
     rustToolchain = args.rustToolchain or rust.defaultRustToolchain;
     nativeBuildInputs = args.nativeBuildInputs or [ ];
@@ -57,7 +65,7 @@ let
     '');
 
   renderCargoArgs =
-    args:
+    args: cargoTarget:
     lib.escapeShellArgs (
       [
         "build"
@@ -66,7 +74,7 @@ let
         "unstable-options"
       ]
       ++ profileArgs args.profile
-      ++ args.cargoArgs
+      ++ cargoTarget
       ++ [
         "--frozen"
         "--offline"
@@ -99,6 +107,7 @@ let
           nativeBuildInputs = [
             args.rustToolchain
             pkgs.cacert
+            nixCargoUnit
           ]
           ++ args.nativeBuildInputs;
           SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
@@ -115,9 +124,32 @@ let
           inherit (args) cargoExtraConfig cargoLock;
         }}
 
-        export CARGO_TARGET_DIR="$TMPDIR/cargo-target"
         cd ${args.src}
-        cargo ${renderCargoArgs args} > "$out"
+
+        pids=
+        ${lib.concatMapStringsSep "\n" (
+          targetIndex:
+          let
+            targetArgs = builtins.elemAt args.cargoTargets targetIndex;
+          in
+          ''
+            (
+              export CARGO_TARGET_DIR="$TMPDIR/cargo-target-${builtins.toString targetIndex}"
+              cargo ${renderCargoArgs args targetArgs} > "$TMPDIR/unit-graph-${builtins.toString targetIndex}.json"
+            ) &
+            pids="$pids $!"
+          ''
+        ) (lib.range 0 ((builtins.length args.cargoTargets) - 1))}
+
+        for pid in $pids; do
+          wait "$pid"
+        done
+
+        nix-cargo-unit merge ${
+          lib.concatMapStringsSep " " (
+            targetIndex: "$TMPDIR/unit-graph-${builtins.toString targetIndex}.json"
+          ) (lib.range 0 ((builtins.length args.cargoTargets) - 1))
+        } > "$out"
       '';
 
   /**
@@ -197,6 +229,8 @@ let
     Pass `workspaceRoot = ./.` for local workspaces so `src` can stay a filtered
     build input while package scopes are carved from the real checkout root.
     Rendering fails when a unit path cannot be tied back to `src` or `vendorDir`.
+    Pass `cargoTargets = [ [ "--workspace" ] [ "--workspace" "--tests" ] ]`
+    to expose roots from several Cargo executions through one generated graph.
 
     Returns the generated attrset with `sourceAudit`, `units`, `roots`, `checkedRoots`,
     `packages`, `binaries`, `libraries`, `default`, `policyChecks`, plus the
@@ -257,32 +291,7 @@ let
     };
 
   /**
-    Build one package from a workspace by passing `-p <package>` to Cargo
-    during unit-graph generation.
-  */
-  buildPackage =
-    {
-      package,
-      cargoArgs ? [ ],
-      ...
-    }@args:
-    buildWorkspace (
-      builtins.removeAttrs args [
-        "package"
-        "cargoArgs"
-      ]
-      // {
-        cargoArgs = [
-          "-p"
-          package
-        ]
-        ++ cargoArgs;
-      }
-    );
-
-  /**
-    Build one binary target from a workspace by passing `--bin <binary>` to
-    Cargo during unit-graph generation.
+    Select one binary target from a generated workspace graph.
   */
   buildBinary =
     {
@@ -291,28 +300,15 @@ let
       ...
     }@args:
     let
-      workspace = buildWorkspace (
-        builtins.removeAttrs args [
-          "binary"
-          "cargoArgs"
-        ]
-        // {
-          cargoArgs = [
-            "--bin"
-            binary
-          ]
-          ++ cargoArgs;
-        }
-      );
+      workspace = buildWorkspace (builtins.removeAttrs args [ "binary" ]);
     in
     workspace.binaries.${binary} or workspace.default;
 
   /**
-    Build several binary targets from one workspace unit graph.
+    Select several binary targets from one workspace unit graph.
 
-    Use this when a system closure needs many binaries from the same Cargo
-    workspace. One `cargo build --unit-graph` invocation resolves all selected
-    roots, then callers can select individual binaries from the rendered graph.
+    Use `cargoTargets` on `buildWorkspace` when the same import should expose
+    roots from several Cargo executions, such as build and test graphs.
   */
   buildBinaries =
     {
@@ -321,20 +317,7 @@ let
       ...
     }@args:
     let
-      workspace = buildWorkspace (
-        builtins.removeAttrs args [
-          "binaries"
-          "cargoArgs"
-        ]
-        // {
-          cargoArgs =
-            lib.concatMap (binary: [
-              "--bin"
-              binary
-            ]) binaries
-            ++ cargoArgs;
-        }
-      );
+      workspace = buildWorkspace (builtins.removeAttrs args [ "binaries" ]);
     in
     lib.genAttrs binaries (binary: workspace.binaries.${binary} or workspace.default);
 in
@@ -342,7 +325,6 @@ in
   inherit
     buildBinary
     buildBinaries
-    buildPackage
     buildWorkspace
     auditCargoLock
     generateUnitGraph

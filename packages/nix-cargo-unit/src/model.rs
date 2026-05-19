@@ -1,18 +1,20 @@
 use std::borrow::Cow;
 
+use std::collections::BTreeMap;
+
 use color_eyre::eyre::{Result as EyreResult, bail, ensure, eyre};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::Digest as _;
 use url::Url;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UnitGraph {
     pub version: u32,
     pub units: Vec<Unit>,
     pub roots: Vec<usize>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Unit {
     pub pkg_id: String,
     pub target: Target,
@@ -28,7 +30,7 @@ pub struct Unit {
     pub is_std: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Target {
     #[serde(default)]
     pub kind: Vec<String>,
@@ -45,7 +47,7 @@ pub struct Target {
     pub doc: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct Profile {
     pub name: String,
@@ -74,7 +76,7 @@ pub struct Profile {
     pub rustflags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Dependency {
     pub index: usize,
     pub extern_crate_name: String,
@@ -124,6 +126,15 @@ impl<'de> Deserialize<'de> for UnitMode {
     }
 }
 
+impl Serialize for UnitMode {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Eq, PartialEq)]
 pub enum Lto {
     #[default]
@@ -146,6 +157,19 @@ impl<'de> Deserialize<'de> for Lto {
                 _ => Self::Off,
             },
             _ => Self::Off,
+        })
+    }
+}
+
+impl Serialize for Lto {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::Off => "off",
+            Self::Thin => "thin",
+            Self::Fat => "fat",
         })
     }
 }
@@ -185,7 +209,22 @@ impl<'de> Deserialize<'de> for DebugInfo {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, Eq, PartialEq)]
+impl Serialize for DebugInfo {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::None => "none",
+            Self::LineDirectivesOnly => "line-directives-only",
+            Self::LineTablesOnly => "line-tables-only",
+            Self::Limited => "limited",
+            Self::Full => "full",
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Panic {
     #[default]
@@ -225,6 +264,19 @@ impl<'de> Deserialize<'de> for Strip {
     }
 }
 
+impl Serialize for Strip {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::None => "none",
+            Self::Debuginfo => "debuginfo",
+            Self::Symbols => "symbols",
+        })
+    }
+}
+
 fn strip_from_str(value: &str) -> Strip {
     match value {
         "debuginfo" => Strip::Debuginfo,
@@ -238,6 +290,45 @@ const fn default_true() -> bool {
 }
 
 impl UnitGraph {
+    pub fn merge(graphs: Vec<Self>) -> EyreResult<Self> {
+        let mut merged = Self {
+            version: 1,
+            units: Vec::new(),
+            roots: Vec::new(),
+        };
+        let mut merged_by_hash = BTreeMap::new();
+
+        for graph in graphs {
+            graph.ensure_supported()?;
+            let mut hashes = vec![None; graph.units.len()];
+            for index in 0..graph.units.len() {
+                merge_identity_hash(&graph, index, &mut hashes)?;
+            }
+
+            let mut index_map = vec![None; graph.units.len()];
+            for index in 0..graph.units.len() {
+                merge_unit(
+                    &graph,
+                    &hashes,
+                    index,
+                    &mut index_map,
+                    &mut merged,
+                    &mut merged_by_hash,
+                )?;
+            }
+
+            for root in graph.roots {
+                let merged_root = index_map[root].expect("root unit was merged");
+                if !merged.roots.contains(&merged_root) {
+                    merged.roots.push(merged_root);
+                }
+            }
+        }
+
+        merged.validate()?;
+        Ok(merged)
+    }
+
     pub fn ensure_supported(&self) -> EyreResult<()> {
         ensure!(
             self.version == 1,
@@ -278,6 +369,74 @@ impl UnitGraph {
             .get(index)
             .ok_or_else(|| eyre!("unit index {index} is outside the unit graph"))
     }
+}
+
+fn merge_unit(
+    graph: &UnitGraph,
+    hashes: &[Option<String>],
+    index: usize,
+    index_map: &mut [Option<usize>],
+    merged: &mut UnitGraph,
+    merged_by_hash: &mut BTreeMap<String, usize>,
+) -> EyreResult<usize> {
+    if let Some(merged_index) = index_map[index] {
+        return Ok(merged_index);
+    }
+
+    let unit = graph.unit(index)?;
+    let hash = hashes[index].clone().expect("unit hash was computed");
+    let merged_index = if let Some(merged_index) = merged_by_hash.get(&hash) {
+        *merged_index
+    } else {
+        let mut unit = unit.clone();
+        unit.dependencies = unit
+            .dependencies
+            .iter()
+            .map(|dependency| {
+                let index = merge_unit(
+                    graph,
+                    hashes,
+                    dependency.index,
+                    index_map,
+                    merged,
+                    merged_by_hash,
+                )?;
+                Ok(Dependency {
+                    index,
+                    extern_crate_name: dependency.extern_crate_name.clone(),
+                    public: dependency.public,
+                    noprelude: dependency.noprelude,
+                })
+            })
+            .collect::<EyreResult<Vec<_>>>()?;
+        let merged_index = merged.units.len();
+        merged.units.push(unit);
+        merged_by_hash.insert(hash, merged_index);
+        merged_index
+    };
+
+    index_map[index] = Some(merged_index);
+    Ok(merged_index)
+}
+
+fn merge_identity_hash(
+    graph: &UnitGraph,
+    index: usize,
+    hashes: &mut [Option<String>],
+) -> EyreResult<String> {
+    if let Some(hash) = &hashes[index] {
+        return Ok(hash.clone());
+    }
+
+    let unit = graph.unit(index)?;
+    let dependency_hashes = unit
+        .dependencies
+        .iter()
+        .map(|dependency| merge_identity_hash(graph, dependency.index, hashes))
+        .collect::<EyreResult<Vec<_>>>()?;
+    let hash = unit.identity_hash(&dependency_hashes, None);
+    hashes[index] = Some(hash.clone());
+    Ok(hash)
 }
 
 #[derive(Debug, Clone)]
@@ -333,10 +492,7 @@ fn package_name_from_path_location(location: &str) -> Option<Cow<'_, str>> {
 
 fn package_name_from_url_location(location: &str) -> Option<Cow<'_, str>> {
     let url = Url::parse(location).ok()?;
-    let segment = url
-        .path_segments()?
-        .filter(|segment| !segment.is_empty())
-        .next_back()?;
+    let segment = url.path_segments()?.rfind(|segment| !segment.is_empty())?;
     let name = segment.strip_suffix(".git").unwrap_or(segment);
     Some(Cow::Owned(name.to_string()))
 }

@@ -493,10 +493,6 @@ let
   cargoUnitWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
     workspaceRoot = ./fixtures/cargo-unit-hello;
-    cargoArgs = [
-      "--bin"
-      "cargo-unit-hello"
-    ];
   };
 
   cargoUnitHello = cargoUnitWorkspace.binaries.cargo-unit-hello;
@@ -513,19 +509,18 @@ let
   cargoUnitTestWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
     workspaceRoot = ./fixtures/cargo-unit-hello;
-    cargoArgs = [
-      "--workspace"
-      "--tests"
+    cargoTargets = [
+      [ "--workspace" ]
+      [
+        "--workspace"
+        "--tests"
+      ]
     ];
   };
 
   cargoUnitPolicyDisabledWorkspace = ix.cargoUnit.buildWorkspace {
     src = cargoUnitFixture;
     workspaceRoot = ./fixtures/cargo-unit-hello;
-    cargoArgs = [
-      "--bin"
-      "cargo-unit-hello"
-    ];
     policy = {
       denyUnusedCrateDependencies = false;
       cargoAudit.enable = false;
@@ -741,8 +736,7 @@ let
       hash = "sha256-9czj9Oa25H8VhMmZNyS0h9sFn6rYDrEPlOuGm9NJd9A=";
       lockFile = ./fixtures/cargo-unit-real-workspaces/regex/Cargo.lock;
       testArgs = [
-        "-p"
-        "regex-syntax"
+        "--workspace"
         "--tests"
       ];
     };
