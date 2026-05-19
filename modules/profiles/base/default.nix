@@ -93,6 +93,17 @@ in
         enable = true;
         configFile.source = ./config.nu;
       };
+      # Shared prompt across every shell on the system. Starship reads
+      # /etc/starship.toml (or ~/.config/starship.toml when HM writes one),
+      # so the same prompt renders whether the operator stays in Nushell
+      # or chshes into bash/zsh/fish.
+      programs.starship = {
+        enable = true;
+        enableNushellIntegration = true;
+        enableBashIntegration = true;
+        enableZshIntegration = true;
+        enableFishIntegration = true;
+      };
     };
 
     # Ship every common operator shell so an SSH session can chsh into
