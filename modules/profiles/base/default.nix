@@ -300,6 +300,7 @@ in
 
     environment.systemPackages = builtins.attrValues {
       inherit (pkgs)
+        ast-grep
         bat
         bpftrace
         btop
@@ -322,6 +323,7 @@ in
         jq
         lldb
         lsof
+        mgrep
         ncdu
         # nh wraps nixos-rebuild/home-manager/darwin-rebuild with a
         # build tree (via nom), pre-activation diffs (via dix), and
