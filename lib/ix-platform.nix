@@ -3,7 +3,12 @@
 # All images run on EPYC Gen 5 (Turin, Zen 5). Setting hostPlatform.gcc.arch
 # propagates -march=znver5 -mtune=znver5 to every package in the closure.
 # No binary cache hits: everything builds from source.
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   healthCheckType = lib.types.submodule (
     { name, ... }:
@@ -229,6 +234,13 @@ in
     # by default for the rare image that is genuinely a sealed appliance and
     # wants to drop the stub from its closure.
     programs.nix-ld.enable = lib.mkDefault true;
+
+    # Nushell is the operator shell across this repo: the base profile ships
+    # system-wide nu config and the workspace login.nu. Setting it as the
+    # default user shell means service users (minecraft, hyperion, ...) and
+    # any future user inherit Nushell rather than bash, so an su or a manual
+    # session into a service account lands in the same shell as root.
+    users.defaultUserShell = pkgs.nushell;
 
     networking = {
       # ix provisions the guest address, route, and DNS before systemd reaches
