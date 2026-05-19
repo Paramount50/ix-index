@@ -125,6 +125,17 @@ in
           enableZshIntegration = true;
           enableFishIntegration = true;
         };
+        # Per-directory environment loading. nix-direnv caches nix-shell
+        # evaluation so cd'ing into a repo with a shell.nix or flake.nix
+        # gets its environment without re-evaluating Nix every time.
+        direnv = {
+          enable = true;
+          nix-direnv.enable = true;
+          enableNushellIntegration = true;
+          enableBashIntegration = true;
+          enableZshIntegration = true;
+          enableFishIntegration = true;
+        };
       };
     };
 
