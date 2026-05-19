@@ -221,7 +221,23 @@ in
       };
     };
 
-    boot.isContainer = true;
+    boot = {
+      isContainer = true;
+
+      # /tmp on tmpfs (RAM-backed). The default on-disk /tmp grows
+      # without bound on long-running VMs, and ix VMs have plenty of RAM
+      # to spare for ephemeral working space (see AGENTS.md "VM
+      # assumptions"). Default tmpfs size is 50% of RAM, allocated lazily
+      # so unused space costs nothing. Workloads that genuinely need
+      # persistent or oversized temp scratch should write to /var/tmp,
+      # which stays on the rootfs and is not affected by this.
+      tmp = {
+        useTmpfs = true;
+        # No-op when useTmpfs is on, but keeps /tmp clean if an image
+        # ever sets useTmpfs = false explicitly.
+        cleanOnBoot = true;
+      };
+    };
 
     # Rust rewrite of switch-to-configuration. Faster activation and clearer
     # error messages than the Perl original, which matters for fleet flows
