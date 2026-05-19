@@ -217,6 +217,12 @@ in
     };
 
     boot.isContainer = true;
+
+    # Rust rewrite of switch-to-configuration. Faster activation and clearer
+    # error messages than the Perl original, which matters for fleet flows
+    # that re-switch images constantly. Expected upstream default.
+    system.switch.enableNg = true;
+
     networking = {
       # ix provisions the guest address, route, and DNS before systemd reaches
       # normal service startup. Leaving NixOS DHCP enabled makes dhcpcd wait
