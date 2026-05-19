@@ -567,6 +567,8 @@ When creating or editing GitHub issue bodies or comments, pass multiline text th
 
 When you hit a real bug, broken assumption, or unidiomatic pattern while working in this repo, file a GitHub issue right then (`gh issue create -R indexable-inc/index ...`). Don't batch and don't wait to be asked. One concrete observation per issue.
 
+Issues should nearly always carry at least one label. `bug` for an observed failure, `enhancement` for a feature ask, `documentation` for doc gaps, `rfc` for design proposals that need discussion before implementation, `help wanted` to signal an open invitation to contributors, and `good first issue` for small well-scoped tasks that don't need deep repo context. Apply labels at filing time so the backlog stays sortable; if an existing issue is unlabeled, label it the next time you touch it. The unlabeled state should be reserved for issues you literally just filed and haven't classified yet.
+
 ## Tests
 
 Image and reusable package derivations expose their tests through `passthru.tests.<name>` (RFC 0119). A test that targets one image or one helper attaches to that derivation so `nix build .#<name>.passthru.tests.<test>` works and downstream tooling can iterate. Cross-image eval invariants stay in `tests/default.nix` and remain accessible through `checks.eval`. Tests do not run as part of the default image build.
