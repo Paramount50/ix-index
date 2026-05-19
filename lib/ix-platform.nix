@@ -261,6 +261,26 @@ in
       SystemMaxUse=1G
     '';
 
+    # Modern Nix experimental feature set for any in-VM nix invocation: the
+    # CLI, flakes, the `|>` pipe operator, fetchClosure, content-addressed
+    # derivations, dynamic derivations, and git tree hashing. List-typed
+    # option, so per-image additions concatenate rather than override.
+    # IFD is allowed by upstream default; setting it explicitly pins repo
+    # policy ("IFD is allowed when it removes a fake Nix layer", AGENTS.md)
+    # against a future upstream default flip.
+    nix.settings = {
+      experimental-features = [
+        "nix-command"
+        "flakes"
+        "pipe-operators"
+        "fetch-closure"
+        "ca-derivations"
+        "dynamic-derivations"
+        "git-hashing"
+      ];
+      allow-import-from-derivation = lib.mkDefault true;
+    };
+
     system.stateVersion = "25.05";
   };
 }
