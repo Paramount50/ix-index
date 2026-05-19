@@ -4,12 +4,18 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
+    # Determinate Nix replaces the in-VM Nix CLI and daemon with the
+    # Determinate Systems distribution: faster eval (lazy-trees), JSON
+    # logging, and hash-mismatch auto-fixes. Pinned to major version 3;
+    # routine bumps come from `nix flake update`.
+    determinate.url = "https://flakehub.com/f/DeterminateSystems/determinate/3";
   };
 
   outputs =
     {
       nixpkgs,
       rust-overlay,
+      determinate,
       ...
     }:
     let
@@ -49,7 +55,12 @@
       };
 
       ix = import ./lib {
-        inherit nixpkgs paths rust-overlay;
+        inherit
+          nixpkgs
+          paths
+          rust-overlay
+          determinate
+          ;
       };
       devSystems = [
         "x86_64-linux"

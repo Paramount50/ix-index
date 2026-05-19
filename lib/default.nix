@@ -4,6 +4,7 @@
   nixpkgs,
   paths,
   rust-overlay,
+  determinate,
   cliArtifacts ? { },
 }:
 let
@@ -630,6 +631,11 @@ let
         { nixpkgs.overlays = overlays; }
         ./ix-platform.nix
         ./ix-oci-layer.nix
+        # Determinate Nix replaces the in-VM nix package and daemon. The
+        # module sets nix.package, configures determinate-nixd as a systemd
+        # service, and seeds nix.settings defaults. Compatible with
+        # boot.isContainer = true since the daemon runs under our PID 1.
+        determinate.nixosModules.default
       ]
       ++ moduleList
       ++ modules;
