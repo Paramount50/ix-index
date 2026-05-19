@@ -128,14 +128,27 @@ in
       };
     };
 
-    # Ship every common operator shell so an SSH session can chsh into
-    # whatever the operator already knows. bash is implicit in NixOS;
-    # zsh and fish get their NixOS modules so /etc/shells registration
-    # and system-wide completion paths are wired without per-image setup.
-    # Nushell is the platform default user shell (see lib/ix-platform.nix)
-    # and is registered via the workspace wrapper below.
-    programs.zsh.enable = true;
-    programs.fish.enable = true;
+    programs = {
+      # Ship every common operator shell so an SSH session can chsh into
+      # whatever the operator already knows. bash is implicit in NixOS;
+      # zsh and fish get their NixOS modules so /etc/shells registration
+      # and system-wide completion paths are wired without per-image
+      # setup. Nushell is the platform default user shell (see
+      # lib/ix-platform.nix) and is registered via the workspace wrapper.
+      zsh.enable = true;
+      fish.enable = true;
+
+      # Neovim is the default $EDITOR system-wide (defaultEditor exports
+      # EDITOR for both interactive and service contexts). vi/vim aliases
+      # mean muscle memory from any other Unix box lands on nvim. Helix
+      # and micro ride along as alternatives the operator can choose.
+      neovim = {
+        enable = true;
+        defaultEditor = true;
+        viAlias = true;
+        vimAlias = true;
+      };
+    };
 
     environment.systemPackages =
       builtins.attrValues {
@@ -150,6 +163,11 @@ in
           # on NixOS' default system PATH.
           gnutar
           gzip
+          # Alternative editors next to the default neovim. Helix is the
+          # modern single-binary editor; micro is the nano-style fallback
+          # for operators who want predictable bindings without modes.
+          helix
+          micro
           jq
           lldb
           lsof
