@@ -49,3 +49,8 @@ vim.opt.undofile = true
 vim.opt.undolevels = 1000
 vim.opt.undoreload = 10000
 vim.opt.swapfile = false
+
+-- Default colorscheme. ix-islands-{dark,light} ship to ~/.config/nvim/
+-- colors/ via home.file, so both are available via :colorscheme. Dark
+-- is the default because operator SSH sessions are dark terminals.
+vim.cmd.colorscheme("ix-islands-dark")

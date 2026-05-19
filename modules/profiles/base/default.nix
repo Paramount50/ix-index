@@ -271,13 +271,18 @@ in
               type = "lua";
               config = builtins.readFile ./nvim/plugins/oil.lua;
             }
-            {
-              plugin = kanagawa-nvim;
-              type = "lua";
-              config = builtins.readFile ./nvim/plugins/kanagawa.lua;
-            }
           ];
         };
+      };
+
+      # ix-islands colorscheme shipped inline as Neovim color files.
+      # Faithful port of JetBrains Islands Dark/Light (see
+      # andrewgazelka/vscode-islands for the VS Code variant); init.lua
+      # picks the dark variant by default. Both are available via
+      # `:colorscheme ix-islands-{dark,light}` at runtime.
+      home.file = {
+        ".config/nvim/colors/ix-islands-dark.lua".source = ./nvim/colors/ix-islands-dark.lua;
+        ".config/nvim/colors/ix-islands-light.lua".source = ./nvim/colors/ix-islands-light.lua;
       };
     };
 
