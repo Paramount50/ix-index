@@ -145,6 +145,19 @@ in
           enableZshIntegration = true;
           enableFishIntegration = true;
         };
+        # Git baseline. main as the initial branch matches every modern
+        # forge default; pull.rebase keeps history linear on an operator
+        # box where merge commits add noise; autoSetupRemote means a
+        # plain `git push` on a new branch sets upstream without the
+        # explicit -u dance every time.
+        git = {
+          enable = true;
+          extraConfig = {
+            init.defaultBranch = "main";
+            pull.rebase = true;
+            push.autoSetupRemote = true;
+          };
+        };
       };
     };
 
