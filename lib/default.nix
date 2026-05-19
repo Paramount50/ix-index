@@ -550,7 +550,7 @@ let
           ix = ixForPackages;
         };
         llm-clippy = llmClippyFor pkgs;
-        mc-probe = pkgs.callPackage paths.packages.mcProbe {
+        mc-probe = pkgs.callPackage paths.packages.minecraft.probe {
           ix = ixForPackages;
         };
         minecraft-sync-managed = pkgs.callPackage paths.packages.minecraft.syncManaged {

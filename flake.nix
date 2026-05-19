@@ -47,11 +47,11 @@
           minecraft = {
             hotReloadAgent = ./packages/minecraft/hot-reload-agent;
             nbt = ./packages/minecraft/nbt;
+            probe = ./packages/minecraft/probe;
             rcon = ./packages/minecraft/rcon;
             syncManaged = ./packages/minecraft/sync-managed;
           };
           llmClippy = ./packages/llm-clippy;
-          mcProbe = ./packages/mc-probe;
           minestom.servers.hello = ./packages/minestom/servers/hello;
           nixCargoUnit = ./packages/nix-cargo-unit;
           ociImageBuilder = ./packages/oci-image-builder;
