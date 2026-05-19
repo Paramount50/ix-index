@@ -128,6 +128,12 @@ in
           enableZshIntegration = true;
           enableFishIntegration = true;
         };
+        # AST-aware merge driver. Parses 30+ languages (Nix, Rust,
+        # Python, TS/JS, Go, Java, ...) and resolves structural conflicts
+        # that the line-based three-way merge would otherwise mark. The
+        # HM module wires the driver, sets `* merge=mergiraf` globally,
+        # and forces conflictStyle = diff3 (required by the driver).
+        mergiraf.enable = true;
         # Generic git defaults for any operator working in an ix VM.
         # Identity (user.name/email), commit signing, GPG/SSH agent
         # paths, and per-host credential helpers stay out of here: those
@@ -178,9 +184,9 @@ in
               autoupdate = true;
             };
             merge = {
-              # zdiff3 includes the common ancestor in conflict markers
-              # so the operator can see what both sides changed against.
-              conflictstyle = "zdiff3";
+              # mergiraf's HM module sets conflictStyle = "diff3" globally
+              # because mergiraf needs classic diff3 markers to parse the
+              # three-way merge output; we set ff/renormalize alongside.
               ff = "only";
               renormalize = true;
             };
