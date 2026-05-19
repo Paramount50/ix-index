@@ -187,7 +187,7 @@ nix-rules/                                 # ast-grep lint rules
 
 Do not put inside `flake.nix`:
 
-- Fetched-artifact URLs. They are data, not flake-graph participants; keep URL + SRI hash beside the catalog entry and call `pkgs.fetchurl` at use.
+- Fetched data artifact URLs. They are data, not flake-graph participants; keep URL + SRI hash beside the catalog entry and call `pkgs.fetchurl` at use. Repo-owned workflow tools are a separate category: a prebuilt executable such as the `ix` CLI may be a flake input when the intended bump path is `nix flake update`.
 - App wrapper definitions (`writeNushellApplication { ... }` for `lint`, `update-mods`, `ix-fleet`, preset wrappers, etc.). Define them in a dedicated module under `./lib/` and reference them from `outputs` by name.
 - Per-system `let`-bindings that compose many helpers. Push the composition into a single `mkOutputs system` function in `./lib/` and call it from `lib.genAttrs devSystems`.
 - Image preset wiring, per-VM wrappers, or other scenario-specific command composition. Move it into the preset's own `default.nix` and import it once.
@@ -463,6 +463,8 @@ Prefer `WAV`, stereo PCM, `44 kHz`, `float32` for repo-owned audio data by defau
 
 Fetched artifacts (mod jars, server jars, plugins, source trees) belong at the point of use, not as flake inputs. Use a `pkgs.*` fetcher with an inline SRI hash kept beside the source in the per-image catalog (`images/games/minecraft/mods/*.json` or the image's own data file). The `flake.nix` inputs list is reserved for things that genuinely participate in the flake graph: `nixpkgs` and tooling flakes that expose `lib`, `overlays`, or `packages`. A static URL is not a flake input. It is data, and data lives next to the code that reads it.
 
+Workflow tool pins can use `flake.lock` when the lock file is the practical update surface. The precompiled `ix` CLI is in this bucket: updating it by running `nix flake update` is less error-prone than editing three platform hashes by hand. Prefer immutable release URLs, tag URLs, or an upstream flake so an existing lock keeps building after a newer binary is published. A `latest` URL that overwrites bytes under the same path is a publishing problem; fix or version the endpoint before moving that hash into package code.
+
 Pick the most specific `pkgs.*` fetcher for the source. `pkgs.fetchurl` is right for opaque single-file downloads (jars, zips, tarballs hosted at a stable URL). For source trees, prefer the upstream-specific fetcher so the derivation captures the right metadata and so future bumps go through one well-known field: `pkgs.fetchFromGitHub`, `pkgs.fetchFromGitLab`, `pkgs.fetchFromForgejo`, and friends for forge tarballs; `pkgs.fetchgit` for raw git refs; `pkgs.fetchzip` for archives that should be unpacked; `pkgs.fetchMavenArtifact`, `pkgs.fetchNpmDeps`, `pkgs.fetchCrate` for ecosystem artifacts. Do not use `builtins.fetchurl`, `builtins.fetchTarball`, `builtins.fetchGit`, or `builtins.fetchTree` in tracked Nix files: those run on eval, are not fixed-output derivations, do not substitute from a binary cache, and are banned in nixpkgs. The `pkgs.*` fetchers are (optionally) fixed-output derivations and only fetch at build time.
 
 Earlier versions of this repo tracked every mod jar as a non-flake `inputs.artifact-*` URL so that `flake.lock` would own each `narHash`. That made `flake.nix` unreadable and centralized nothing useful: each entry still had to be edited individually, and the lock file became a churn-heavy diff for every routine mod bump. Prefer URL + SRI hash next to the catalog entry; the update tooling (`nix run .#update-mods`) regenerates both fields together.
@@ -522,7 +524,7 @@ Run `nix run .#lint` before committing. It runs `nixfmt`, `statix`, `deadnix`, a
 - No bare `assert cond;`. Use `assert lib.assertMsg cond "why";`.
 - No unused bindings. Use `_` for intentionally unused lambda arguments, remove unused module args, and run `deadnix --fail --no-lambda-pattern-names .` through `nix run .#lint`.
 - `strictDeps = true` on every `mkDerivation`. `__structuredAttrs` is the nixpkgs default; do not set it explicitly.
-- No artifact URLs in `flake.nix` inputs. Fetched assets (jars, plugins, server tarballs, source trees) go through a `pkgs.*` fetcher at point of use with the URL/ref and SRI hash held next to the catalog entry. Flake inputs are for flake-graph participants only (`nixpkgs`, tooling flakes).
+- No fetched data artifact URLs in `flake.nix` inputs. Fetched assets (jars, plugins, server tarballs, source trees) go through a `pkgs.*` fetcher at point of use with the URL/ref and SRI hash held next to the catalog entry. Repo-owned workflow tool binaries may be flake inputs when they have immutable or versioned URLs and the intended bump path is `nix flake update`.
 - No `builtins.fetchurl`, `builtins.fetchTarball`, `builtins.fetchGit`, or `builtins.fetchTree` in tracked Nix files. Use the matching `pkgs.*` fetcher (`pkgs.fetchurl`, `pkgs.fetchzip`, `pkgs.fetchFromGitHub`/`pkgs.fetchgit`, etc.) so the fetch is a fixed-output derivation that can substitute from the cache.
 - No fake hash helpers or placeholder hashes in tracked Nix files. Compute the real SRI hash first.
 - No flat top-level `modules` flake output. Use `nixosModules.<name>` (standard schema) for module exports.
