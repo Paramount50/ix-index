@@ -173,8 +173,11 @@ in
     environment.systemPackages =
       builtins.attrValues {
         inherit (pkgs)
+          bat
           bpftrace
           btop
+          eza
+          fd
           file
           gdb
           # gnutar, gzip, and zstd ride along so any VM switched once stays
@@ -187,6 +190,7 @@ in
           # modern single-binary editor; micro is the nano-style fallback
           # for operators who want predictable bindings without modes.
           helix
+          htop
           micro
           jq
           lldb
@@ -202,6 +206,7 @@ in
           nix-output-monitor
           nix-tree
           pv
+          ripgrep
           strace
           tcpdump
           zstd
