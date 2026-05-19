@@ -203,6 +203,19 @@ images/
 nix-rules/                                 # ast-grep lint rules
 ```
 
+## Folder hierarchy
+
+Repo folders follow the same "preserve the conceptual path" rule that the Rust/Nix style section applies to local bindings. When two or more siblings share a domain prefix, nest them under a parent directory whose name is the prefix. Prefer `packages/minecraft/nbt/` over `packages/minecraft-nbt/`, `packages/minecraft/rcon/` over `packages/minecraft-rcon/`, `modules/services/minecraft/paper.nix` over `modules/services/minecraft-paper.nix`. The dashed-flat form is a data-clump smell: it flattens a real hierarchy into a sibling-suffix list, and the next package in the same family then has to choose between joining the flat list or creating the parent everyone should have had from the start.
+
+A few corollaries:
+
+- Make the parent the moment a second sibling lands. The first `packages/foo-bar/` is fine in isolation; the second forces a rename, and the rename should happen in the same change that introduces the sibling.
+- The package or module's published name (`Cargo.toml` `name = "minecraft-nbt"`, derivation `pname`, image tag) can stay dashed because that name is a foreign identifier under a different namespace. The repo path is what changes.
+- Nested folders compose with the existing discovery and registry conventions. `images/<category>/<name>/` is already hierarchical; `packages/<family>/<name>/` and `modules/services/<family>/<name>.nix` follow the same shape so a reader scanning `packages/` sees families, not a long alphabetized list.
+- Pure cross-domain tools that do not belong to a family stay at the top of their tree (`packages/llm-clippy/`, `packages/oci-image-builder/`). Do not invent an artificial parent for a single child.
+
+When you encounter a legacy flat-dashed package or module while doing unrelated work, move it as part of that change if the rename is small and the call sites are inside the repo. Leave a follow-up only when the rename is genuinely larger than the work that uncovered it.
+
 ## Flake.nix style
 
 `flake.nix` is the repo's handle. It should read like a manifest: a small inputs block and an `outputs` body that is mostly delegation. All logic lives in `./lib/` or behind discovery (`ix.discoverImages`). The goal is that someone landing on `flake.nix` cold can answer "what does this flake expose?" by skimming, not by parsing.
