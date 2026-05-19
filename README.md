@@ -2,6 +2,10 @@
   <img src="assets/logo.svg" width="80" alt="index" />
 </p>
 
+<p align="center">
+  <a href="https://antithesis.com/"><img src="https://img.shields.io/badge/Antithesis-tested-00B214?labelColor=7F39DA&style=flat" alt="Antithesis tested" /></a>
+</p>
+
 # Index
 
 `index` builds ready-to-run VM images from NixOS modules. Every image targets
