@@ -261,24 +261,39 @@ in
       SystemMaxUse=1G
     '';
 
-    # Modern Nix experimental feature set for any in-VM nix invocation: the
-    # CLI, flakes, the `|>` pipe operator, fetchClosure, content-addressed
-    # derivations, dynamic derivations, and git tree hashing. List-typed
-    # option, so per-image additions concatenate rather than override.
-    # IFD is allowed by upstream default; setting it explicitly pins repo
-    # policy ("IFD is allowed when it removes a fake Nix layer", AGENTS.md)
-    # against a future upstream default flip.
-    nix.settings = {
-      experimental-features = [
-        "nix-command"
-        "flakes"
-        "pipe-operators"
-        "fetch-closure"
-        "ca-derivations"
-        "dynamic-derivations"
-        "git-hashing"
-      ];
-      allow-import-from-derivation = lib.mkDefault true;
+    # Modern Nix configuration for any in-VM nix invocation.
+    #
+    # experimental-features: nix CLI, flakes, the `|>` pipe operator,
+    # fetchClosure, content-addressed derivations, dynamic derivations,
+    # and git tree hashing. List-typed, so per-image additions concatenate
+    # rather than override.
+    #
+    # allow-import-from-derivation: IFD is allowed by upstream default;
+    # setting it explicitly pins repo policy ("IFD is allowed when it
+    # removes a fake Nix layer", AGENTS.md) against a future upstream flip.
+    #
+    # gc + optimise: long-lived dev VMs accumulate roots from `nix run` /
+    # `nix shell` and never get a /nix/store sweep otherwise. 30 days
+    # keeps recent results for repeat invocations and bounds disk growth.
+    # Optimise hardlinks duplicate store paths so the savings compound.
+    nix = {
+      settings = {
+        experimental-features = [
+          "nix-command"
+          "flakes"
+          "pipe-operators"
+          "fetch-closure"
+          "ca-derivations"
+          "dynamic-derivations"
+          "git-hashing"
+        ];
+        allow-import-from-derivation = lib.mkDefault true;
+      };
+      gc = {
+        automatic = true;
+        options = "--delete-older-than 30d";
+      };
+      optimise.automatic = true;
     };
 
     system.stateVersion = "25.05";
