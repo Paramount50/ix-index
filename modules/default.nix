@@ -5,9 +5,9 @@
 #
 # Every module is gated on its own `enable` flag. Listing it here only makes
 # the options visible; it does not turn anything on. The one exception is
-# `profiles/base.nix`, which `lib/ix-oci-layer.nix` enables by default.
+# `profiles/base/`, which `lib/ix-oci-layer.nix` enables by default.
 {
-  base = ./profiles/base.nix;
+  base = ./profiles/base;
   extended-attributes = ./profiles/extended-attributes.nix;
   floodgate = ./services/floodgate.nix;
   geyser = ./services/geyser.nix;

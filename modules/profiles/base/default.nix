@@ -82,6 +82,18 @@ in
       "net.core.default_qdisc" = "fq";
     };
 
+    # System-wide Nushell config. The two settings worth the file are
+    # banner-off and SQLite history; everything else stays at Nushell
+    # defaults. NixOS does not have a `programs.nushell` module (that one
+    # lives in Home Manager, which this repo intentionally does not use),
+    # so the config goes through /etc and a tmpfiles symlink into root's
+    # config dir, which is where Nushell's normal lookup finds it.
+    environment.etc."nushell/config.nu".source = ./config.nu;
+    systemd.tmpfiles.rules = [
+      "d /root/.config/nushell 0755 root root -"
+      "L+ /root/.config/nushell/config.nu - - - - /etc/nushell/config.nu"
+    ];
+
     environment.systemPackages =
       builtins.attrValues {
         inherit (pkgs)

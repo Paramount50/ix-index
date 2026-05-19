@@ -172,7 +172,7 @@ Use one of these shapes:
 
 Do not assume every `registry.ix.dev` image is public. The `ix` namespace is system-owned, so shared bootstrap refs such as `registry.ix.dev/ix/test-cluster-bootstrap:<tag>` are expected to be public. User images live under `registry.ix.dev/<username>/<image>:<tag>` and default to private; private images require the owner's auth and should behave like not-found for other users. When debugging image pulls, distinguish a public system bootstrap image from a user-owned private image before treating access as a registry outage.
 
-The shared fleet bootstrap image is defined at `images/system/test-cluster-bootstrap`. It is an ordinary image that extends the repo base profile; keep source-switch tools such as `gnutar`, `zstd`, and `gzip` in `modules/profiles/base.nix` so any VM that has been switched once can be switched again. Build the bootstrap with `nix build .#test-cluster-bootstrap --print-out-paths --no-link`; upload it only with an admin ix profile, using an explicit system namespace ref such as `ix image push <archive>.tar registry.ix.dev/ix/test-cluster-bootstrap:<tag>`. TODO: replace full payload uploads with CAS/CDC-aware transfer for both bootstrap image publishing and `ix switch --source`, so routine updates send only changed chunks and then update the registry or switch input reference.
+The shared fleet bootstrap image is defined at `images/system/test-cluster-bootstrap`. It is an ordinary image that extends the repo base profile; keep source-switch tools such as `gnutar`, `zstd`, and `gzip` in `modules/profiles/base/` so any VM that has been switched once can be switched again. Build the bootstrap with `nix build .#test-cluster-bootstrap --print-out-paths --no-link`; upload it only with an admin ix profile, using an explicit system namespace ref such as `ix image push <archive>.tar registry.ix.dev/ix/test-cluster-bootstrap:<tag>`. TODO: replace full payload uploads with CAS/CDC-aware transfer for both bootstrap image publishing and `ix switch --source`, so routine updates send only changed chunks and then update the registry or switch input reference.
 
 ## Layout
 
@@ -188,7 +188,7 @@ lib/
   build-oci-image.sh                       # direct OCI archive builder
 modules/
   default.nix                              # canonical module registry (attrset)
-  profiles/base.nix                        # CLI tools, on by default
+  profiles/base/                           # CLI tools + system-wide nushell config, on by default
   services/<name>.nix                      # opt-in service
   services/<family>/{default,...}.nix      # service family (runtime + plugins)
 images/
@@ -251,7 +251,7 @@ Drop the file at `modules/services/<name>.nix` (or `modules/profiles/<name>.nix`
 
 ## Adding a platform-wide default
 
-Settings that should apply to every image without per-image opt-in have two homes. System-level posture (nftables, firewall, journald caps, `nix.settings`, `programs.nix-ld`, `system.switch.enableNg`, gc policy, znver5 host platform) lives in [`lib/ix-platform.nix`](lib/ix-platform.nix). The auto-enabled CLI baseline (debugging tools, source-switch utilities such as `gnutar`/`zstd`/`gzip`, the workspace shell wrapper) lives in [`modules/profiles/base.nix`](modules/profiles/base.nix), which [`lib/ix-oci-layer.nix`](lib/ix-oci-layer.nix) turns on for every image. Touch the platform module for system posture and the base profile for CLI ergonomics. Use `lib.mkDefault` on anything an unusual image might legitimately need to override, so that opt-out stays a one-liner.
+Settings that should apply to every image without per-image opt-in have two homes. System-level posture (nftables, firewall, journald caps, `nix.settings`, `programs.nix-ld`, `system.switch.enableNg`, gc policy, znver5 host platform) lives in [`lib/ix-platform.nix`](lib/ix-platform.nix). The auto-enabled CLI baseline (debugging tools, source-switch utilities such as `gnutar`/`zstd`/`gzip`, the workspace shell wrapper, system-wide Nushell config) lives in [`modules/profiles/base/`](modules/profiles/base/), which [`lib/ix-oci-layer.nix`](lib/ix-oci-layer.nix) turns on for every image. Touch the platform module for system posture and the base profile for CLI ergonomics. Use `lib.mkDefault` on anything an unusual image might legitimately need to override, so that opt-out stays a one-liner.
 
 Home Manager is not used in this repo. Operators connect as root (the trust model assumes the underlying ix host is safe, secrets stay on the host side), so there is no second user whose dotfiles need separate management. NixOS's `programs.<tool>` modules write the same config to `/etc/<tool>/` system-wide, which covers the single-user-box payoff without a second flake input or a second config DSL. Repo-tracked source files (e.g. `config.nu`, `starship.toml`) live next to the module that consumes them via `programs.<tool>.<file>.source = ./file`, so editing tooling sees them as ordinary `.nu` / `.toml` files.
 
