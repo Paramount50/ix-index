@@ -9,6 +9,14 @@
     # logging, and hash-mismatch auto-fixes. Pinned to major version 3;
     # routine bumps come from `nix flake update`.
     determinate.url = "https://flakehub.com/f/DeterminateSystems/determinate/3";
+
+    # Home Manager wired in via its NixOS module for per-tool XDG-shaped
+    # config (Nushell, atuin, zoxide, starship, ...). Follows nixpkgs so
+    # the two stay on the same release.
+    home-manager = {
+      url = "github:nix-community/home-manager/release-25.05";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -16,6 +24,7 @@
       nixpkgs,
       rust-overlay,
       determinate,
+      home-manager,
       ...
     }:
     let
@@ -60,6 +69,7 @@
           paths
           rust-overlay
           determinate
+          home-manager
           ;
       };
       devSystems = [

@@ -5,6 +5,7 @@
   paths,
   rust-overlay,
   determinate,
+  home-manager,
   cliArtifacts ? { },
 }:
 let
@@ -636,6 +637,21 @@ let
         # service, and seeds nix.settings defaults. Compatible with
         # boot.isContainer = true since the daemon runs under our PID 1.
         determinate.nixosModules.default
+        # Home Manager as a NixOS module. Per-tool XDG config (Nushell,
+        # atuin, zoxide, starship, ...) is configured under
+        # `home-manager.users.root` in the base profile; this module
+        # exposes the option set and shares the system pkgs.
+        home-manager.nixosModules.home-manager
+        {
+          home-manager = {
+            useGlobalPkgs = true;
+            useUserPackages = true;
+            # Activation renames existing user files with this extension
+            # instead of failing, so an operator who hand-edited a config
+            # sees the conflict rather than losing the file.
+            backupFileExtension = "hm-backup";
+          };
+        }
       ]
       ++ moduleList
       ++ modules;
