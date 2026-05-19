@@ -249,11 +249,19 @@ in
       # EDITOR for both interactive and service contexts). vi/vim aliases
       # mean muscle memory from any other Unix box lands on nvim. Helix
       # and micro ride along as alternatives the operator can choose.
+      # init.lua next to this module ships reasonable defaults (numbers,
+      # space leader, persistent undo, soft wrap, truecolor); plugins
+      # stay out of the base profile.
       neovim = {
         enable = true;
         defaultEditor = true;
         viAlias = true;
         vimAlias = true;
+        configure.customRC = ''
+          lua << EOF
+          ${builtins.readFile ./nvim/init.lua}
+          EOF
+        '';
       };
     };
 
