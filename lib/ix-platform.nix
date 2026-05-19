@@ -223,6 +223,13 @@ in
     # that re-switch images constantly. Expected upstream default.
     system.switch.enableNg = true;
 
+    # Many ix VMs are SSH'd into and used as interactive dev machines, where
+    # operators run unpatched prebuilt binaries (npm-installed CLIs, LSPs,
+    # downloaded toolchains) that expect a standard FHS dynamic linker. Off
+    # by default for the rare image that is genuinely a sealed appliance and
+    # wants to drop the stub from its closure.
+    programs.nix-ld.enable = lib.mkDefault true;
+
     networking = {
       # ix provisions the guest address, route, and DNS before systemd reaches
       # normal service startup. Leaving NixOS DHCP enabled makes dhcpcd wait
