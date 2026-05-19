@@ -136,6 +136,15 @@ in
           enableZshIntegration = true;
           enableFishIntegration = true;
         };
+        # Fuzzy finder. Closes the loop with atuin (Ctrl+R history) and
+        # zoxide (z foo) so the same interaction model picks files,
+        # processes, branches, anything the operator pipes into fzf.
+        fzf = {
+          enable = true;
+          enableBashIntegration = true;
+          enableZshIntegration = true;
+          enableFishIntegration = true;
+        };
       };
     };
 
