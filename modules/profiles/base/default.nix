@@ -11,25 +11,6 @@
 }:
 let
   cfg = config.ix.profiles.base;
-
-  inherit (cfg) shellWorkspace;
-  shellWrapper = pkgs.writeTextFile {
-    name = "ix-workspace-shell";
-    executable = true;
-    destination = "/bin/ix-workspace-shell";
-    text = ''
-      #!${pkgs.runtimeShell}
-      set -eu
-
-      workdir="''${IX_WORKDIR:-${shellWorkspace.directory}}"
-      mkdir -p -- "$workdir"
-      cd -- "$workdir"
-
-      exec ${lib.getExe shellWorkspace.shell} "$@"
-    '';
-    meta.mainProgram = "ix-workspace-shell";
-    passthru.shellPath = "/bin/ix-workspace-shell";
-  };
 in
 {
   options.ix.profiles.base = {
@@ -40,22 +21,16 @@ in
         type = lib.types.bool;
         default = true;
         description = ''
-          Make interactive root shells enter a writable image workspace before
-          starting the configured shell.
+          Pre-create a writable workspace directory and auto-cd login
+          shells (Nushell `login.nu`) into it. Disable for sealed
+          appliances where there is no interactive workflow to land in.
         '';
       };
 
       directory = lib.mkOption {
         type = lib.types.str;
         default = "/work/ix";
-        description = "Directory created and entered by the base shell wrapper.";
-      };
-
-      shell = lib.mkOption {
-        type = lib.types.package;
-        default = pkgs.nushell;
-        defaultText = lib.literalExpression "pkgs.nushell";
-        description = "Shell executed after entering the image workspace.";
+        description = "Workspace directory entered by login shells.";
       };
     };
   };
@@ -93,6 +68,14 @@ in
         nushell = {
           enable = true;
           configFile.source = ./config.nu;
+          loginFile.source = ./login.nu;
+          # env.nu is tiny machine-owned glue: one line that surfaces
+          # the workspace path from the shellWorkspace option into the
+          # Nushell session so login.nu can read it. Generating it
+          # inline keeps the workspace path in one Nix source of truth.
+          envFile.text = ''
+            $env.IX_WORKDIR = "${cfg.shellWorkspace.directory}"
+          '';
         };
         # Shared prompt across every shell on the system, so the same
         # rendering follows the operator whether they stay in Nushell or
@@ -167,7 +150,8 @@ in
       # zsh and fish get their NixOS modules so /etc/shells registration
       # and system-wide completion paths are wired without per-image
       # setup. Nushell is the platform default user shell (see
-      # lib/ix-platform.nix) and is registered via the workspace wrapper.
+      # lib/ix-platform.nix) and lands as the login shell directly,
+      # since Home Manager owns its config files via the root attrset.
       zsh.enable = true;
       fish.enable = true;
 
@@ -183,53 +167,52 @@ in
       };
     };
 
-    environment.systemPackages =
-      builtins.attrValues {
-        inherit (pkgs)
-          bat
-          bpftrace
-          btop
-          eza
-          fd
-          file
-          gdb
-          # gnutar, gzip, and zstd ride along so any VM switched once stays
-          # switchable: `ix switch --source` streams a tarball through
-          # `tar -x -I zstd` inside the guest, and these binaries are not
-          # on NixOS' default system PATH.
-          gnutar
-          gzip
-          # Alternative editors next to the default neovim. Helix is the
-          # modern single-binary editor; micro is the nano-style fallback
-          # for operators who want predictable bindings without modes.
-          helix
-          htop
-          micro
-          jq
-          lldb
-          lsof
-          ncdu
-          # nh wraps nixos-rebuild/home-manager/darwin-rebuild with a
-          # build tree (via nom), pre-activation diffs (via dix), and
-          # confirmation prompts. nix-output-monitor is shipped
-          # separately so plain `nom nix build .#foo` works outside nh.
-          # nix-tree is the interactive TUI for exploring a derivation's
-          # dependency graph.
-          nh
-          nix-output-monitor
-          nix-tree
-          pv
-          ripgrep
-          strace
-          tcpdump
-          zstd
-          ;
-      }
-      ++ lib.optionals shellWorkspace.enable [
-        shellWorkspace.shell
-        shellWrapper
-      ];
+    environment.systemPackages = builtins.attrValues {
+      inherit (pkgs)
+        bat
+        bpftrace
+        btop
+        eza
+        fd
+        file
+        gdb
+        # gnutar, gzip, and zstd ride along so any VM switched once stays
+        # switchable: `ix switch --source` streams a tarball through
+        # `tar -x -I zstd` inside the guest, and these binaries are not
+        # on NixOS' default system PATH.
+        gnutar
+        gzip
+        # Alternative editors next to the default neovim. Helix is the
+        # modern single-binary editor; micro is the nano-style fallback
+        # for operators who want predictable bindings without modes.
+        helix
+        htop
+        micro
+        jq
+        lldb
+        lsof
+        ncdu
+        # nh wraps nixos-rebuild/home-manager/darwin-rebuild with a
+        # build tree (via nom), pre-activation diffs (via dix), and
+        # confirmation prompts. nix-output-monitor is shipped
+        # separately so plain `nom nix build .#foo` works outside nh.
+        # nix-tree is the interactive TUI for exploring a derivation's
+        # dependency graph.
+        nh
+        nix-output-monitor
+        nix-tree
+        pv
+        ripgrep
+        strace
+        tcpdump
+        zstd
+        ;
+    };
 
-    users.users.root.shell = lib.mkIf shellWorkspace.enable shellWrapper;
+    # Pre-create the workspace at boot so login.nu can cd into it
+    # without racing tmpfiles or relying on mkdir from the shell.
+    systemd.tmpfiles.rules = lib.mkIf cfg.shellWorkspace.enable [
+      "d ${cfg.shellWorkspace.directory} 0755 root root -"
+    ];
   };
 }
