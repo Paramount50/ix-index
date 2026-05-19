@@ -249,6 +249,10 @@ Discovery then exposes `<name>_<ver>` for each version key plus `<name>` as an a
 
 Drop the file at `modules/services/<name>.nix` (or `modules/profiles/<name>.nix`) and register it in `modules/default.nix`. Keep modules independent: declare `options`, gate everything behind `mkIf cfg.enable`, never import another module. The registry exists so option sets are visible to every image; modules stay inert until their `enable` flag is set.
 
+## Adding a platform-wide default
+
+Settings that should apply to every image without per-image opt-in have two homes. System-level posture (nftables, firewall, journald caps, `nix.settings`, `programs.nix-ld`, `system.switch.enableNg`, gc policy, znver5 host platform) lives in [`lib/ix-platform.nix`](lib/ix-platform.nix). The auto-enabled CLI baseline (debugging tools, source-switch utilities such as `gnutar`/`zstd`/`gzip`, the workspace shell wrapper) lives in [`modules/profiles/base.nix`](modules/profiles/base.nix), which [`lib/ix-oci-layer.nix`](lib/ix-oci-layer.nix) turns on for every image. Touch the platform module for system posture and the base profile for CLI ergonomics. Use `lib.mkDefault` on anything an unusual image might legitimately need to override, so that opt-out stays a one-liner.
+
 ## Service families
 
 When several modules vary along one axis (e.g. minecraft + fabric/paper/vanilla loaders), put the runtime in `modules/services/<name>/default.nix` and each variant in `modules/services/<name>/<variant>.nix`. The runtime declares a "slot" option; variants fill it. Wire each file into `modules/default.nix` as a separate registry entry.
