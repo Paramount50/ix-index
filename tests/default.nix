@@ -427,23 +427,6 @@ let
         };
     };
 
-  hyperion =
-    let
-      config = evalConfig [ ../images/games/hyperion ];
-    in
-    {
-      inherit config;
-      cfg = config.services.hyperion;
-      service =
-        let
-          unit = config.systemd.services.hyperion;
-        in
-        {
-          inherit unit;
-          config = unit.serviceConfig;
-        };
-    };
-
   remoteDesktop =
     let
       config = evalConfig [ ../images/desktop/remote-desktop ];
@@ -1710,56 +1693,6 @@ let
       {
         assertion = bedrock.service.config.StateDirectory == "minecraft-bedrock";
         message = "minecraft-bedrock service should get a managed state directory";
-      }
-    ];
-
-    hyperion = [
-      {
-        assertion = hyperion.config.ix.image.name == "hyperion";
-        message = "hyperion image should set the expected OCI image name";
-      }
-      {
-        assertion = hyperion.config.ix.image.tag == repoPackages.hyperion.version;
-        message = "hyperion image tag should follow the pinned package version";
-      }
-      {
-        assertion = hyperion.cfg.enable;
-        message = "hyperion image should enable services.hyperion";
-      }
-      {
-        assertion =
-          lib.getName hyperion.cfg.package == lib.getName repoPackages.hyperion
-          && hyperion.cfg.package.version == repoPackages.hyperion.version;
-        message = "hyperion service should default to the repo-packaged Hyperion build";
-      }
-      {
-        assertion =
-          hyperion.service.unit.environment.BEDWARS_PROXY_ADDR == "0.0.0.0:25565"
-          && hyperion.service.unit.environment.BEDWARS_IP == "127.0.0.1"
-          && hyperion.service.unit.environment.BEDWARS_PORT == "35565";
-        message = "hyperion service should wire the embedded proxy and Bedwars bind addresses";
-      }
-      {
-        assertion =
-          lib.hasInfix "/bin/bedwars" hyperion.service.config.ExecStart
-          && lib.hasInfix "--root-ca-cert /var/lib/hyperion/root_ca.crt" hyperion.service.config.ExecStart;
-        message = "hyperion service should launch bedwars with generated mTLS files";
-      }
-      {
-        assertion =
-          lib.hasInfix "subjectAltName=IP:127.0.0.1,DNS:localhost" hyperion.service.unit.preStart
-          && lib.hasInfix "proxy_private_key.pem" hyperion.service.unit.preStart;
-        message = "hyperion service should generate local CA, server, and proxy certificates";
-      }
-      {
-        assertion = hyperion.config.networking.firewall.allowedTCPPorts == [ hyperion.cfg.proxy.port ];
-        message = "hyperion image should expose the proxy port and keep the game port private";
-      }
-      {
-        assertion =
-          hyperion.config.ix.networking.portClaims.hyperion-proxy.port == hyperion.cfg.proxy.port
-          && hyperion.config.ix.networking.portClaims.hyperion-bedwars.port == hyperion.cfg.game.port;
-        message = "hyperion service should register proxy and game-server listener claims";
       }
     ];
 

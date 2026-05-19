@@ -253,8 +253,8 @@ in
 
     # Nushell is the operator shell across this repo: the base profile ships
     # system-wide nu config and the workspace login.nu. Setting it as the
-    # default user shell means service users (minecraft, hyperion, ...) and
-    # any future user inherit Nushell rather than bash, so an su or a manual
+    # default user shell means service users (minecraft, ...) and any future
+    # user inherit Nushell rather than bash, so an su or a manual
     # session into a service account lands in the same shell as root.
     users.defaultUserShell = pkgs.nushell;
 

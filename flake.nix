@@ -43,7 +43,6 @@
         minecraftVelocityPlugins = ./images/games/minecraft/plugins/velocity;
         packages = {
           ix = ./packages/ix;
-          hyperion = ./packages/hyperion;
           ixFleet = ./packages/ix-fleet;
           minecraftHotReloadAgent = ./packages/minecraft-hot-reload-agent;
           minecraftNbt = ./packages/minecraft-nbt;

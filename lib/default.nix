@@ -539,9 +539,6 @@ let
         inherit pkgs;
       };
       basePackages = {
-        hyperion = (pkgsWithRustOverlayFor pkgs).callPackage paths.packages.hyperion {
-          ix = ixForPackages;
-        };
         ix-fleet = pkgs.callPackage paths.packages.ixFleet {
           ix = ixForPackages;
         };

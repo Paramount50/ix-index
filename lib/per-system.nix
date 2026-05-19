@@ -123,7 +123,6 @@ in
         };
 
       inherit (repoPackages)
-        hyperion
         ix-fleet
         mc-probe
         minecraft-nbt
