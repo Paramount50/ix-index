@@ -114,6 +114,17 @@ in
           enableZshIntegration = true;
           enableFishIntegration = true;
         };
+        # Frecency-ranked directory jumper: `z minecraft` jumps to the
+        # most-used directory matching that fragment. SSH dev sessions
+        # bounce between /etc, /var/log, /work/ix, and service data dirs
+        # constantly; full paths get old fast.
+        zoxide = {
+          enable = true;
+          enableNushellIntegration = true;
+          enableBashIntegration = true;
+          enableZshIntegration = true;
+          enableFishIntegration = true;
+        };
       };
     };
 
