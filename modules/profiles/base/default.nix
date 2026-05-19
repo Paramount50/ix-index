@@ -89,20 +89,31 @@ in
     # (atuin, zoxide, starship) hang off the same root user attrset.
     home-manager.users.root = {
       home.stateVersion = "25.05";
-      programs.nushell = {
-        enable = true;
-        configFile.source = ./config.nu;
-      };
-      # Shared prompt across every shell on the system. Starship reads
-      # /etc/starship.toml (or ~/.config/starship.toml when HM writes one),
-      # so the same prompt renders whether the operator stays in Nushell
-      # or chshes into bash/zsh/fish.
-      programs.starship = {
-        enable = true;
-        enableNushellIntegration = true;
-        enableBashIntegration = true;
-        enableZshIntegration = true;
-        enableFishIntegration = true;
+      programs = {
+        nushell = {
+          enable = true;
+          configFile.source = ./config.nu;
+        };
+        # Shared prompt across every shell on the system, so the same
+        # rendering follows the operator whether they stay in Nushell or
+        # chsh into bash/zsh/fish.
+        starship = {
+          enable = true;
+          enableNushellIntegration = true;
+          enableBashIntegration = true;
+          enableZshIntegration = true;
+          enableFishIntegration = true;
+        };
+        # SQLite-backed, searchable shell history that follows the
+        # operator across bash/zsh/fish/nushell. Local-only by default;
+        # sync to an atuin server only when the operator chooses to.
+        atuin = {
+          enable = true;
+          enableNushellIntegration = true;
+          enableBashIntegration = true;
+          enableZshIntegration = true;
+          enableFishIntegration = true;
+        };
       };
     };
 
