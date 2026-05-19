@@ -328,7 +328,7 @@ let
         "zlib"
       ];
       jsonFormat = pkgs.formats.json { };
-      checkedMinecraftNbt = pkgs.callPackage paths.packages.minecraftNbt {
+      checkedMinecraftNbt = pkgs.callPackage paths.packages.minecraft.nbt {
         inherit pkgs;
         ix = {
           buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
