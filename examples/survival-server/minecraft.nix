@@ -1,6 +1,7 @@
-_:
+{ ix, ... }:
 let
   forwardingSecret = "ix-survival-example-forwarding-secret-change-me";
+  tags = ix.minecraft.nbt;
 in
 {
   services = {
@@ -56,6 +57,69 @@ in
       serverFiles."spigot.yml".settings = {
         bungeecord = false;
         restart-on-crash = false;
+      };
+
+      # Demo: ship a tiny vanilla datapack whose only payload is a structure
+      # template. An operator (or a function in another datapack) can paste
+      # the structure with `/place template ix:zombie_arena ~ ~ ~`. The point
+      # is to exercise the typed-NBT pipeline end to end: Nix-side helpers
+      # tag each value with its NBT kind, `mkMinecraftNbtFormat` generates
+      # the binary NBT file, and the server loads it on world start without
+      # ever writing back.
+      datapacks.ix-spawner-arena.files."data/ix/structure/zombie_arena.nbt" = tags.compound {
+        # DataFixer upgrades older structure files on load. Using the
+        # 1.21.11 stamp here is intentional: it is the most recent
+        # release whose server jar ships with Mojang deobfuscation
+        # mappings, so the format is verifiable against decompiled
+        # source via `nix run .#mc-source -- 1.21.11`.
+        DataVersion = tags.int 4325;
+
+        # `size` is a List of three Int tags, not an IntArray. Same
+        # for `pos` below. StructureTemplate.save() in vanilla writes
+        # `newIntegerList(...)`, which is ListTag<IntTag>.
+        size = tags.list [
+          (tags.int 1)
+          (tags.int 1)
+          (tags.int 1)
+        ];
+
+        palette = [
+          { Name = tags.string "minecraft:spawner"; }
+        ];
+
+        blocks = [
+          {
+            pos = tags.list [
+              (tags.int 0)
+              (tags.int 0)
+              (tags.int 0)
+            ];
+            state = tags.int 0;
+            nbt = tags.compound {
+              # Every spawner timing field is a Short (signed 16-bit).
+              # Passing an Int here loads silently and then misbehaves
+              # because the server reads the wrong number of bytes:
+              # the typed wrappers make the width explicit so the
+              # bug cannot happen.
+              Delay = tags.short 20;
+              MinSpawnDelay = tags.short 200;
+              MaxSpawnDelay = tags.short 800;
+              SpawnCount = tags.short 4;
+              SpawnRange = tags.short 4;
+              MaxNearbyEntities = tags.short 6;
+              RequiredPlayerRange = tags.short 16;
+              # `entity` wrapper around `id` is the post-1.18 shape.
+              # Pre-1.18 wrote `id` as a sibling of `SpawnData`.
+              SpawnData = tags.compound {
+                entity = tags.compound {
+                  id = tags.string "minecraft:zombie";
+                };
+              };
+            };
+          }
+        ];
+
+        entities = [ ];
       };
     };
   };
