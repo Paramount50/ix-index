@@ -368,7 +368,7 @@ let
   mkMinecraftSyncManaged =
     args:
     let
-      checkedPackage = pkgs.callPackage paths.packages.minecraftSyncManaged {
+      checkedPackage = pkgs.callPackage paths.packages.minecraft.syncManaged {
         inherit pkgs;
         ix = {
           buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
