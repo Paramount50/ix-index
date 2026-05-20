@@ -237,6 +237,16 @@ in
       };
     };
 
+    # YourKit is the only unfree we currently allow into images, and only
+    # because `ix.languages.java.yourkit` is an opt-in profiler agent that
+    # an operator turns on for performance work. The predicate keeps every
+    # other unfree (Oracle JDK, Adobe runtimes, NVIDIA blobs) failing at
+    # eval until the platform decides to allow it explicitly.
+    #
+    # Refs: https://www.yourkit.com/docs/java/help/agent.jsp
+    nixpkgs.config.allowUnfreePredicate =
+      pkg: builtins.elem (lib.getName pkg) [ "yourkit-java" ];
+
     boot = {
       isContainer = true;
 

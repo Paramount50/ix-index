@@ -1,4 +1,7 @@
-{ errors }:
+{
+  errors,
+  lib,
+}:
 let
   validDistributions = [
     "openjdk"
@@ -115,4 +118,15 @@ in
       attrset = jdkTable;
       key = version;
     };
+
+  /**
+    YourKit profiler integration for JVM services.
+
+    See [`./yourkit.nix`](./yourkit.nix) for the option submodule plus the
+    `flagsFor` / `portClaimFor` helpers that a service module pulls into
+    its JVM args and firewall config when the option is enabled. Defaults
+    are off; when enabled the agent loads at JVM startup so the first
+    instruction is profiled (matches YourKit's startup-attach docs).
+  */
+  yourkit = import ./yourkit.nix { inherit errors lib; };
 }
