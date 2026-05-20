@@ -65,6 +65,23 @@ in
     # (atuin, zoxide, starship) hang off the same root user attrset.
     home-manager.users.root = {
       home.stateVersion = "25.05";
+
+      # Home Manager's `manual.manpages.enable` defaults to true and ships
+      # `home-configuration.nix(5)`, an options reference built by piping the
+      # merged option tree through `nixosOptionsDoc`. Two reasons we kill it:
+      #   - Operators inside an ix VM don't edit home-manager config in
+      #     place: HM is configured here via the NixOS module, then changes
+      #     land through `ix-fleet switch`. The man page describes options
+      #     the operator can't meaningfully change from inside the VM.
+      #   - `nixosOptionsDoc` constructs the `options.json` derivation with
+      #     `builtins.unsafeDiscardStringContext` on the merged options
+      #     tree, which Nix surfaces as a "references store path without a
+      #     proper context" warning at eval time. With seven nodes across
+      #     the example fleets, `nix run .#health-checks` printed that
+      #     warning seven times before the first useful line of output.
+      # Per-package man pages (`man tar`, `man systemd`) keep working
+      # because NixOS `documentation.man.enable` is untouched.
+      manual.manpages.enable = false;
       programs = {
         nushell = {
           enable = true;
