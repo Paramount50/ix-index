@@ -53,7 +53,7 @@ let
             exit 1
           }
 
-          let plan_data = (open ${fleet.plan} | from json)
+          let plan_data = (open ${fleet.plan})
           let nodes = $plan_data.order
 
           print $"[${name}] removing any pre-existing VMs: ($nodes | str join ', ')"
