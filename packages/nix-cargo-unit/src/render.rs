@@ -1704,10 +1704,124 @@ fn collect_source_closure_roots(
             }
         } else if file_type.is_dir() {
             collect_source_closure_roots(&path, source_boundary, included_roots, queue)?;
+        } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+            scan_rust_includes_into_closure(&path, source_boundary, included_roots, queue)?;
         }
     }
 
     Ok(())
+}
+
+/// Extend `included_roots` / `queue` with any directories reached through
+/// `include!`, `include_bytes!`, or `include_str!` macros in `file` whose
+/// argument is a plain or `r"…"` string literal. Paths are resolved
+/// relative to the source file's directory and normalized; matches outside
+/// `source_boundary` are dropped on the assumption they come from build
+/// scripts via `OUT_DIR` or similar (rustc will surface a clear error if
+/// the file is genuinely missing). Non-literal arguments such as
+/// `concat!(env!("OUT_DIR"), "/x")` cannot be resolved statically and are
+/// skipped on purpose.
+fn scan_rust_includes_into_closure(
+    file: &Path,
+    source_boundary: &Path,
+    included_roots: &mut BTreeSet<PathBuf>,
+    queue: &mut VecDeque<PathBuf>,
+) -> Result<()> {
+    let source = match fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(_) => return Ok(()),
+    };
+    let file_dir = file.parent().unwrap_or(file);
+    for include_arg in extract_include_macro_paths(&source) {
+        let resolved = normalize_path(&file_dir.join(&include_arg));
+        if !resolved.starts_with(source_boundary) {
+            continue;
+        }
+        // A single referenced file almost always sits next to siblings the
+        // package also loads (`testdata/*.toml`, `fixtures/*.json`); promote
+        // to the parent directory rather than tracking one path at a time.
+        let include_root = if resolved.is_dir() {
+            resolved.clone()
+        } else {
+            resolved
+                .parent()
+                .map(Path::to_path_buf)
+                .unwrap_or(resolved)
+        };
+        if !path_is_covered_by_roots(&include_root, included_roots) {
+            queue.push_back(include_root.clone());
+            included_roots.insert(include_root);
+        }
+    }
+    Ok(())
+}
+
+/// Lift literal-string arguments out of `include!`, `include_bytes!`, and
+/// `include_str!` macro calls. The scan is intentionally textual: it does
+/// not parse Rust, so false positives inside comments and string literals
+/// are possible but harmless (an extra non-existent directory in the
+/// closure is filtered out at the Nix layer). Macro arguments that are
+/// not plain `"…"` or `r"…"` literals — `concat!`, `env!`, identifiers,
+/// or raw strings with `#` delimiters — are skipped.
+fn extract_include_macro_paths(source: &str) -> Vec<String> {
+    const MARKERS: &[&str] = &["include!", "include_bytes!", "include_str!"];
+    let mut paths = Vec::new();
+    for marker in MARKERS {
+        let mut cursor = 0;
+        while let Some(found) = source[cursor..].find(marker) {
+            let start = cursor + found;
+            let after = start + marker.len();
+            cursor = after;
+            // Word-boundary check: `my_include_bytes!` should not match.
+            if start > 0
+                && source[..start]
+                    .chars()
+                    .next_back()
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                continue;
+            }
+            let tail = source[after..].trim_start();
+            let Some(tail) = tail.strip_prefix('(') else {
+                continue;
+            };
+            let tail = tail.trim_start();
+            let (tail, is_raw) = match tail.strip_prefix('r') {
+                Some(after_r) if after_r.starts_with('"') => (after_r, true),
+                _ => (tail, false),
+            };
+            let Some(body) = tail.strip_prefix('"') else {
+                continue;
+            };
+            let mut chars = body.chars();
+            let mut literal = String::new();
+            let mut closed = false;
+            while let Some(c) = chars.next() {
+                if c == '"' {
+                    closed = true;
+                    break;
+                }
+                if c == '\\' && !is_raw {
+                    match chars.next() {
+                        Some('n') => literal.push('\n'),
+                        Some('t') => literal.push('\t'),
+                        Some('r') => literal.push('\r'),
+                        Some('"') => literal.push('"'),
+                        Some('\'') => literal.push('\''),
+                        Some('\\') => literal.push('\\'),
+                        Some(other) => literal.push(other),
+                        None => break,
+                    }
+                } else {
+                    literal.push(c);
+                }
+            }
+            if closed && !literal.is_empty() {
+                paths.push(literal);
+            }
+        }
+    }
+    paths
 }
 
 fn path_is_covered_by_roots(path: &Path, roots: &BTreeSet<PathBuf>) -> bool {
@@ -2565,6 +2679,108 @@ version = "0.1.0"
         assert!(rendered.contains("export CARGO_MANIFEST_DIR=\"$src/internal\""));
         assert!(rendered.contains("\"$src/internal/lib.rs\""));
         fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extends_source_closure_through_include_macros() {
+        let workspace = std::env::temp_dir().join(format!(
+            "nix-cargo-unit-include-source-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        fs::create_dir_all(workspace.join("regex-lite/tests")).unwrap();
+        fs::create_dir_all(workspace.join("testdata")).unwrap();
+        fs::write(
+            workspace.join("regex-lite/Cargo.toml"),
+            r#"[package]
+name = "regex-lite"
+version = "0.1.0"
+"#,
+        )
+        .unwrap();
+        // The test entry point mirrors the regex-lite shape: an integration
+        // test under `tests/` that reads sibling testdata via `include_bytes!`
+        // with a parent-relative path. The walker must add the testdata dir
+        // to the rustc source closure, otherwise the build sandbox can't see it.
+        fs::write(
+            workspace.join("regex-lite/tests/lib.rs"),
+            r#"const ANCHORED: &[u8] = include_bytes!("../../testdata/anchored.toml");
+const CRLF: &str = include_str!("../../testdata/crlf.toml");
+"#,
+        )
+        .unwrap();
+        fs::write(workspace.join("testdata/anchored.toml"), "name = 'anchored'\n").unwrap();
+        fs::write(workspace.join("testdata/crlf.toml"), "name = 'crlf'\n").unwrap();
+        let src_path = workspace.join("regex-lite/tests/lib.rs");
+        let pkg_id = format!(
+            "path+file://{}#regex-lite@0.1.0",
+            workspace.join("regex-lite").display()
+        );
+        let graph: UnitGraph = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "units": [
+                {
+                    "pkg_id": pkg_id,
+                    "target": {
+                        "kind": ["test"],
+                        "crate_types": ["bin"],
+                        "name": "integration",
+                        "src_path": src_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3", "test": true },
+                    "mode": "build",
+                    "dependencies": []
+                }
+            ],
+            "roots": [0]
+        }))
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: workspace.clone(),
+                vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("[ \"regex-lite\" \"testdata\" ]"));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[test]
+    fn extracts_literal_include_macro_paths_in_order() {
+        let source = r#"
+            const A: &[u8] = include_bytes!("data/anchored.toml");
+            const B: &str = include_str!("../../shared/template.txt");
+            // Computed paths are not resolvable and are skipped:
+            include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+            // Raw strings without `#` are still literals:
+            const C: &[u8] = include_bytes!(r"raw/data.bin");
+            // Wrong macro name with the same suffix; the word boundary blocks it:
+            let _ = my_include_bytes!("not_a_real_macro");
+            // Comments and intra-string occurrences are over-matched but harmless:
+            // include_str!("from_a_comment.txt")
+        "#;
+        let mut paths = extract_include_macro_paths(source);
+        paths.sort();
+        assert_eq!(
+            paths,
+            vec![
+                "../../shared/template.txt".to_string(),
+                "data/anchored.toml".to_string(),
+                "from_a_comment.txt".to_string(),
+                "raw/data.bin".to_string(),
+            ]
+        );
     }
 
     #[test]
