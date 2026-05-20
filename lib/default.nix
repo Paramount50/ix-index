@@ -162,6 +162,7 @@ let
       };
     in
     {
+      drgn = final.callPackage paths.packages.drgn { };
       minecraft-hot-reload-agent = final.callPackage paths.packages.minecraft.hotReloadAgent { };
       minecraft-rcon = final.callPackage paths.packages.minecraft.rcon {
         writePythonApplication = writePythonApplication final;
@@ -569,6 +570,7 @@ let
           inherit pkgs;
           ix = ixForPackages;
         };
+        drgn = pkgs.callPackage paths.packages.drgn { };
         ix-fleet = pkgs.callPackage paths.packages.ixFleet {
           ix = ixForPackages;
         };

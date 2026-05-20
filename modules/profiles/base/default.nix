@@ -371,6 +371,13 @@ in
           # canonical tool for "I have raw memory and I need to know what
           # struct lives at this offset", which gdb/lldb both fumble.
           pahole
+          # drgn complements pahole: pahole answers "what is the layout of
+          # struct foo?", drgn lets you start from a typed root and walk
+          # the live value graph in Python (dereference pointers, follow
+          # intrusive lists, dump fields). Packaged in `packages/drgn/`
+          # against the v0.2.0 upstream release until the open nixpkgs PR
+          # (#446138) lands and the pin moves.
+          drgn
           pv
           ripgrep
           strace

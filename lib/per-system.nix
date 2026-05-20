@@ -179,6 +179,7 @@ in
 
       inherit (repoPackages)
         dag-runner
+        drgn
         ix-fleet
         mc-probe
         minecraft-nbt
