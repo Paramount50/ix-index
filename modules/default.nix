@@ -9,6 +9,7 @@
 {
   base = ./profiles/base;
   extended-attributes = ./profiles/extended-attributes.nix;
+  jvm = ./profiles/jvm.nix;
   floodgate = ./services/floodgate.nix;
   geyser = ./services/geyser.nix;
   git-clone = ./services/git-clone.nix;
