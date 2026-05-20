@@ -55,9 +55,14 @@ let
         value = typeCheckingMode;
         valid = basedpyrightTypeCheckingModes;
       };
+      # `"${src}"` (not `builtins.toString src`) so the generated JSON
+      # carries Nix string context for the source derivation; otherwise
+      # the file references a store path with no recorded dependency
+      # and Nix prints a "without a proper context" eval warning on
+      # every consumer evaluation.
       pyrightConfig = pkgs.writeText "basedpyright-${name}.json" (
         builtins.toJSON {
-          include = [ (builtins.toString src) ];
+          include = [ "${src}" ];
           inherit extraPaths pythonPlatform;
           typeCheckingMode = checkedTypeCheckingMode;
           inherit (python) pythonVersion;
