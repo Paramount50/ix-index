@@ -238,9 +238,11 @@ let
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
   languages = {
+    cpp = import ./languages/cpp.nix { inherit errors; };
     elixir = import ./languages/elixir.nix { inherit errors; };
     erlang = import ./languages/erlang.nix { inherit errors; };
     go = import ./languages/go.nix { inherit errors; };
+    haskell = import ./languages/haskell.nix { inherit errors; };
     java = import ./languages/java { inherit errors lib; };
     javascript = import ./languages/javascript.nix { inherit errors; };
     kotlin = import ./languages/kotlin.nix { inherit errors; };
