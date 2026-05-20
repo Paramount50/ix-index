@@ -7,15 +7,15 @@ let
   sources = {
     x86_64-linux = fetchurl {
       url = "https://ix.dev/cli/linux-x86_64/ix";
-      hash = "sha256-eXdV+aSEQNIssqfRywiIOk+979WkOLJapa7C2D7C6Ts=";
+      hash = "sha256-U5vAZ1AKsk5XIwXoNwM4Bz7FJ1firsZddY9fwfChsNY=";
     };
     aarch64-darwin = fetchurl {
       url = "https://ix.dev/cli/darwin-arm64/ix";
-      hash = "sha256-b6wwHtikhMYl/FfpmepU3ONOR+Wtcm5HE5zQIK7qC6M=";
+      hash = "sha256-1Whto7SP/iogbInZSLXXIgcUpuuCXGDEH4im+7b0jK4=";
     };
     x86_64-darwin = fetchurl {
       url = "https://ix.dev/cli/darwin-x86_64/ix";
-      hash = "sha256-LATWkElzdoSxO95f3n1hOwauMBuLkLSsyIDdccbmhJ4=";
+      hash = "sha256-PZ+WlN4L/cFj9tWothY0V4xaG3VRrVgY9sFKpPM9efg=";
     };
   };
 
