@@ -34,6 +34,16 @@ let
 
   mkLifecycle =
     name: fleet:
+    let
+      # Pin each node's OCI image as a build-time dep of the lifecycle script
+      # so `nix run .#health-checks` realises every image before the runner
+      # starts. Without this, `ix-fleet up` calls `nix-store --realise` on the
+      # image .drv at runtime, which then triggers an x86_64-linux build chain
+      # on whatever host launched the runner. Surfacing the realise step as a
+      # normal Nix build fails fast at one well-known boundary instead of five
+      # parallel runners independently rediscovering a broken remote builder.
+      pinnedImages = lib.attrValues fleet.packages;
+    in
     writeNushellApplication pkgs {
       name = "health-check-${name}";
       text = ''
@@ -53,10 +63,11 @@ let
             exit 1
           }
 
+          let pinned_images = ${builtins.toJSON pinnedImages}
           let plan_data = (open ${fleet.plan})
           let nodes = $plan_data.order
 
-          print $"[${name}] removing any pre-existing VMs: ($nodes | str join ', ')"
+          print $"[${name}] ($pinned_images | length) image\(s) pinned in store; removing any pre-existing VMs: ($nodes | str join ', ')"
           for node_name in $nodes {
             do --ignore-errors { ^ix rm --force $node_name } | ignore
           }
