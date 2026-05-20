@@ -16,36 +16,39 @@ let
 
   defaultVersion = "3.14";
 in
-/**
-  Return the nixpkgs Python interpreter for `version`.
-
-  `version` is a `major.minor` string matching one of the supported
-  entries; unknown versions throw with the supported set listed so a
-  typo or a too-new pin is fixable from the error message alone.
-
-  The default tracks `writePythonApplication` and `buildUvApplication`
-  so callers that only need the same interpreter the rest of the repo
-  uses do not have to repeat the version string.
-
-  Arguments:
-  - `pkgs`: nixpkgs instance to look the interpreter up in. Modules pass
-    their own `pkgs` so the returned package is from the image's
-    evaluation rather than the lib's default.
-  - `version`: optional `major.minor` string. Defaults to `"3.14"`.
-
-  Example:
-  ```nix
-  { pkgs, ix, ... }:
-  let python = ix.languages.python pkgs { version = "3.12"; };
-  in { environment.systemPackages = [ python ]; }
-  ```
-*/
-pkgs:
 {
-  version ? defaultVersion,
-}:
-errors.requireAttr {
-  context = "ix.languages.python: unknown version";
-  attrset = interpretersFor pkgs;
-  key = version;
+  /**
+    Return the nixpkgs Python interpreter for `version`.
+
+    `version` is a `major.minor` string matching one of the supported
+    entries; unknown versions throw with the supported set listed so a
+    typo or a too-new pin is fixable from the error message alone.
+
+    The default tracks `writePythonApplication` and `buildUvApplication`
+    so callers that only need the same interpreter the rest of the repo
+    uses do not have to repeat the version string.
+
+    Arguments:
+    - `pkgs`: nixpkgs instance to look the interpreter up in. Modules pass
+      their own `pkgs` so the returned package is from the image's
+      evaluation rather than the lib's default.
+    - `version`: optional `major.minor` string. Defaults to `"3.14"`.
+
+    Example:
+    ```nix
+    { pkgs, ix, ... }:
+    let python = ix.languages.python.interpreter pkgs { version = "3.12"; };
+    in { environment.systemPackages = [ python ]; }
+    ```
+  */
+  interpreter =
+    pkgs:
+    {
+      version ? defaultVersion,
+    }:
+    errors.requireAttr {
+      context = "ix.languages.python.interpreter: unknown version";
+      attrset = interpretersFor pkgs;
+      key = version;
+    };
 }

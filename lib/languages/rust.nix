@@ -71,72 +71,75 @@ let
     else
       "${channel}-${version}";
 in
-/**
-  Build a rust-overlay toolchain.
-
-  Returns an aggregated toolchain package suitable for use as a system
-  package or as the `rustc` + `cargo` source for downstream rust
-  builders. Unknown channels, versions, and components throw with the
-  valid alternatives listed so a typo is fixable from the message
-  alone.
-
-  Arguments (all optional):
-  - `channel`: one of `"stable" | "beta" | "nightly"`. Default
-    `"nightly"`.
-  - `version`: `"latest"`, a semver like `"1.83.0"`, or an ISO date
-    like `"2025-12-01"` (date is only valid on nightly). Defaults to
-    the repo-wide pinned nightly date when channel is `"nightly"`,
-    otherwise `"latest"`.
-  - `components`: rustup components to include. Defaults to the
-    minimal `[ "cargo" "rust-std" "rustc" ]` set; pass an extended
-    list (for example `[ ... "rust-src" "rust-analyzer" ]`) when the
-    consumer needs more.
-  - `targets`: extra rustc targets beyond the host. Default `[ ]`.
-  - `profile`: rust-overlay profile baseline. One of
-    `"minimal" | "default" | "complete"`. Default `"minimal"`.
-
-  Example:
-  ```nix
-  { pkgs, ix, ... }:
-  let
-    rust = ix.languages.rust pkgs {
-      channel = "nightly";
-      version = "2025-12-01";
-      components = [ "cargo" "rust-std" "rustc" "rust-src" "rustfmt" ];
-    };
-  in {
-    environment.systemPackages = [ rust ];
-  }
-  ```
-*/
-pkgs:
 {
-  channel ? "nightly",
-  version ? defaultVersionFor channel,
-  components ? defaultComponents,
-  targets ? [ ],
-  profile ? "minimal",
-}:
-let
-  checkedChannel = errors.assertEnum {
-    name = "ix.languages.rust.channel";
-    value = channel;
-    valid = validChannels;
-  };
+  /**
+    Build a rust-overlay toolchain.
 
-  checkedProfile = errors.assertEnum {
-    name = "ix.languages.rust.profile";
-    value = profile;
-    valid = validProfiles;
-  };
+    Returns an aggregated toolchain package suitable for use as a system
+    package or as the `rustc` + `cargo` source for downstream rust
+    builders. Unknown channels, versions, and components throw with the
+    valid alternatives listed so a typo is fixable from the message
+    alone.
 
-  pkgsWithOverlay = pkgsWithOverlayFor pkgs;
-in
-pkgsWithOverlay.rust-bin.fromRustupToolchain {
-  channel = rustupChannelFor {
-    channel = checkedChannel;
-    inherit version;
-  };
-  inherit components targets;
-  profile = checkedProfile;
+    Arguments (all optional):
+    - `channel`: one of `"stable" | "beta" | "nightly"`. Default
+      `"nightly"`.
+    - `version`: `"latest"`, a semver like `"1.83.0"`, or an ISO date
+      like `"2025-12-01"` (date is only valid on nightly). Defaults to
+      the repo-wide pinned nightly date when channel is `"nightly"`,
+      otherwise `"latest"`.
+    - `components`: rustup components to include. Defaults to the
+      minimal `[ "cargo" "rust-std" "rustc" ]` set; pass an extended
+      list (for example `[ ... "rust-src" "rust-analyzer" ]`) when the
+      consumer needs more.
+    - `targets`: extra rustc targets beyond the host. Default `[ ]`.
+    - `profile`: rust-overlay profile baseline. One of
+      `"minimal" | "default" | "complete"`. Default `"minimal"`.
+
+    Example:
+    ```nix
+    { pkgs, ix, ... }:
+    let
+      rust = ix.languages.rust.toolchain pkgs {
+        channel = "nightly";
+        version = "2025-12-01";
+        components = [ "cargo" "rust-std" "rustc" "rust-src" "rustfmt" ];
+      };
+    in {
+      environment.systemPackages = [ rust ];
+    }
+    ```
+  */
+  toolchain =
+    pkgs:
+    {
+      channel ? "nightly",
+      version ? defaultVersionFor channel,
+      components ? defaultComponents,
+      targets ? [ ],
+      profile ? "minimal",
+    }:
+    let
+      checkedChannel = errors.assertEnum {
+        name = "ix.languages.rust.toolchain.channel";
+        value = channel;
+        valid = validChannels;
+      };
+
+      checkedProfile = errors.assertEnum {
+        name = "ix.languages.rust.toolchain.profile";
+        value = profile;
+        valid = validProfiles;
+      };
+
+      pkgsWithOverlay = pkgsWithOverlayFor pkgs;
+    in
+    pkgsWithOverlay.rust-bin.fromRustupToolchain {
+      channel = rustupChannelFor {
+        channel = checkedChannel;
+        inherit version;
+      };
+      inherit components targets;
+      profile = checkedProfile;
+    };
 }

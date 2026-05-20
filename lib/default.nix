@@ -238,14 +238,14 @@ let
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
   languages = {
-    java = import ./languages/java.nix { inherit errors; };
+    java = import ./languages/java { inherit errors; };
     python = import ./languages/python.nix { inherit errors; };
     rust = import ./languages/rust.nix { inherit errors rust-overlay; };
   };
-  rustNightlyToolchainFor = pkgs: languages.rust pkgs { };
+  rustNightlyToolchainFor = pkgs: languages.rust.toolchain pkgs { };
   rustNightlyClippyToolchainFor =
     pkgs:
-    languages.rust pkgs {
+    languages.rust.toolchain pkgs {
       components = [
         "cargo"
         "llvm-tools"

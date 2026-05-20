@@ -1027,18 +1027,19 @@ let
   # --- Language helpers -----------------------------------------------------
 
   languages = {
-    pythonDefault = ix.languages.python pkgs { };
-    python312 = ix.languages.python pkgs { version = "3.12"; };
+    pythonDefault = ix.languages.python.interpreter pkgs { };
+    python312 = ix.languages.python.interpreter pkgs { version = "3.12"; };
     pythonUnknown = builtins.tryEval (
-      builtins.deepSeq (ix.languages.python pkgs { version = "3.99"; }).pythonVersion true
+      builtins.deepSeq (ix.languages.python.interpreter pkgs { version = "3.99"; }).pythonVersion
+        true
     );
 
-    rustDefault = ix.languages.rust pkgs { };
-    rustStable = ix.languages.rust pkgs {
+    rustDefault = ix.languages.rust.toolchain pkgs { };
+    rustStable = ix.languages.rust.toolchain pkgs {
       channel = "stable";
       version = "latest";
     };
-    rustExtraComponents = ix.languages.rust pkgs {
+    rustExtraComponents = ix.languages.rust.toolchain pkgs {
       components = [
         "cargo"
         "rust-std"
@@ -1048,22 +1049,22 @@ let
       ];
     };
     rustBadChannel = builtins.tryEval (
-      builtins.deepSeq (ix.languages.rust pkgs { channel = "nighty"; }).name true
+      builtins.deepSeq (ix.languages.rust.toolchain pkgs { channel = "nighty"; }).name true
     );
     rustBadProfile = builtins.tryEval (
-      builtins.deepSeq (ix.languages.rust pkgs { profile = "extreme"; }).name true
+      builtins.deepSeq (ix.languages.rust.toolchain pkgs { profile = "extreme"; }).name true
     );
 
-    javaDefault = ix.languages.java pkgs { };
-    javaTemurin = ix.languages.java pkgs {
+    javaDefault = ix.languages.java.jdk pkgs { };
+    javaTemurin = ix.languages.java.jdk pkgs {
       version = "21";
       distribution = "temurin";
     };
     javaBadDistribution = builtins.tryEval (
-      builtins.deepSeq (ix.languages.java pkgs { distribution = "openjdkk"; }).name true
+      builtins.deepSeq (ix.languages.java.jdk pkgs { distribution = "openjdkk"; }).name true
     );
     javaBadVersion = builtins.tryEval (
-      builtins.deepSeq (ix.languages.java pkgs { version = "22"; }).name true
+      builtins.deepSeq (ix.languages.java.jdk pkgs { version = "22"; }).name true
     );
   };
 
