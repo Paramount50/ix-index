@@ -126,6 +126,11 @@ let
         }) fleetSubs
       )
     ) exampleFleets;
+
+  healthChecks = import ./health-checks.nix {
+    inherit lib pkgs;
+    inherit (ix) writeNushellApplication;
+  } { inherit exampleFleets; };
 in
 {
   packages =
@@ -184,6 +189,7 @@ in
     mc-source = mkApp mcSource "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
     nix-cargo-unit = mkApp repoPackages.nix-cargo-unit "Render Cargo unit graphs as Nix derivations";
     python-mcp-server = mkApp repoPackages.python-mcp-server "Run a Python MCP server";
+    health-checks = mkApp healthChecks "Boot every example fleet in parallel, run its health checks, and tear the VMs down";
   }
   // exampleApps;
 
