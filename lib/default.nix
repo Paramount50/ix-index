@@ -771,36 +771,72 @@ let
           pkg;
     in
     lib.mapAttrs attach raw;
+
+  /**
+    Discovered `examples/<name>/default.nix` fleets, each imported with
+    `{ index = { lib = ix; }; }` to match the contract examples already use.
+    Returns `{ <example-name> = fleet; ... }`.
+
+    Adding an example is `mkdir examples/<name> + edit default.nix`; this
+    aggregator picks it up on the next eval, no registry edits.
+  */
+  exampleFleets =
+    let
+      indexShim = {
+        lib = ixReturn;
+      };
+      names = lib.filter (name: builtins.pathExists (paths.examples + "/${name}/default.nix")) (
+        subdirs paths.examples
+      );
+    in
+    lib.genAttrs names (name: import (paths.examples + "/${name}") { index = indexShim; });
+
+  /**
+    `ix.healthChecks` declared by every example, keyed by example name and
+    fleet node. Plain-data attrset suitable for `nix eval --json` and `jq`
+    pipelines; the `apps.health-checks` Nu wrapper pretty-prints the same
+    data as a table.
+  */
+  examplesHealthChecks = lib.mapAttrs (
+    _name: fleet: lib.mapAttrs (_node: nodePlan: nodePlan.healthChecks) fleet.planValue.nodes
+  ) exampleFleets;
+
+  # Self-reference (let-bindings are mutually recursive): `exampleFleets`
+  # passes `ixReturn` back into examples as `index.lib`. Forced only when
+  # an example actually reads from it.
+  ixReturn = {
+    inherit
+      system
+      pkgs
+      overlay
+      overlays
+      evalImageConfig
+      mkImage
+      mkFleet
+      mkFleetFor
+      discoverImages
+      exampleFleets
+      examplesHealthChecks
+      artifacts
+      buildBunSite
+      buildGradleFatJar
+      buildNpmSite
+      buildUvApplication
+      bunLock
+      bunLockFor
+      cargoUnit
+      cargoUnitFor
+      minecraft
+      mkMinecraftLoader
+      mkMinecraftNbtFormat
+      mkMinecraftSyncManaged
+      packageSetFor
+      systemdHardening
+      uvLock
+      uvLockFor
+      writeNushellApplication
+      writePythonApplication
+      ;
+  };
 in
-{
-  inherit
-    system
-    pkgs
-    overlay
-    overlays
-    evalImageConfig
-    mkImage
-    mkFleet
-    mkFleetFor
-    discoverImages
-    artifacts
-    buildBunSite
-    buildGradleFatJar
-    buildNpmSite
-    buildUvApplication
-    bunLock
-    bunLockFor
-    cargoUnit
-    cargoUnitFor
-    minecraft
-    mkMinecraftLoader
-    mkMinecraftNbtFormat
-    mkMinecraftSyncManaged
-    packageSetFor
-    systemdHardening
-    uvLock
-    uvLockFor
-    writeNushellApplication
-    writePythonApplication
-    ;
-}
+ixReturn

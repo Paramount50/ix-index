@@ -36,6 +36,7 @@
         root = ./.;
         images = ./images;
         modules = ./modules;
+        examples = ./examples;
         tests = ./tests;
         bench.filesystem = ./bench/filesystem;
         minecraftMods = ./images/games/minecraft/mods;
