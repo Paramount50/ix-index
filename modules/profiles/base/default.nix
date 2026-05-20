@@ -336,6 +336,12 @@ in
         nh
         nix-output-monitor
         nix-tree
+        # Walks DWARF/BTF type info to pretty-print kernel and userspace
+        # structs out of core dumps, /proc/kcore, or VM RAM memfds. The
+        # canonical tool for "I have raw memory and I need to know what
+        # struct lives at this offset" — incident-debug ergonomics that
+        # don't fit inside gdb/lldb.
+        pahole
         pv
         ripgrep
         strace
