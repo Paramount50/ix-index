@@ -1,9 +1,10 @@
 //! Run a JSON-described DAG of commands with inline progress.
 //!
-//! The spec is a flat map of nodes, each with an argv `command` and an
-//! optional `depends_on` list. Nodes whose deps have completed run as soon
-//! as they are unblocked, so the layout of the graph determines how much
-//! parallelism is achievable; there is no notion of "levels".
+//! The spec is a flat map of nodes, each with an argv `command`, an
+//! optional `depends_on` list, and an optional `env` overlay. Nodes whose
+//! deps have completed run as soon as they are unblocked, so the layout of
+//! the graph determines how much parallelism is achievable; there is no
+//! notion of "levels".
 //!
 //! Output modes:
 //! - `auto` (default): TUI on a TTY, plain otherwise.
@@ -64,6 +65,10 @@ struct NodeSpec {
     command: Vec<String>,
     #[serde(default)]
     depends_on: Vec<String>,
+    /// Extra env vars layered on top of the runner's own environment.
+    /// Parent env is inherited; entries here shadow it.
+    #[serde(default)]
+    env: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug)]
@@ -332,6 +337,7 @@ fn make_spinner(multi: &MultiProgress, name: &str) -> ProgressBar {
 async fn run_command(node: &NodeSpec) -> (Outcome, String, String) {
     let mut cmd = Command::new(&node.command[0]);
     cmd.args(&node.command[1..]);
+    cmd.envs(&node.env);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
     match cmd.output().await {
@@ -501,6 +507,7 @@ mod tests {
         NodeSpec {
             command: vec!["true".into()],
             depends_on: deps.iter().map(|s| (*s).to_string()).collect(),
+            env: BTreeMap::new(),
         }
     }
 
@@ -521,12 +528,14 @@ mod tests {
 
     #[test]
     fn spec_round_trips_through_json() {
-        let text = r#"{"nodes":{"a":{"command":["true"]},"b":{"command":["echo","x"],"depends_on":["a"]}}}"#;
+        let text = r#"{"nodes":{"a":{"command":["true"]},"b":{"command":["echo","x"],"depends_on":["a"],"env":{"K":"v"}}}}"#;
         let spec: Spec = serde_json::from_str(text).unwrap();
         assert_eq!(spec.nodes.len(), 2);
         assert_eq!(spec.nodes["a"].command, vec!["true"]);
         assert!(spec.nodes["a"].depends_on.is_empty());
+        assert!(spec.nodes["a"].env.is_empty());
         assert_eq!(spec.nodes["b"].depends_on, vec!["a"]);
+        assert_eq!(spec.nodes["b"].env.get("K").map(String::as_str), Some("v"));
     }
 
     #[test]

@@ -80,6 +80,62 @@ fn worst_failure_drives_exit_code() {
 }
 
 #[test]
+fn env_overlay_is_visible_to_child() {
+    let spec = r#"{"nodes":{
+        "a":{"command":["sh","-c","test \"$DAG_RUNNER_TEST\" = wired"],"env":{"DAG_RUNNER_TEST":"wired"}}
+    }}"#;
+    let (output, _dir) = run_binary(spec);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn env_overlay_shadows_parent() {
+    let spec = r#"{"nodes":{
+        "a":{"command":["sh","-c","test \"$DAG_RUNNER_TEST\" = child"],"env":{"DAG_RUNNER_TEST":"child"}}
+    }}"#;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spec.json");
+    std::fs::write(&path, spec).unwrap();
+    let bin = env!("CARGO_BIN_EXE_dag-runner");
+    let output = Command::new(bin)
+        .arg("--output")
+        .arg("json")
+        .arg(&path)
+        .env("DAG_RUNNER_TEST", "parent")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn parent_env_inherited_when_no_overlay() {
+    let spec = r#"{"nodes":{
+        "a":{"command":["sh","-c","test \"$DAG_RUNNER_TEST\" = parent"]}
+    }}"#;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spec.json");
+    std::fs::write(&path, spec).unwrap();
+    let bin = env!("CARGO_BIN_EXE_dag-runner");
+    let output = Command::new(bin)
+        .arg("--output")
+        .arg("json")
+        .arg(&path)
+        .env("DAG_RUNNER_TEST", "parent")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
+fn env_value_with_equals_is_preserved() {
+    let spec = r#"{"nodes":{
+        "a":{"command":["sh","-c","test \"$DAG_RUNNER_TEST\" = 'a=b=c'"],"env":{"DAG_RUNNER_TEST":"a=b=c"}}
+    }}"#;
+    let (output, _dir) = run_binary(spec);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
 fn cycle_is_rejected_before_running() {
     let spec = r#"{"nodes":{
         "a":{"command":["true"],"depends_on":["b"]},
