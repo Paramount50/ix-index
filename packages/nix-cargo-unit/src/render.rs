@@ -238,6 +238,7 @@ struct UnitsNixTemplate {
     binary_entries: String,
     library_entries: String,
     test_entries: String,
+    test_target_entries: String,
     target_set_entries: String,
     default_entry: String,
 }
@@ -256,6 +257,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         binary_entries: render_root_entries(graph, &prepared, Unit::is_bin),
         library_entries: render_root_entries(graph, &prepared, Unit::is_library),
         test_entries: render_test_entries(graph, &prepared),
+        test_target_entries: render_test_target_entries(graph, &prepared),
         target_set_entries: render_target_sets(graph, &prepared),
         default_entry: render_default_entry(graph, &prepared),
     };
@@ -1813,6 +1815,7 @@ fn render_target_sets(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
     } else {
         graph.root_sets.clone()
     };
+    let test_keys = compute_test_keys(graph, prepared);
 
     root_sets
         .iter()
@@ -1822,14 +1825,58 @@ fn render_target_sets(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
                 render_unit_refs(roots, prepared),
                 render_root_entries_for(roots, &graph.units, prepared, Unit::is_bin),
                 render_root_entries_for(roots, &graph.units, prepared, Unit::is_library),
-                render_test_entries_for(roots, &graph.units, prepared),
+                render_test_entries_for(roots, &graph.units, prepared, &test_keys),
             )
         })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-fn render_test_entries_for(roots: &[usize], units: &[Unit], prepared: &PreparedGraph) -> String {
+/// Globally stable key per root test unit. Picks `target.name` when no other
+/// root test unit shares it, falling back to the unit-specific name so the
+/// shared test manifest can reference every binary under the same key the
+/// `tests = { ... }` block uses, regardless of which target set it appears in.
+fn compute_test_keys(graph: &UnitGraph, prepared: &PreparedGraph) -> BTreeMap<usize, String> {
+    let mut all_roots: BTreeSet<usize> = graph.roots.iter().copied().collect();
+    for set in &graph.root_sets {
+        all_roots.extend(set.iter().copied());
+    }
+    let test_roots: Vec<usize> = all_roots
+        .into_iter()
+        .filter(|index| graph.units[*index].is_test())
+        .collect();
+
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for index in &test_roots {
+        *counts
+            .entry(graph.units[*index].target.name.as_str())
+            .or_insert(0) += 1;
+    }
+
+    let mut keys = BTreeMap::new();
+    for index in test_roots {
+        let unit = &graph.units[index];
+        let key = if counts[unit.target.name.as_str()] == 1 {
+            unit.target.name.clone()
+        } else {
+            prepared.names[index].clone()
+        };
+        keys.insert(index, key);
+    }
+    keys
+}
+
+fn test_binary_expr(unit: &Unit, prepared: &PreparedGraph, index: usize) -> String {
+    let unit_ref = format!("${{units.{}}}", nix_attr(&prepared.names[index]));
+    format!("{unit_ref}/bin/{}", unit.target.name)
+}
+
+fn render_test_entries_for(
+    roots: &[usize],
+    units: &[Unit],
+    prepared: &PreparedGraph,
+    keys: &BTreeMap<usize, String>,
+) -> String {
     let mut entries = String::new();
     let mut seen = BTreeSet::new();
     for index in roots {
@@ -1837,14 +1884,14 @@ fn render_test_entries_for(roots: &[usize], units: &[Unit], prepared: &PreparedG
         if !unit.is_test() {
             continue;
         }
-
-        let key = if seen.insert(unit.target.name.clone()) {
-            unit.target.name.clone()
-        } else {
-            prepared.names[*index].clone()
-        };
-        let unit_ref = format!("${{units.{}}}", nix_attr(&prepared.names[*index]));
-        let binary = format!("{unit_ref}/bin/{}", unit.target.name);
+        let key = keys
+            .get(index)
+            .expect("compute_test_keys covers every root test unit")
+            .clone();
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        let binary = test_binary_expr(unit, prepared, *index);
         let _ = writeln!(
             entries,
             "    {} = mkTestEntry {{ name = {}; binary = \"{binary}\"; }};",
@@ -1857,7 +1904,30 @@ fn render_test_entries_for(roots: &[usize], units: &[Unit], prepared: &PreparedG
 }
 
 fn render_test_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
-    render_test_entries_for(&graph.roots, &graph.units, prepared)
+    let keys = compute_test_keys(graph, prepared);
+    render_test_entries_for(&graph.roots, &graph.units, prepared, &keys)
+}
+
+/// One `{ name; binary; }` per unique test target across every root set.
+/// The template feeds this into a single manifest derivation so test
+/// enumeration is one IFD instead of one per binary.
+fn render_test_target_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
+    let keys = compute_test_keys(graph, prepared);
+    let mut by_key: BTreeMap<String, String> = BTreeMap::new();
+    for (&index, key) in &keys {
+        by_key
+            .entry(key.clone())
+            .or_insert_with(|| test_binary_expr(&graph.units[index], prepared, index));
+    }
+    let mut entries = String::new();
+    for (key, binary) in by_key {
+        let _ = writeln!(
+            entries,
+            "    {{ name = {}; binary = \"{binary}\"; }}",
+            nix_attr(&key),
+        );
+    }
+    entries
 }
 
 fn nix_attr(value: &str) -> String {
@@ -2033,6 +2103,10 @@ mod tests {
         assert!(rendered.contains("mkTestEntry ="));
         assert!(rendered.contains("RUST_TEST_THREADS"));
         assert!(rendered.contains("mkTestCases ="));
+        assert!(rendered.contains("testTargets = ["));
+        assert!(rendered.contains("{ name = \"hello\"; binary ="));
+        assert!(rendered.contains("testManifestDrv ="));
+        assert!(rendered.contains("cargo-unit-test-manifest"));
     }
 
     #[test]

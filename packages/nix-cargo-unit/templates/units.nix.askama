@@ -103,6 +103,11 @@ let
   units = rec {
 {{ unit_entries }}  };
 
+  # Every test target in the graph, keyed the same way `tests.<name>` is.
+  # The shared manifest derivation depends on every binary listed here.
+  testTargets = [
+{{ test_target_entries }}  ];
+
   # `<bin> --list --format terse` writes one `name: test` or `name: bench`
   # line per item plus a trailing summary line. Keep the `: test` lines and
   # strip the suffix.
@@ -118,19 +123,30 @@ let
   # Map both to ASCII-safe runs without losing the path shape.
   sanitizeTestName = pkgs.lib.replaceStrings [ "::" ":" " " ] [ "--" "_" "_" ];
 
-  mkTestListDrv =
-    { name, binary, ignored }:
-    pkgs.runCommand
-      "cargo-unit-test-list-${name}${pkgs.lib.optionalString ignored "-ignored"}"
-      { }
+  # Single IFD that depends on every test binary. Writes one
+  # `<name>.list` (non-ignored tests) and one `<name>.ignored.list`
+  # per target. Mainline Nix evaluates IFDs serially, so collapsing
+  # per-binary list drvs into one cuts eval latency proportionally
+  # to the number of test targets. The tradeoff is that touching any
+  # `cases` forces every test binary to build; consumers that only
+  # want `tests.<name>.all` skip this derivation entirely.
+  testManifestDrv =
+    if testTargets == [] then null
+    else pkgs.runCommand "cargo-unit-test-manifest" { } (
       ''
-        ${binary} --list --format terse ${pkgs.lib.optionalString ignored "--ignored"} > "$out"
-      '';
+        mkdir -p "$out"
+      ''
+      + pkgs.lib.concatMapStrings (target: ''
+        ${target.binary} --list --format terse > "$out"/${pkgs.lib.escapeShellArg target.name}.list
+        ${target.binary} --list --format terse --ignored > "$out"/${pkgs.lib.escapeShellArg target.name}.ignored.list
+      '') testTargets
+    );
 
   mkTestCases =
     { name, binary, ignored }:
     let
-      listDrv = mkTestListDrv { inherit name binary ignored; };
+      suffix = if ignored then ".ignored.list" else ".list";
+      listPath = "${testManifestDrv}/${name}${suffix}";
       runFlag = pkgs.lib.optionalString ignored "--include-ignored ";
     in
     pkgs.lib.listToAttrs (
@@ -144,7 +160,7 @@ let
               ${binary} --exact --nocapture ${runFlag}${pkgs.lib.escapeShellArg testName}
               mkdir -p "$out"
             '';
-      }) (parseTestList listDrv)
+      }) (parseTestList listPath)
     );
 
   mkTestEntry =
@@ -156,8 +172,9 @@ let
         ${binary}
         mkdir -p "$out"
       '';
-      # One derivation per #[test]. Forces an IFD per accessed entry, so it
-      # only fires when a consumer reaches into `cases`.
+      # One derivation per #[test], populated from the shared manifest.
+      # First access to any binary's `cases` triggers the single manifest
+      # IFD (which builds every test binary in the workspace).
       cases =
         mkTestCases { inherit name binary; ignored = false; }
         // pkgs.lib.optionalAttrs includeIgnored (
