@@ -136,6 +136,41 @@ fn env_value_with_equals_is_preserved() {
 }
 
 #[test]
+fn node_with_timeout_kills_long_sleeper_and_exits_124() {
+    let spec = r#"{"nodes":{
+        "a":{"command":["sh","-c","sleep 30"],"timeout_secs":1}
+    }}"#;
+    // Run in plain mode so the per-node stderr dump appears on the binary's
+    // stderr; the JSON event stream summarises but doesn't include captured
+    // child output.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spec.json");
+    std::fs::write(&path, spec).unwrap();
+    let bin = env!("CARGO_BIN_EXE_dag-runner");
+    let output = Command::new(bin)
+        .arg("--output")
+        .arg("plain")
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(124));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("timed out after 1s"),
+        "expected stderr to mention timeout, got: {stderr}"
+    );
+}
+
+#[test]
+fn node_completes_before_timeout_succeeds() {
+    let spec = r#"{"nodes":{
+        "a":{"command":["true"],"timeout_secs":30}
+    }}"#;
+    let (output, _dir) = run_binary(spec);
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+}
+
+#[test]
 fn cycle_is_rejected_before_running() {
     let spec = r#"{"nodes":{
         "a":{"command":["true"],"depends_on":["b"]},

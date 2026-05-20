@@ -21,6 +21,7 @@ The spec is a single JSON object with a `nodes` map. Each entry is a node keyed 
 | `command` | `string[]` | yes | argv. `command[0]` is the program, the rest are arguments. Must be non-empty. |
 | `depends_on` | `string[]` | no, default `[]` | Names of other nodes that must succeed first. |
 | `env` | `{string: string}` | no, default `{}` | Extra env vars layered on top of the runner's own env. Entries here shadow inherited vars; missing entries are inherited from the parent. |
+| `timeout_secs` | `u64` | no, default `null` | Wall-clock seconds before the child is SIGTERMed (then SIGKILLed after ~500ms grace). On expiry the outcome is `failed` with exit code `124` (matches `coreutils timeout`) and the captured stderr ends with `dag-runner: node timed out after Ns`. |
 
 Validation runs before any node is spawned and rejects:
 
@@ -93,5 +94,6 @@ Concretely:
 - Multiple failures: the largest non-zero `exit_code` across failed nodes wins.
 - At least one node was skipped (because a dep failed) and no failure had a larger code: `1`.
 - A node could not be spawned: counted as `failed` with `exit_code = 127`.
+- A node hit its `timeout_secs`: counted as `failed` with `exit_code = 124`.
 
 CI pipelines should treat any non-zero exit as a stop signal and read stderr for the per-node breakdown and captured child output.

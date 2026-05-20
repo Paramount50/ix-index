@@ -1,9 +1,10 @@
 //! Run a JSON-described DAG of commands with inline progress.
 //!
 //! The spec is a flat map of nodes, each with an argv `command`, an
-//! optional `depends_on` list, and an optional `env` overlay. Nodes whose
-//! deps have completed run as soon as they are unblocked, so the layout of
-//! the graph determines how much parallelism is achievable; there is no
+//! optional `depends_on` list, an optional `env` overlay, and an
+//! optional `timeout_secs` wall-clock limit. Nodes whose deps have
+//! completed run as soon as they are unblocked, so the layout of the
+//! graph determines how much parallelism is achievable; there is no
 //! notion of "levels".
 //!
 //! Output modes:
@@ -70,6 +71,11 @@ struct NodeSpec {
     /// Parent env is inherited; entries here shadow it.
     #[serde(default)]
     env: BTreeMap<String, String>,
+    /// Wall-clock seconds before the child is `SIGTERM`ed (then `SIGKILL`ed
+    /// after a brief grace period). `None` means run to completion.
+    /// Mirrors the `coreutils timeout` exit code on expiry: 124.
+    #[serde(default)]
+    timeout_secs: Option<u64>,
 }
 
 #[derive(Clone, Debug)]
@@ -355,22 +361,85 @@ async fn run_command(node: &NodeSpec, pb: Option<&ProgressBar>) -> (Outcome, Str
     let stdout_task = tokio::spawn(tee_lines(stdout_pipe, pb.cloned()));
     let stderr_task = tokio::spawn(tee_lines(stderr_pipe, pb.cloned()));
 
-    let outcome = match child.wait().await {
-        Ok(status) => {
-            if status.success() {
-                Outcome::Succeeded
-            } else {
-                Outcome::Failed(status.code().unwrap_or(1))
+    let completion = tokio::select! {
+        biased;
+        () = maybe_timeout(node.timeout_secs) => Completion::TimedOut,
+        res = child.wait() => match res {
+            Ok(status) => {
+                if status.success() {
+                    Completion::Succeeded
+                } else {
+                    Completion::Failed(status.code().unwrap_or(1))
+                }
             }
+            Err(e) => Completion::WaitFailed(e.to_string()),
+        },
+    };
+
+    let mut extra_stderr = String::new();
+    let outcome = match completion {
+        Completion::Succeeded => Outcome::Succeeded,
+        Completion::Failed(code) => Outcome::Failed(code),
+        Completion::WaitFailed(msg) => {
+            use std::fmt::Write;
+            let _ = writeln!(extra_stderr, "wait failed: {msg}");
+            Outcome::Failed(1)
         }
-        Err(e) => {
-            return (Outcome::Failed(1), String::new(), format!("wait failed: {e}\n"));
+        Completion::TimedOut => {
+            use std::fmt::Write;
+            // Safe to unwrap: only the timeout arm produces TimedOut, and
+            // maybe_timeout only resolves when timeout_secs is Some.
+            let secs = node.timeout_secs.expect("timeout arm requires timeout_secs");
+            terminate_child(&mut child).await;
+            let _ = writeln!(extra_stderr, "dag-runner: node timed out after {secs}s");
+            Outcome::Failed(124)
         }
     };
 
     let stdout = stdout_task.await.unwrap_or_default();
-    let stderr = stderr_task.await.unwrap_or_default();
+    let mut stderr = stderr_task.await.unwrap_or_default();
+    stderr.push_str(&extra_stderr);
     (outcome, stdout, stderr)
+}
+
+enum Completion {
+    Succeeded,
+    Failed(i32),
+    WaitFailed(String),
+    TimedOut,
+}
+
+/// Resolves after `secs` seconds when set, otherwise blocks forever. Used as
+/// the timeout arm of a `tokio::select!`: pairing it with `child.wait()`
+/// lets the wait win when no timeout was requested.
+async fn maybe_timeout(secs: Option<u64>) {
+    match secs {
+        Some(s) => tokio::time::sleep(Duration::from_secs(s)).await,
+        None => std::future::pending::<()>().await,
+    }
+}
+
+/// `SIGTERM` the child, wait a brief grace period for it to exit cleanly,
+/// then `SIGKILL` if it's still alive. `tokio::process::Child::start_kill`
+/// is `SIGKILL` only; sending `SIGTERM` first gives well-behaved children
+/// a chance to flush state.
+async fn terminate_child(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        // Safety: `pid` was just returned by the OS for a child we own and
+        // have not yet reaped, and `SIGTERM` is a valid signal number.
+        unsafe {
+            libc::kill(pid.cast_signed(), libc::SIGTERM);
+        }
+    }
+    let grace = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(grace);
+    tokio::select! {
+        () = &mut grace => {
+            let _ = child.start_kill();
+        }
+        _ = child.wait() => return,
+    }
+    let _ = child.wait().await;
 }
 
 /// Read `stream` line-by-line, returning the full captured text and, when a
@@ -565,6 +634,7 @@ mod tests {
             command: vec!["true".into()],
             depends_on: deps.iter().map(|s| (*s).to_string()).collect(),
             env: BTreeMap::new(),
+            timeout_secs: None,
         }
     }
 
@@ -585,14 +655,16 @@ mod tests {
 
     #[test]
     fn spec_round_trips_through_json() {
-        let text = r#"{"nodes":{"a":{"command":["true"]},"b":{"command":["echo","x"],"depends_on":["a"],"env":{"K":"v"}}}}"#;
+        let text = r#"{"nodes":{"a":{"command":["true"]},"b":{"command":["echo","x"],"depends_on":["a"],"env":{"K":"v"},"timeout_secs":30}}}"#;
         let spec: Spec = serde_json::from_str(text).unwrap();
         assert_eq!(spec.nodes.len(), 2);
         assert_eq!(spec.nodes["a"].command, vec!["true"]);
         assert!(spec.nodes["a"].depends_on.is_empty());
         assert!(spec.nodes["a"].env.is_empty());
+        assert!(spec.nodes["a"].timeout_secs.is_none());
         assert_eq!(spec.nodes["b"].depends_on, vec!["a"]);
         assert_eq!(spec.nodes["b"].env.get("K").map(String::as_str), Some("v"));
+        assert_eq!(spec.nodes["b"].timeout_secs, Some(30));
     }
 
     #[test]
