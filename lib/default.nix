@@ -247,9 +247,11 @@ let
     java = import ./languages/java { inherit errors lib; };
     javascript = import ./languages/javascript.nix { inherit errors; };
     kotlin = import ./languages/kotlin.nix { inherit errors; };
+    ocaml = import ./languages/ocaml.nix { inherit errors; };
     python = import ./languages/python.nix { inherit errors; };
     rust = import ./languages/rust.nix { inherit errors rust-overlay; };
     scala = import ./languages/scala.nix { inherit errors; };
+    zig = import ./languages/zig.nix { inherit errors; };
   };
   rustNightlyToolchainFor = pkgs: languages.rust.toolchain pkgs { };
   rustNightlyClippyToolchainFor =
