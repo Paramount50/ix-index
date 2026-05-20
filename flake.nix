@@ -11,10 +11,13 @@
     determinate.url = "https://flakehub.com/f/DeterminateSystems/determinate/3";
 
     # Home Manager wired in via its NixOS module for per-tool XDG-shaped
-    # config (Nushell, atuin, zoxide, starship, ...). Follows nixpkgs so
-    # the two stay on the same release.
+    # config (Nushell, atuin, zoxide, starship, ...). Tracks master so it
+    # stays on the same release as nixpkgs-unstable; the per-release
+    # branches lag (no release-26.05 exists at the time of writing) and
+    # the mismatch fires a noisy `enableNixpkgsReleaseCheck` warning on
+    # every eval.
     home-manager = {
-      url = "github:nix-community/home-manager/release-25.05";
+      url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
