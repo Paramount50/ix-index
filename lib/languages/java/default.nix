@@ -56,6 +56,27 @@ let
 
   defaultDistribution = "openjdk";
   defaultVersion = "21";
+
+  /**
+    Resolve the JDK package this namespace defaults to when a sibling
+    helper (`maven`, `gradle`) does not get an explicit `jdk` argument.
+    Pulls from the same table as the `jdk` helper so a caller that
+    overrides nothing gets one consistent JDK across the toolchain.
+  */
+  defaultJdkFor = pkgs: (jdksFor pkgs).${defaultDistribution}.${defaultVersion};
+
+  /**
+    Per-major-version Gradle attribute mapping. nixpkgs also exposes a
+    floating `pkgs.gradle` alias, but the explicit attributes make the
+    resolver diff reviewable when a Gradle major moves.
+  */
+  gradlesFor = pkgs: {
+    "7" = pkgs.gradle_7;
+    "8" = pkgs.gradle_8;
+    "9" = pkgs.gradle_9;
+  };
+
+  defaultGradleVersion = "9";
 in
 {
   /**
@@ -118,6 +139,82 @@ in
       attrset = jdkTable;
       key = version;
     };
+
+  /**
+    Return a Maven package overridden to use the chosen JDK.
+
+    `pkgs.maven` defaults to whatever JDK the nixpkgs Maven derivation pins,
+    which floats with channel updates. Routing it through the
+    `ix.languages.java.jdk` selection keeps Maven, the toolchain it launches,
+    and the runtime JRE on one version, so a `mvn package` cannot silently
+    target a different bytecode level than the deploy image.
+
+    Arguments:
+    - `pkgs`: nixpkgs instance the Maven and JDK packages come from.
+    - `jdk`: optional resolved JDK package. Defaults to the same JDK
+      `ix.languages.java.jdk pkgs { }` returns (OpenJDK 21 headless).
+
+    Example:
+    ```nix
+    { pkgs, ix, ... }:
+    let
+      jdk = ix.languages.java.jdk pkgs { version = "21"; distribution = "temurin"; };
+      maven = ix.languages.java.maven pkgs { inherit jdk; };
+    in {
+      environment = {
+        systemPackages = [ jdk maven ];
+        variables.JAVA_HOME = jdk.home;
+      };
+    }
+    ```
+  */
+  maven =
+    pkgs:
+    {
+      jdk ? defaultJdkFor pkgs,
+    }:
+    pkgs.maven.override { jdk_headless = jdk; };
+
+  /**
+    Return a Gradle package on the requested major version, overridden to
+    use the chosen JDK.
+
+    Gradle's compatibility matrix is the load-bearing thing here: Gradle 7
+    refuses JDK 21+, Gradle 8 added 21 mid-line, Gradle 9 dropped support
+    for JDK 8 and 11 daemons. Picking the major explicitly and pinning the
+    JDK underneath keeps that matrix legible at the call site instead of
+    drifting through `pkgs.gradle` channel bumps.
+
+    Arguments:
+    - `pkgs`: nixpkgs instance the Gradle and JDK packages come from.
+    - `jdk`: optional resolved JDK package. Defaults to the same JDK
+      `ix.languages.java.jdk pkgs { }` returns (OpenJDK 21 headless).
+    - `version`: Gradle major as a string (`"7" | "8" | "9"`). Defaults to
+      `"9"`, which matches `lib/build-gradle-fat-jar.nix`.
+  */
+  gradle =
+    pkgs:
+    {
+      jdk ? defaultJdkFor pkgs,
+      version ? defaultGradleVersion,
+    }:
+    let
+      gradlePackage = errors.requireAttr {
+        context = "ix.languages.java.gradle: unknown Gradle major";
+        attrset = gradlesFor pkgs;
+        key = version;
+      };
+    in
+    gradlePackage.override { java = jdk; };
+
+  /**
+    Return the Eclipse JDT language server package.
+
+    Intended for dev VMs that host an editor (remote-desktop image, an
+    in-VM neovim/vscode workflow). Runtime-only server images that just
+    execute compiled `.jar` artifacts do not need it.
+  */
+  languageServer = pkgs: { }: pkgs.jdt-language-server;
 
   /**
     YourKit profiler integration for JVM services.
