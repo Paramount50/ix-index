@@ -66,21 +66,18 @@ in
     home-manager.users.root = {
       home.stateVersion = "25.05";
 
-      # Home Manager's `manual.manpages.enable` defaults to true and ships
-      # `home-configuration.nix(5)`, an options reference built by piping the
-      # merged option tree through `nixosOptionsDoc`. Two reasons we kill it:
-      #   - Operators inside an ix VM don't edit home-manager config in
-      #     place: HM is configured here via the NixOS module, then changes
-      #     land through `ix-fleet switch`. The man page describes options
-      #     the operator can't meaningfully change from inside the VM.
-      #   - `nixosOptionsDoc` constructs the `options.json` derivation with
-      #     `builtins.unsafeDiscardStringContext` on the merged options
-      #     tree, which Nix surfaces as a "references store path without a
-      #     proper context" warning at eval time. With seven nodes across
-      #     the example fleets, `nix run .#health-checks` printed that
-      #     warning seven times before the first useful line of output.
-      # Per-package man pages (`man tar`, `man systemd`) keep working
-      # because NixOS `documentation.man.enable` is untouched.
+      # Workaround for upstream nixpkgs#485682: `make-options-doc` strips
+      # string context from `options.json` via `unsafeDiscardStringContext`,
+      # which Nix flags as "references store path without a proper context"
+      # every time the derivation is constructed. Home Manager's
+      # `manual.manpages.enable` (default true) is the only thing in our
+      # base closure that pulls `nixosOptionsDoc`, so toggling it off
+      # silences seven warnings per `nix run .#health-checks` (one per
+      # fleet node) until the upstream fix lands. Per-package `man tar`
+      # etc. are unaffected (NixOS `documentation.man.enable` is left
+      # alone). Re-enable per-image when an operator actually wants
+      # `man home-configuration.nix` from inside the VM, e.g. a dev box
+      # that's editing the source checkout in place.
       manual.manpages.enable = false;
       programs = {
         nushell = {
