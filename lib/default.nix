@@ -237,6 +237,11 @@ let
     validTypeCheckingModes = basedpyrightTypeCheckingModes;
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
+  languages = {
+    java = import ./languages/java.nix { inherit errors; };
+    python = import ./languages/python.nix { inherit errors; };
+    rust = import ./languages/rust.nix { inherit errors rust-overlay; };
+  };
   rustNightlyChannel = "nightly-2026-05-17";
   pkgsWithRustOverlayFor =
     pkgs: if builtins.hasAttr "rust-bin" pkgs then pkgs else pkgs.extend rust-overlay.overlays.default;
@@ -654,6 +659,7 @@ let
       cargoUnit
       cargoUnitFor
       errors
+      languages
       minecraft
       mkMinecraftLoader
       mkMinecraftNbtFormat
@@ -908,6 +914,7 @@ let
       cargoUnit
       cargoUnitFor
       errors
+      languages
       minecraft
       mkMinecraftLoader
       mkMinecraftNbtFormat
