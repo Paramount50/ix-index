@@ -231,58 +231,6 @@ in
             maintenance.auto = true;
           };
         };
-        # Neovim with a curated plugin set. defaultEditor wires EDITOR
-        # via HM's home.sessionVariables; vi/vim aliases mean muscle
-        # memory from any other Unix box lands on nvim. init.lua ships
-        # the base options (numbers, leader, undo, soft wrap, ...) and
-        # each plugin's setup() lives in its own plugins/<name>.lua so
-        # the file is editable as ordinary Lua. treesitter ships every
-        # grammar (cross-tenant dedup makes this free, see AGENTS.md).
-        neovim = {
-          enable = true;
-          defaultEditor = true;
-          viAlias = true;
-          vimAlias = true;
-          extraLuaConfig = builtins.readFile ./nvim/init.lua;
-          plugins = with pkgs.vimPlugins; [
-            {
-              plugin = nvim-treesitter.withAllGrammars;
-              type = "lua";
-              config = builtins.readFile ./nvim/plugins/treesitter.lua;
-            }
-            plenary-nvim
-            {
-              plugin = telescope-nvim;
-              type = "lua";
-              config = builtins.readFile ./nvim/plugins/telescope.lua;
-            }
-            {
-              plugin = gitsigns-nvim;
-              type = "lua";
-              config = builtins.readFile ./nvim/plugins/gitsigns.lua;
-            }
-            {
-              plugin = which-key-nvim;
-              type = "lua";
-              config = builtins.readFile ./nvim/plugins/which-key.lua;
-            }
-            {
-              plugin = oil-nvim;
-              type = "lua";
-              config = builtins.readFile ./nvim/plugins/oil.lua;
-            }
-          ];
-        };
-      };
-
-      # ix-islands colorscheme shipped inline as Neovim color files.
-      # Faithful port of JetBrains Islands Dark/Light (see
-      # andrewgazelka/vscode-islands for the VS Code variant); init.lua
-      # picks the dark variant by default. Both are available via
-      # `:colorscheme ix-islands-{dark,light}` at runtime.
-      home.file = {
-        ".config/nvim/colors/ix-islands-dark.lua".source = ./nvim/colors/ix-islands-dark.lua;
-        ".config/nvim/colors/ix-islands-light.lua".source = ./nvim/colors/ix-islands-light.lua;
       };
     };
 
@@ -296,6 +244,60 @@ in
     programs = {
       zsh.enable = true;
       fish.enable = true;
+
+      # Neovim is wired through the NixOS module because the wrapper
+      # bakes the curated config into the binary itself, so XDG never
+      # has to find anything in `~/.config/nvim/` for the operator to
+      # land in the configured experience. (HM's neovim module on
+      # release-25.05 and release-25.11 extends nixpkgs' plugin
+      # submodule with a `runtime` attr that the wrapped binary's
+      # submodule rejects; the `suppressIncompatibleConfig` cleanup
+      # only landed on master, so until 26.05 ships it the HM path is
+      # unusable for any plugin set anyway.) Operators can still drop
+      # `~/.config/nvim/` overrides; the wrapper's config is the
+      # system-wide XDG default they fall back to.
+      #
+      # defaultEditor wires EDITOR via environment.sessionVariables;
+      # vi/vim aliases mean muscle memory from any other Unix box
+      # lands on nvim. init.lua ships the base options (numbers,
+      # leader, undo, soft wrap, ...) and each plugin's setup() lives
+      # in its own plugins/<name>.lua so the file is editable as
+      # ordinary Lua. treesitter ships every grammar (cross-tenant
+      # dedup makes this free, see AGENTS.md).
+      neovim = {
+        enable = true;
+        defaultEditor = true;
+        viAlias = true;
+        vimAlias = true;
+        configure = {
+          customLuaRC = lib.concatMapStringsSep "\n" builtins.readFile [
+            ./nvim/init.lua
+            ./nvim/plugins/treesitter.lua
+            ./nvim/plugins/telescope.lua
+            ./nvim/plugins/gitsigns.lua
+            ./nvim/plugins/which-key.lua
+            ./nvim/plugins/oil.lua
+          ];
+          packages.ix.start = with pkgs.vimPlugins; [
+            nvim-treesitter.withAllGrammars
+            plenary-nvim
+            telescope-nvim
+            gitsigns-nvim
+            which-key-nvim
+            oil-nvim
+          ];
+        };
+        # ix-islands colorscheme shipped as Neovim color files.
+        # Faithful port of JetBrains Islands Dark/Light (see
+        # andrewgazelka/vscode-islands for the VS Code variant);
+        # init.lua picks the dark variant by default. Both are
+        # available via `:colorscheme ix-islands-{dark,light}` at
+        # runtime.
+        runtime = {
+          "colors/ix-islands-dark.lua".source = ./nvim/colors/ix-islands-dark.lua;
+          "colors/ix-islands-light.lua".source = ./nvim/colors/ix-islands-light.lua;
+        };
+      };
     };
 
     environment.systemPackages = builtins.attrValues {
