@@ -238,10 +238,15 @@ let
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
   languages = {
+    elixir = import ./languages/elixir.nix { inherit errors; };
+    erlang = import ./languages/erlang.nix { inherit errors; };
+    go = import ./languages/go.nix { inherit errors; };
     java = import ./languages/java { inherit errors lib; };
+    javascript = import ./languages/javascript.nix { inherit errors; };
     kotlin = import ./languages/kotlin.nix { inherit errors; };
     python = import ./languages/python.nix { inherit errors; };
     rust = import ./languages/rust.nix { inherit errors rust-overlay; };
+    scala = import ./languages/scala.nix { inherit errors; };
   };
   rustNightlyToolchainFor = pkgs: languages.rust.toolchain pkgs { };
   rustNightlyClippyToolchainFor =

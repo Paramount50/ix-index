@@ -1,0 +1,125 @@
+{ errors }:
+let
+  validVersions = [
+    "2"
+    "3"
+  ];
+
+  /**
+    Scala major → nixpkgs attribute mapping. `pkgs.scala` is the Scala 2
+    line (currently 2.13), `pkgs.scala_3` is the Dotty-based Scala 3.
+    The split matters: 2.x and 3.x are different compilers with
+    overlapping but non-identical syntax, and a build that pins one will
+    not transparently switch to the other.
+  */
+  compilersFor = pkgs: {
+    "2" = pkgs.scala;
+    "3" = pkgs.scala_3;
+  };
+
+  defaultVersion = "3";
+
+  /**
+    Default JDK paired with Scala 2/3 when the caller does not pass
+    `jdk`. Matches `ix.languages.java.jdk pkgs { }` (OpenJDK 21
+    headless) so a service that resolves both helpers with defaults
+    pulls one JDK into the closure rather than two.
+
+    Hardcoded rather than imported from the java namespace to keep this
+    file independent; if the java default moves, this constant moves
+    with it (see [`./java/default.nix`](./java/default.nix)).
+  */
+  defaultJdkFor = pkgs: pkgs.jdk21_headless;
+in
+{
+  /**
+    Return the Scala compiler for the requested major, overridden to use
+    the chosen JDK.
+
+    Scala compiles to JVM bytecode and runs on a host JVM, so the
+    compiler and the runtime JDK need to agree. Routing the override
+    through this helper keeps `scalac`'s `--target` and the runtime JVM
+    on the same major instead of letting `pkgs.scala.jre` float.
+
+    Arguments:
+    - `pkgs`: nixpkgs instance the compiler and JDK come from.
+    - `version`: Scala major, `"2" | "3"`. Defaults to `"3"`. Pick `"2"`
+      only when an upstream library has not migrated; the long-term
+      destination is `"3"`.
+    - `jdk`: optional resolved JDK. Defaults to OpenJDK 21 headless.
+
+    Example:
+    ```nix
+    { pkgs, ix, ... }:
+    let
+      jdk = ix.languages.java.jdk pkgs { version = "21"; };
+      scala = ix.languages.scala.compiler pkgs { inherit jdk; };
+    in {
+      environment = {
+        systemPackages = [ jdk scala ];
+        variables.JAVA_HOME = jdk.home;
+      };
+    }
+    ```
+  */
+  compiler =
+    pkgs:
+    {
+      version ? defaultVersion,
+      jdk ? defaultJdkFor pkgs,
+    }:
+    let
+      checkedVersion = errors.assertEnum {
+        name = "ix.languages.scala.compiler.version";
+        value = version;
+        valid = validVersions;
+      };
+
+      compilerPackage = errors.requireAttr {
+        context = "ix.languages.scala.compiler: unknown major";
+        attrset = compilersFor pkgs;
+        key = checkedVersion;
+      };
+    in
+    compilerPackage.override { jre = jdk; };
+
+  /**
+    Return the sbt build tool, overridden to run on the chosen JDK.
+
+    sbt drives most Scala 2 projects and a non-trivial fraction of
+    Scala 3 ones. Pinning the JRE it launches under prevents the build
+    daemon from reading project metadata with a JDK other than the one
+    `scalac` targets.
+  */
+  sbt =
+    pkgs:
+    {
+      jdk ? defaultJdkFor pkgs,
+    }:
+    pkgs.sbt.override { jre = jdk; };
+
+  /**
+    Return the mill build tool, overridden to run on the chosen JDK.
+
+    Mill is the Bazel-influenced alternative to sbt; faster cold builds
+    and a Scala-only build DSL. Same JRE-pinning rationale as `sbt`.
+  */
+  mill =
+    pkgs:
+    {
+      jdk ? defaultJdkFor pkgs,
+    }:
+    pkgs.mill.override { jre = jdk; };
+
+  /**
+    Return the Metals language server, overridden to run on the chosen
+    JDK. Intended for dev VMs that host an editor; runtime-only servers
+    that just execute compiled `.jar` artifacts do not need it.
+  */
+  languageServer =
+    pkgs:
+    {
+      jdk ? defaultJdkFor pkgs,
+    }:
+    pkgs.metals.override { jre = jdk; };
+}
