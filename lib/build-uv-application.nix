@@ -1,5 +1,7 @@
 {
+  errors,
   uvLockFor,
+  validTypeCheckingModes,
 }:
 
 /**
@@ -62,6 +64,12 @@ pkgs:
 let
   inherit (pkgs) lib;
 
+  checkedTypeCheckingMode = errors.assertEnum {
+    name = "buildUvApplication.typeCheckingMode";
+    value = typeCheckingMode;
+    valid = validTypeCheckingModes;
+  };
+
   uvLock = uvLockFor pkgs;
   uvWheelhouse = uvLock.buildWheelhouse {
     uvRoot = src;
@@ -79,7 +87,8 @@ let
   pyrightConfig = pkgs.writeText "basedpyright-${pname}.json" (
     builtins.toJSON {
       include = typeCheckPaths;
-      inherit extraPaths typeCheckingMode pythonPlatform;
+      inherit extraPaths pythonPlatform;
+      typeCheckingMode = checkedTypeCheckingMode;
       inherit (python) pythonVersion;
     }
   );

@@ -50,11 +50,16 @@ let
       runtimePath = lib.makeBinPath ([ python ] ++ runtimeInputs);
       srcPath = src;
       argv = builtins.toJSON ([ "${srcPath}" ] ++ args);
+      checkedTypeCheckingMode = errors.assertEnum {
+        name = "writePythonApplication.typeCheckingMode";
+        value = typeCheckingMode;
+        valid = basedpyrightTypeCheckingModes;
+      };
       pyrightConfig = pkgs.writeText "basedpyright-${name}.json" (
         builtins.toJSON {
           include = [ (builtins.toString src) ];
-          inherit extraPaths;
-          inherit typeCheckingMode pythonPlatform;
+          inherit extraPaths pythonPlatform;
+          typeCheckingMode = checkedTypeCheckingMode;
           inherit (python) pythonVersion;
         }
       );
@@ -187,8 +192,17 @@ let
       inherit lib pkgs;
     };
   uvLock = uvLockFor pkgs;
+  basedpyrightTypeCheckingModes = [
+    "off"
+    "basic"
+    "standard"
+    "strict"
+    "recommended"
+    "all"
+  ];
   buildUvApplication = import ./build-uv-application.nix {
-    inherit uvLockFor;
+    inherit errors uvLockFor;
+    validTypeCheckingModes = basedpyrightTypeCheckingModes;
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
   rustNightlyChannel = "nightly-2026-05-17";
