@@ -239,11 +239,6 @@ in
       };
     };
 
-    # Rust rewrite of switch-to-configuration. Faster activation and clearer
-    # error messages than the Perl original, which matters for fleet flows
-    # that re-switch images constantly. Expected upstream default.
-    system.switch.enableNg = true;
-
     # Many ix VMs are SSH'd into and used as interactive dev machines, where
     # operators run unpatched prebuilt binaries (npm-installed CLIs, LSPs,
     # downloaded toolchains) that expect a standard FHS dynamic linker. Off
@@ -309,11 +304,11 @@ in
     # disk — disk autoscales to ~1 PiB, the cap is just defence in depth.
     systemd.coredump = {
       enable = true;
-      extraConfig = ''
-        Storage=external
-        Compress=yes
-        MaxUse=5G
-      '';
+      settings.Coredump = {
+        Storage = "external";
+        Compress = "yes";
+        MaxUse = "5G";
+      };
     };
 
     # Modern Nix configuration for any in-VM nix invocation.
