@@ -1008,16 +1008,14 @@ let
         message = "base profile should use /work/ix as the default shell workspace";
       }
       {
-        assertion = base.config.users.users.root.shell.meta.mainProgram == "ix-workspace-shell";
-        message = "base profile should make root enter the workspace shell wrapper";
+        assertion = base.config.users.users.root.shell.meta.mainProgram == "nu";
+        message = "base profile should make root land in nushell (via platform users.defaultUserShell)";
       }
       {
-        assertion = base.config.users.users.root.shell.shellPath == "/bin/ix-workspace-shell";
-        message = "base profile workspace shell wrapper should be accepted as a NixOS shell package";
-      }
-      {
-        assertion = builtins.elem base.cfg.shellWorkspace.shell base.config.environment.systemPackages;
-        message = "base profile should install the configured workspace shell";
+        assertion = lib.any (
+          rule: lib.hasPrefix "d ${base.cfg.shellWorkspace.directory} " rule
+        ) base.config.systemd.tmpfiles.rules;
+        message = "base profile should pre-create the workspace directory via systemd-tmpfiles";
       }
     ];
 
