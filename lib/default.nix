@@ -239,6 +239,7 @@ let
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
   languages = {
     java = import ./languages/java { inherit errors lib; };
+    kotlin = import ./languages/kotlin.nix { inherit errors; };
     python = import ./languages/python.nix { inherit errors; };
     rust = import ./languages/rust.nix { inherit errors rust-overlay; };
   };
