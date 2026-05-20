@@ -374,6 +374,7 @@ let
     if cfg.rcon.enable then cfg.rcon.passwordFile else cfg.autoReload.rconPasswordFile;
   rconBroadcastToOps = if cfg.rcon.enable then cfg.rcon.broadcastToOps else false;
   java = lib.getExe' cfg.javaPackage "java";
+  yourkit = ix.languages.java.yourkit;
   pluginConfigFiles = lib.optionalAttrs plugmanReloadEnabled {
     "plugins/PlugManX/config.yml" = {
       ignored-plugins = cfg.autoReload.plugman.ignoredPlugins;
@@ -694,6 +695,7 @@ let
     java
     "-XX:MaxRAMPercentage=${toString cfg.maxRAMPercentage}"
   ]
+  ++ yourkit.flagsFor pkgs cfg.yourkit
   ++ cfg.jvmFlags
   ++ autoReloadJvmFlags
   ++ [
@@ -969,6 +971,17 @@ in
       description = "Whether to open the Minecraft Java port in the firewall.";
     };
 
+    yourkit = mkOption {
+      type = ix.languages.java.yourkit.type;
+      default = { };
+      description = ''
+        YourKit profiler agent. Enable to load `libyjpagent` at JVM
+        startup so call counts and allocations are accurate from the
+        first instruction. See [`ix.languages.java.yourkit`](../../../lib/languages/java/yourkit.nix)
+        for option semantics.
+      '';
+    };
+
     health.motdContains = mkOption {
       type = types.listOf types.str;
       default = [ ];
@@ -1078,6 +1091,10 @@ in
           port = rconPort;
           description = "Minecraft RCON";
         };
+      }
+      // yourkit.portClaimFor {
+        owner = "minecraft";
+        cfg = cfg.yourkit;
       };
 
       healthChecks = {
@@ -1135,7 +1152,9 @@ in
     environment.systemPackages = [ ix.packages.mc-probe ];
 
     networking.firewall.allowedTCPPorts =
-      lib.optionals cfg.openFirewall [ cfg.port ] ++ lib.optionals cfg.rcon.openFirewall [ rconPort ];
+      lib.optionals cfg.openFirewall [ cfg.port ]
+      ++ lib.optionals cfg.rcon.openFirewall [ rconPort ]
+      ++ yourkit.firewallTcpPortsFor cfg.yourkit;
     environment.etc = {
       "minecraft/managed-dropins".source = managed.dropins;
       "minecraft/managed-datapacks".source = managed.datapacks;

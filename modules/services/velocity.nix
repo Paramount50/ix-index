@@ -15,6 +15,7 @@ let
     ;
 
   cfg = config.services.velocity;
+  yourkit = ix.languages.java.yourkit;
   dataDir = "/var/lib/velocity";
   java = lib.getExe' cfg.javaPackage "java";
   systemctl = lib.getExe' config.systemd.package "systemctl";
@@ -202,6 +203,7 @@ let
     java
     "-XX:MaxRAMPercentage=${toString cfg.maxRAMPercentage}"
   ]
+  ++ yourkit.flagsFor pkgs cfg.yourkit
   ++ cfg.jvmFlags
   ++ [
     "-jar"
@@ -253,6 +255,17 @@ in
       type = types.bool;
       default = true;
       description = "Whether to open the Velocity client port in the firewall.";
+    };
+
+    yourkit = mkOption {
+      type = ix.languages.java.yourkit.type;
+      default = { };
+      description = ''
+        YourKit profiler agent. Enable to load `libyjpagent` at JVM
+        startup so call counts and allocations are accurate from the
+        first instruction. See [`ix.languages.java.yourkit`](../../lib/languages/java/yourkit.nix)
+        for option semantics.
+      '';
     };
 
     motd = mkOption {
@@ -577,9 +590,15 @@ in
         inherit (cfg.query) port;
         description = "Velocity query";
       };
+    }
+    // yourkit.portClaimFor {
+      owner = "velocity";
+      cfg = cfg.yourkit;
     };
 
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [ cfg.port ];
+    networking.firewall.allowedTCPPorts =
+      lib.optionals cfg.openFirewall [ cfg.port ]
+      ++ yourkit.firewallTcpPortsFor cfg.yourkit;
     networking.firewall.allowedUDPPorts = lib.optionals (cfg.query.enable && cfg.query.openFirewall) [
       cfg.query.port
     ];

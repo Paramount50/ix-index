@@ -17,6 +17,7 @@ let
     types
     ;
   cfg = config.services.minestom;
+  yourkit = ix.languages.java.yourkit;
 
   dataDir = "/var/lib/minestom";
   java = lib.getExe' cfg.javaPackage "java";
@@ -25,6 +26,7 @@ let
     java
     "-XX:MaxRAMPercentage=${toString cfg.maxRAMPercentage}"
   ]
+  ++ yourkit.flagsFor pkgs cfg.yourkit
   ++ cfg.jvmFlags
   ++ [
     "-jar"
@@ -65,16 +67,35 @@ in
       default = true;
       description = "Whether to open the Minestom client port in the firewall.";
     };
+
+    yourkit = mkOption {
+      type = ix.languages.java.yourkit.type;
+      default = { };
+      description = ''
+        YourKit profiler agent. Enable to load `libyjpagent` at JVM
+        startup so call counts and allocations are accurate from the
+        first instruction. See [`ix.languages.java.yourkit`](../../lib/languages/java/yourkit.nix)
+        for option semantics.
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
-    ix.networking.portClaims.minestom = {
-      protocol = "tcp";
-      inherit (cfg) port;
-      description = "Minestom server";
+    ix.networking.portClaims = {
+      minestom = {
+        protocol = "tcp";
+        inherit (cfg) port;
+        description = "Minestom server";
+      };
+    }
+    // yourkit.portClaimFor {
+      owner = "minestom";
+      cfg = cfg.yourkit;
     };
 
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [ cfg.port ];
+    networking.firewall.allowedTCPPorts =
+      lib.optionals cfg.openFirewall [ cfg.port ]
+      ++ yourkit.firewallTcpPortsFor cfg.yourkit;
 
     systemd.services.minestom = {
       description = "Minestom server";
