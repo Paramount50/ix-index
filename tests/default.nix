@@ -1024,6 +1024,49 @@ let
       cfg = config.ix.profiles.base;
     };
 
+  # --- Language helpers -----------------------------------------------------
+
+  languages = {
+    pythonDefault = ix.languages.python pkgs { };
+    python312 = ix.languages.python pkgs { version = "3.12"; };
+    pythonUnknown = builtins.tryEval (
+      builtins.deepSeq (ix.languages.python pkgs { version = "3.99"; }).pythonVersion true
+    );
+
+    rustDefault = ix.languages.rust pkgs { };
+    rustStable = ix.languages.rust pkgs {
+      channel = "stable";
+      version = "latest";
+    };
+    rustExtraComponents = ix.languages.rust pkgs {
+      components = [
+        "cargo"
+        "rust-std"
+        "rustc"
+        "rust-src"
+        "rustfmt"
+      ];
+    };
+    rustBadChannel = builtins.tryEval (
+      builtins.deepSeq (ix.languages.rust pkgs { channel = "nighty"; }).name true
+    );
+    rustBadProfile = builtins.tryEval (
+      builtins.deepSeq (ix.languages.rust pkgs { profile = "extreme"; }).name true
+    );
+
+    javaDefault = ix.languages.java pkgs { };
+    javaTemurin = ix.languages.java pkgs {
+      version = "21";
+      distribution = "temurin";
+    };
+    javaBadDistribution = builtins.tryEval (
+      builtins.deepSeq (ix.languages.java pkgs { distribution = "openjdkk"; }).name true
+    );
+    javaBadVersion = builtins.tryEval (
+      builtins.deepSeq (ix.languages.java pkgs { version = "22"; }).name true
+    );
+  };
+
   # --- Per-image assertion groups -------------------------------------------
 
   groups = {
@@ -2058,6 +2101,63 @@ let
       {
         assertion = pythonMcpServerPackage.meta.mainProgram == "ix-python-mcp";
         message = "python MCP server package should expose ix-python-mcp as its main program";
+      }
+    ];
+
+    languages = [
+      {
+        assertion = languages.pythonDefault.pythonVersion == "3.14";
+        message = "ix.languages.python should default to 3.14 to match writePythonApplication and buildUvApplication";
+      }
+      {
+        assertion = languages.python312.pythonVersion == "3.12";
+        message = "ix.languages.python should resolve an explicit version to the matching nixpkgs interpreter";
+      }
+      {
+        assertion = !languages.pythonUnknown.success;
+        message = "ix.languages.python should throw on an unknown version instead of returning a missing-attr error";
+      }
+      {
+        assertion = lib.hasPrefix "rust-minimal-" languages.rustDefault.name;
+        message = "ix.languages.rust should default to the minimal rust-overlay profile";
+      }
+      {
+        assertion = lib.hasInfix "nightly-2026-05-17" languages.rustDefault.name;
+        message = "ix.languages.rust should default to the repo-wide pinned nightly date";
+      }
+      {
+        assertion =
+          lib.hasPrefix "rust-minimal-" languages.rustStable.name
+          && !(lib.hasInfix "nightly" languages.rustStable.name);
+        message = "ix.languages.rust should resolve stable to the rust-overlay stable channel";
+      }
+      {
+        assertion = languages.rustExtraComponents.drvPath != languages.rustDefault.drvPath;
+        message = "ix.languages.rust should let callers extend the component set";
+      }
+      {
+        assertion = !languages.rustBadChannel.success;
+        message = "ix.languages.rust should reject unknown channels with errors.assertEnum";
+      }
+      {
+        assertion = !languages.rustBadProfile.success;
+        message = "ix.languages.rust should reject unknown profiles with errors.assertEnum";
+      }
+      {
+        assertion = languages.javaDefault == pkgs.jdk21_headless;
+        message = "ix.languages.java should default to OpenJDK 21 headless";
+      }
+      {
+        assertion = languages.javaTemurin == pkgs.temurin-bin-21;
+        message = "ix.languages.java should resolve temurin 21 to pkgs.temurin-bin-21";
+      }
+      {
+        assertion = !languages.javaBadDistribution.success;
+        message = "ix.languages.java should reject unknown distributions with errors.assertEnum";
+      }
+      {
+        assertion = !languages.javaBadVersion.success;
+        message = "ix.languages.java should reject unknown versions with errors.requireAttr";
       }
     ];
 
