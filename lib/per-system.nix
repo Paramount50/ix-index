@@ -57,6 +57,12 @@ let
     src = paths.tools.updateMods;
   };
 
+  updateIxCli = ix.writePythonApplication pkgs {
+    name = "update-ix-cli";
+    src = paths.tools.updateIxCli;
+    runtimeInputs = [ pkgs.nix ];
+  };
+
   ixShellSyncIgnored = ix.writePythonApplication pkgs {
     name = "ix-shell-sync-ignored";
     src = paths.tools.ixShellSyncIgnored;
@@ -195,6 +201,7 @@ in
     lint = mkApp lint "Run all Nix formatting and lint checks";
     bench-filesystem = mkApp benchFilesystem "Benchmark file-system behavior from inside an ix VM";
     update-mods = mkApp updateMods "Regenerate Minecraft mod catalogs";
+    update-ix-cli = mkApp updateIxCli "Re-prefetch the ix.dev CLI binaries and bump packages/ix/default.nix hashes";
     ix-fleet = mkApp repoPackages.ix-fleet "Render ix fleet plans and commands";
     ix-shell-sync-ignored = mkApp ixShellSyncIgnored "Copy git-ignored files into an ix shell workspace";
     mc-source = mkApp mcSource "Decompile a Minecraft server jar with Mojang mappings via Vineflower";

@@ -67,6 +67,7 @@
         tools = {
           ixShellSyncIgnored = ./tools/ix-shell-sync-ignored.py;
           mcSource = ./tools/mc-source.nu;
+          updateIxCli = ./tools/update-ix-cli.py;
           updateMods = ./tools/update-mods.py;
         };
       };
