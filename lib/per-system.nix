@@ -66,6 +66,14 @@ let
     ];
   };
 
+  mcSource = ix.writeNushellApplication pkgs {
+    name = "mc-source";
+    text = builtins.readFile paths.tools.mcSource;
+    runtimeInputs = [
+      (pkgs.callPackage paths.packages.vineflower { })
+    ];
+  };
+
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };
 
   repoPackages = ix.packageSetFor pkgs;
@@ -147,6 +155,7 @@ in
     update-mods = mkApp updateMods "Regenerate Minecraft mod catalogs";
     ix-fleet = mkApp repoPackages.ix-fleet "Render ix fleet plans and commands";
     ix-shell-sync-ignored = mkApp ixShellSyncIgnored "Copy git-ignored files into an ix shell workspace";
+    mc-source = mkApp mcSource "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
     nix-cargo-unit = mkApp repoPackages.nix-cargo-unit "Render Cargo unit graphs as Nix derivations";
     python-mcp-server = mkApp repoPackages.python-mcp-server "Run a Python MCP server";
   };

@@ -57,9 +57,11 @@
           ociImageBuilder = ./packages/oci-image-builder;
           pythonMcpServer = ./packages/python-mcp-server;
           tonboArtifacts = ./packages/tonbo-artifacts;
+          vineflower = ./packages/vineflower;
         };
         tools = {
           ixShellSyncIgnored = ./tools/ix-shell-sync-ignored.py;
+          mcSource = ./tools/mc-source.nu;
           updateMods = ./tools/update-mods.py;
         };
       };
