@@ -1068,6 +1068,51 @@ let
     );
   };
 
+  # --- Minestom + YourKit wiring -------------------------------------------
+
+  minestomYourkit =
+    let
+      yourkitConfig = evalConfig [
+        {
+          services.minestom = {
+            enable = true;
+            serverJar = pkgs.runCommand "fake-minestom.jar" { } "touch $out";
+            yourkit = {
+              enable = true;
+              listen = "all";
+              openFirewall = true;
+              sessionName = "minestom-eval-test";
+            };
+          };
+        }
+      ];
+      unit = yourkitConfig.systemd.services.minestom;
+    in
+    {
+      inherit yourkitConfig;
+      execStart = unit.serviceConfig.ExecStart;
+      firewallTcpPorts = yourkitConfig.networking.firewall.allowedTCPPorts;
+      portClaim = yourkitConfig.ix.networking.portClaims.minestom-yourkit or null;
+    };
+
+  minestomNoYourkit =
+    let
+      noYourkitConfig = evalConfig [
+        {
+          services.minestom = {
+            enable = true;
+            serverJar = pkgs.runCommand "fake-minestom.jar" { } "touch $out";
+          };
+        }
+      ];
+      unit = noYourkitConfig.systemd.services.minestom;
+    in
+    {
+      inherit noYourkitConfig;
+      execStart = unit.serviceConfig.ExecStart;
+      portClaim = noYourkitConfig.ix.networking.portClaims.minestom-yourkit or null;
+    };
+
   # --- Per-image assertion groups -------------------------------------------
 
   groups = {
@@ -2159,6 +2204,38 @@ let
       {
         assertion = !languages.javaBadVersion.success;
         message = "ix.languages.java should reject unknown versions with errors.requireAttr";
+      }
+      {
+        assertion = lib.hasInfix "-agentpath:" minestomYourkit.execStart;
+        message = "services.minestom.yourkit.enable should inject -agentpath: into the JVM command";
+      }
+      {
+        assertion = lib.hasInfix "port=10001" minestomYourkit.execStart;
+        message = "services.minestom.yourkit should pass the default YourKit port through the agent options";
+      }
+      {
+        assertion = lib.hasInfix "listen=all" minestomYourkit.execStart;
+        message = "services.minestom.yourkit.listen = \"all\" should appear in the agent options";
+      }
+      {
+        assertion = lib.hasInfix "sessionname=minestom-eval-test" minestomYourkit.execStart;
+        message = "services.minestom.yourkit.sessionName should appear in the agent options";
+      }
+      {
+        assertion = builtins.elem 10001 minestomYourkit.firewallTcpPorts;
+        message = "services.minestom.yourkit.openFirewall should open the YourKit port in the firewall";
+      }
+      {
+        assertion = minestomYourkit.portClaim != null && minestomYourkit.portClaim.port == 10001;
+        message = "services.minestom.yourkit.enable should register a portClaim for the YourKit port";
+      }
+      {
+        assertion = !(lib.hasInfix "-agentpath:" minestomNoYourkit.execStart);
+        message = "services.minestom without yourkit.enable should NOT include -agentpath:";
+      }
+      {
+        assertion = minestomNoYourkit.portClaim == null;
+        message = "services.minestom without yourkit.enable should NOT register a yourkit portClaim";
       }
     ];
 
