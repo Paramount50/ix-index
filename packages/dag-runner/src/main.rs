@@ -15,7 +15,9 @@
 //!
 //! Exit code reflects the worst node outcome: zero if every node succeeded,
 //! the worst non-zero command exit code otherwise, or 1 if any node was
-//! skipped because a dep failed.
+//! skipped because a dep failed. Ctrl-C cancels every running child
+//! (SIGTERM, brief grace, SIGKILL) and forces exit 130; a second Ctrl-C
+//! hard-exits immediately.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::IsTerminal;
@@ -140,7 +142,11 @@ async fn main() -> Result<()> {
 
     let mode = resolve_mode(args.output);
     let started = Instant::now();
-    let records = run(spec, mode, started).await?;
+
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    spawn_cancel_listener(cancel_tx);
+
+    let records = run(spec, mode, started, cancel_rx.clone()).await?;
 
     if matches!(mode, OutputMode::Json) {
         emit_summary(&records, started);
@@ -148,7 +154,30 @@ async fn main() -> Result<()> {
         print_summary(&records, started);
     }
 
+    // A cancellation always exits 130, even if every node managed to finish
+    // (succeed, fail, or skip) before being killed. Callers distinguish
+    // "cancelled by the operator" from "ran to completion" via this code.
+    if *cancel_rx.borrow() {
+        std::process::exit(130);
+    }
     std::process::exit(exit_code(&records));
+}
+
+/// Background task: first Ctrl-C broadcasts cancellation; second hard-exits.
+fn spawn_cancel_listener(cancel_tx: tokio::sync::watch::Sender<bool>) {
+    tokio::spawn(async move {
+        if tokio::signal::ctrl_c().await.is_err() {
+            return;
+        }
+        eprintln!(
+            "dag-runner: SIGINT received, cancelling running nodes (Ctrl-C again to hard-exit)"
+        );
+        let _ = cancel_tx.send(true);
+        if tokio::signal::ctrl_c().await.is_ok() {
+            eprintln!("dag-runner: second SIGINT, hard-exiting");
+            std::process::exit(130);
+        }
+    });
 }
 
 fn resolve_mode(requested: OutputMode) -> OutputMode {
@@ -248,6 +277,7 @@ async fn run(
     spec: Spec,
     mode: OutputMode,
     started: Instant,
+    cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) -> Result<BTreeMap<String, NodeRecord>> {
     let multi = matches!(mode, OutputMode::Tui).then(MultiProgress::new);
     let records: Arc<Mutex<BTreeMap<String, NodeRecord>>> = Arc::new(Mutex::new(BTreeMap::new()));
@@ -262,6 +292,7 @@ async fn run(
             node.depends_on.iter().map(|d| futs[d].clone()).collect();
         let pb = multi.as_ref().map(|m| make_spinner(m, &name_owned));
         let records_for_task = records.clone();
+        let cancel_for_task = cancel_rx.clone();
 
         let fut = async move {
             for dep in &dep_futs {
@@ -291,7 +322,8 @@ async fn run(
 
             report_started(&name_owned, started, mode, pb.as_ref());
             let node_started = Instant::now();
-            let (outcome, stdout, stderr) = run_command(&node, pb.as_ref()).await;
+            let (outcome, stdout, stderr) =
+                run_command(&node, pb.as_ref(), cancel_for_task).await;
             let duration = node_started.elapsed();
             report_finished(&name_owned, &outcome, started, mode, pb.as_ref());
 
@@ -341,7 +373,17 @@ fn make_spinner(multi: &MultiProgress, name: &str) -> ProgressBar {
     pb
 }
 
-async fn run_command(node: &NodeSpec, pb: Option<&ProgressBar>) -> (Outcome, String, String) {
+async fn run_command(
+    node: &NodeSpec,
+    pb: Option<&ProgressBar>,
+    mut cancel_rx: tokio::sync::watch::Receiver<bool>,
+) -> (Outcome, String, String) {
+    // If cancellation already fired (a later-spawning node sees the bit
+    // before it ever reaches its select!), skip the work entirely.
+    if *cancel_rx.borrow() {
+        return (Outcome::Failed(130), String::new(), "dag-runner: cancelled\n".into());
+    }
+
     let mut cmd = Command::new(&node.command[0]);
     cmd.args(&node.command[1..])
         .envs(&node.env)
@@ -363,6 +405,7 @@ async fn run_command(node: &NodeSpec, pb: Option<&ProgressBar>) -> (Outcome, Str
 
     let completion = tokio::select! {
         biased;
+        () = wait_for_cancel(&mut cancel_rx) => Completion::Cancelled,
         () = maybe_timeout(node.timeout_secs) => Completion::TimedOut,
         res = child.wait() => match res {
             Ok(status) => {
@@ -394,6 +437,11 @@ async fn run_command(node: &NodeSpec, pb: Option<&ProgressBar>) -> (Outcome, Str
             let _ = writeln!(extra_stderr, "dag-runner: node timed out after {secs}s");
             Outcome::Failed(124)
         }
+        Completion::Cancelled => {
+            terminate_child(&mut child).await;
+            extra_stderr.push_str("dag-runner: cancelled\n");
+            Outcome::Failed(130)
+        }
     };
 
     let stdout = stdout_task.await.unwrap_or_default();
@@ -407,6 +455,23 @@ enum Completion {
     Failed(i32),
     WaitFailed(String),
     TimedOut,
+    Cancelled,
+}
+
+/// Resolves the first time the cancellation flag flips from false to true.
+/// Guards against the case where the watch sender was dropped (returns
+/// without firing) so the caller can keep racing other arms.
+async fn wait_for_cancel(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if *rx.borrow() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            // Sender dropped without ever cancelling. Park forever so the
+            // outer select! falls through to whichever arm wins.
+            std::future::pending::<()>().await;
+        }
+    }
 }
 
 /// Resolves after `secs` seconds when set, otherwise blocks forever. Used as

@@ -95,5 +95,6 @@ Concretely:
 - At least one node was skipped (because a dep failed) and no failure had a larger code: `1`.
 - A node could not be spawned: counted as `failed` with `exit_code = 127`.
 - A node hit its `timeout_secs`: counted as `failed` with `exit_code = 124`.
+- The operator hit Ctrl-C: every running child is SIGTERMed (then SIGKILLed after ~500ms grace), and the runner exits `130` regardless of which nodes had already finished. A second Ctrl-C hard-exits immediately.
 
 CI pipelines should treat any non-zero exit as a stop signal and read stderr for the per-node breakdown and captured child output.

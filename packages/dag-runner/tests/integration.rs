@@ -183,6 +183,35 @@ fn cycle_is_rejected_before_running() {
 }
 
 #[test]
+fn sigint_cancels_running_nodes_with_exit_130() {
+    use std::thread;
+    use std::time::Duration;
+    let spec = r#"{"nodes":{
+        "a":{"command":["sh","-c","sleep 30"]}
+    }}"#;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("spec.json");
+    std::fs::write(&path, spec).unwrap();
+    let bin = env!("CARGO_BIN_EXE_dag-runner");
+    let mut child = std::process::Command::new(bin)
+        .arg("--output")
+        .arg("plain")
+        .arg(&path)
+        .spawn()
+        .expect("spawn");
+    let pid = child.id();
+    // Give the runner time to spawn the sleep child and enter its wait.
+    thread::sleep(Duration::from_millis(300));
+    // SAFETY: we just spawned this child and it has not yet been reaped;
+    // SIGINT is a valid signal. libc here avoids any /bin/kill path
+    // assumption inside the Nix sandbox.
+    let rc = unsafe { libc::kill(pid.cast_signed(), libc::SIGINT) };
+    assert_eq!(rc, 0, "kill(SIGINT) failed: errno {}", std::io::Error::last_os_error());
+    let exit = child.wait().expect("wait for runner");
+    assert_eq!(exit.code(), Some(130), "expected exit 130 after SIGINT");
+}
+
+#[test]
 fn missing_dependency_is_rejected_before_running() {
     let spec = r#"{"nodes":{
         "a":{"command":["true"],"depends_on":["ghost"]}
