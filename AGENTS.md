@@ -110,6 +110,21 @@ When the user proposes building something the ecosystem already provides in robu
 
 The opposite mistake is also wrong: do not turn a small choice into an option-tree exercise. When the user asks "can I use X for Y", lead with the direct answer and the smallest concrete path. Reserve option-comparison tables for surfaces that will outlive the task, such as an interface boundary or a vendor commitment. For a one-screen task, "use X this way" beats listing X, Y, and Z side by side.
 
+## Why `dag-runner` (and not `process-compose` or `devenv-tasks`)
+
+The repo-owned [`dag-runner`](packages/dag-runner/) is the task runner that powers `nix run .#health-checks` and is the planned replacement for `ix-fleet`'s sequential per-node loops. It exists despite the rule above because neither upstream candidate fit cleanly:
+
+- **`process-compose`** has only two output shapes: full-alt-screen TUI or plain text. The TUI takes over the terminal and clears its alt-screen on exit, so a fast failure leaves nothing in scrollback. The maintainer explicitly closed the door on inline-progress (`F1bonacc1/process-compose#362`). The model is "long-running supervisor", so one-shot semantics require a `_done` sentinel and `exit_on_end` to coax it into terminating.
+- **`devenv-tasks`** standalone has the right UX shape (inline indicatif spinners, scrollback-friendly, exits on completion), but its JSON spec is an internal interface to devenv's module system and shifts with devenv. The binary is not in `nixpkgs` as a standalone, so consuming it pulls the whole devenv flake closure for one Rust binary.
+
+What earned the build:
+
+1. The current consumer is `health-checks`. The wait-in-the-wings consumer is [`ix-fleet`](packages/ix-fleet/src/ix_fleet/__init__.py)'s sequential `for node in selected_nodes(...)` loop in `cmd_up`/`cmd_switch`/`cmd_replace`. Re-expressing those imperative loops as DAG specs collapses repeated machinery and surfaces a uniform JSON event stream.
+2. The JSON spec is small and stable: a flat map of `{ name → { command, depends_on } }` owned by this repo, not someone else's release cycle.
+3. The runtime is bounded: roughly 400 lines of Rust on top of `tokio` + `indicatif` + `clap` + `serde_json`. Maintenance cost stays small.
+
+If a third consumer arrives needing something dag-runner does not (per-node soft timeouts, conditional skips, cron-like scheduling), extend the runner. Pulling in `process-compose` or `devenv-tasks` alongside it for "the part dag-runner doesn't do" would defeat the consolidation. Grow one runner, not two.
+
 ## Python style
 
 Default Python projects to uv. A repo-owned Python app has `pyproject.toml`, a committed `uv.lock`, normal `src/<package>/` files, and Nix packaging through [`ix.buildUvApplication`](lib/build-uv-application.nix). Keep dependency resolver diffs reviewable: change source and lockfiles together only when the source change needs the dependency move.
