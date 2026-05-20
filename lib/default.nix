@@ -261,6 +261,13 @@ let
 
   systemdHardening = import ./systemd-hardening.nix;
 
+  /**
+    Helpers that throw with a fixable error message instead of a deep-eval
+    crash. See [`lib/errors.nix`](lib/errors.nix) for the full surface:
+    `assertEnum`, `atMostOne`, `exactlyOne`, `requireAttr`, `requireInput`.
+  */
+  errors = import ./errors.nix { inherit lib; };
+
   mkMinecraftLoader = import ./minecraft-loader.nix;
 
   /**
@@ -595,6 +602,7 @@ let
       bunLockFor
       cargoUnit
       cargoUnitFor
+      errors
       minecraft
       mkMinecraftLoader
       mkMinecraftNbtFormat
@@ -840,6 +848,7 @@ let
       bunLockFor
       cargoUnit
       cargoUnitFor
+      errors
       minecraft
       mkMinecraftLoader
       mkMinecraftNbtFormat
