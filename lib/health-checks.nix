@@ -9,6 +9,11 @@
   run starts from scratch and an unrelated VM is never left running
   after a test.
 
+  The fleets passed in are rebuilt with a `health-check-` `nodePrefix`
+  applied by `exampleFleetsFor`, so the names this script force-deletes
+  cannot collide with a production VM that happens to share the example's
+  natural name (`nginx`, `factions`, `file-server`, ...).
+
   The lifecycle scripts are run in parallel by `dag-runner`, the
   repo-owned task runner. dag-runner reads a JSON spec describing the
   graph, fans out per-node tokio tasks, surfaces an inline indicatif

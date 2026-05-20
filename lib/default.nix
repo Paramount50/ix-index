@@ -815,11 +815,19 @@ let
     this aggregator picks it up on the next eval, no registry edits.
   */
   exampleFleetsFor =
-    hostSystem:
+    {
+      hostSystem,
+      # Prepend this to every example node name. The health-checks runner
+      # uses "health-check-" so its lifecycle scripts cannot collide with
+      # real production VMs that share the natural names (`nginx`,
+      # `factions`, ...). Default empty so the regular `apps.<example>-*`
+      # wrappers see no change.
+      nodePrefix ? "",
+    }:
     let
       indexShim = {
         lib = ixReturn // {
-          mkFleet = mkFleetFor hostSystem;
+          mkFleet = spec: (mkFleetFor hostSystem) (spec // { inherit nodePrefix; });
         };
       };
       names = lib.filter (name: builtins.pathExists (paths.examples + "/${name}/default.nix")) (
@@ -833,7 +841,7 @@ let
     like `examplesHealthChecks` that only need plan data (which is
     system-independent), not the wrapper derivations.
   */
-  exampleFleets = exampleFleetsFor system;
+  exampleFleets = exampleFleetsFor { hostSystem = system; };
 
   /**
     `ix.healthChecks` declared by every example, keyed by example name and

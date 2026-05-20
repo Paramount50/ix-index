@@ -20,6 +20,11 @@
   deployment ? { },
   secrets ? { },
   nodes,
+  # Prefix prepended to every node name and to every `dependsOn` string.
+  # Lets a non-production consumer (test runner, scratch fleet) reuse an
+  # example without colliding with real VMs that share the natural node
+  # names. Defaults to empty so production callers see no change.
+  nodePrefix ? "",
 }:
 let
   asList = value: if builtins.isList value then value else [ value ];
@@ -50,6 +55,22 @@ let
     };
 
   isWrappedNode = value: builtins.isAttrs value && (value ? module || value ? modules);
+
+  prefixName = name: nodePrefix + name;
+  prefixDeps =
+    spec:
+    if !(isWrappedNode spec) || !(spec ? dependsOn) then
+      spec
+    else
+      spec
+      // {
+        dependsOn = map prefixName (asList spec.dependsOn);
+      };
+  prefixedNodes =
+    if nodePrefix == "" then
+      nodes
+    else
+      lib.mapAttrs' (name: spec: lib.nameValuePair (prefixName name) (prefixDeps spec)) nodes;
 
   normalizeNode =
     name: value:
@@ -95,7 +116,7 @@ let
         }) spec.replicas
       );
 
-  rawNodeSpecs = lib.mapAttrs normalizeNode nodes;
+  rawNodeSpecs = lib.mapAttrs normalizeNode prefixedNodes;
   nodeSpecs = lib.mergeAttrsList (lib.mapAttrsToList expandReplicas rawNodeSpecs);
   expandDependency =
     dep:
@@ -126,7 +147,14 @@ let
     }
   ) nodeSpecs;
 
-  nodeRefs = lib.mapAttrs (_name: config: { inherit config; }) nodeConfigs;
+  # Module-args `nodes` is keyed by the example's base node names so cross-node
+  # references like `nodes.file-server.config.ix.networking.eastWest.hostName`
+  # keep working when the fleet was rebuilt with a `nodePrefix`. The prefix is
+  # an external (VM-name / image-name / hostname) concern; it must not change
+  # how an example refers to its own siblings.
+  nodeRefs = lib.mapAttrs' (
+    name: config: lib.nameValuePair (lib.removePrefix nodePrefix name) { inherit config; }
+  ) nodeConfigs;
   planHealthChecks =
     config:
     lib.mapAttrs (_name: check: {

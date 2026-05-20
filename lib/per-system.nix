@@ -101,7 +101,16 @@ let
 
   tests = import paths.tests { inherit nixpkgs ix; };
 
-  exampleFleets = ix.exampleFleetsFor system;
+  exampleFleets = ix.exampleFleetsFor { hostSystem = system; };
+
+  # Separate aggregation with "health-check-" prepended to every node name,
+  # so the lifecycle scripts that force-delete VMs by name can never clobber
+  # an unrelated production VM that happens to share the example's node name
+  # (`nginx`, `factions`, ...).
+  healthCheckExampleFleets = ix.exampleFleetsFor {
+    hostSystem = system;
+    nodePrefix = "health-check-";
+  };
 
   # Surface every example's `ix fleet <sub>` wrapper as a flake app.
   # Each example contributes `apps.<system>.<example>-{up,health,...}`,
@@ -131,7 +140,7 @@ let
     inherit lib pkgs;
     inherit (ix) writeNushellApplication;
     dagRunner = repoPackages.dag-runner;
-  } { inherit exampleFleets; };
+  } { exampleFleets = healthCheckExampleFleets; };
 in
 {
   packages =

@@ -804,6 +804,26 @@ let
 
   fleetPlan = fleet.planValue.nodes;
 
+  prefixedFleet = ix.mkFleet {
+    nodePrefix = "tprefix-";
+    nodes = {
+      api = {
+        services.openssh.enable = true;
+      };
+      worker = {
+        dependsOn = [ "api" ];
+        modules = [
+          (
+            { nodes, ... }:
+            {
+              environment.etc."api-host".text = nodes.api.config.networking.hostName;
+            }
+          )
+        ];
+      };
+    };
+  };
+
   fleetIpv4HealthCheckEval = builtins.tryEval (
     builtins.deepSeq
       (ix.mkFleet {
@@ -2111,6 +2131,26 @@ let
       {
         assertion = fleetPlan."worker-0".dependsOn == [ "db" ];
         message = "fleet replica dependencies should point at expanded node identities";
+      }
+      {
+        assertion =
+          prefixedFleet.planValue.order == [
+            "tprefix-api"
+            "tprefix-worker"
+          ];
+        message = "nodePrefix should rename every node in the plan order";
+      }
+      {
+        assertion = prefixedFleet.planValue.nodes."tprefix-worker".dependsOn == [ "tprefix-api" ];
+        message = "nodePrefix should rewrite dependsOn references so the prefixed graph stays connected";
+      }
+      {
+        assertion = prefixedFleet.nodes."tprefix-api".networking.hostName == "tprefix-api";
+        message = "nodePrefix should flow into the deployment-level identity (hostname, image name)";
+      }
+      {
+        assertion = prefixedFleet.nodes."tprefix-worker".environment.etc."api-host".text == "tprefix-api";
+        message = "nodes module-arg should resolve by the example's base name even when prefixed";
       }
     ];
   };
