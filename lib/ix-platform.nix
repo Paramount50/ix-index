@@ -293,7 +293,18 @@ in
       # synthesized record, and the eventual NFTSet=/cgroup-id integration
       # over the nftables backend already enabled here can hook into real
       # user/group identities without another platform-wide flip.
-      userdbd.enable = true;
+      userdbd = {
+        enable = true;
+        # macOS Nix installs (and other multi-user setups) ship `nixbld*`
+        # build users above 1000, which trips the systemd-userdb "regular
+        # users have system-range UIDs" warning at eval time. The build
+        # users do not exist inside ix VMs at all — `boot.isContainer =
+        # true` means the guest has its own user namespace — so the
+        # warning is noise from the host nixpkgs evaluator rather than a
+        # runtime concern. Silencing here keeps `nix run .#health-checks`
+        # and other repo evals scannable.
+        silenceHighSystemUsers = true;
+      };
     };
 
     # Capture native crashes (JVM segfault, Rust panics in extern, anything
