@@ -4,11 +4,12 @@ let
 
   # One JDK threaded through every JVM tool below so Java, Maven, Gradle,
   # Kotlin's stdlib runtime, Scala, sbt, mill, and Metals all share one
-  # store path instead of pinning their own. Temurin 21 because it's the
-  # current LTS and the Eclipse Adoptium TCK build most JVM upstreams
-  # test against.
+  # store path instead of pinning their own. Temurin 25 because it's the
+  # current LTS (released Sep 2025) and it matches what every existing
+  # JVM service module and `ix.profiles.jvm` default to, so the OCI
+  # closure does not pick up a second JDK store path by accident.
   jdk = L.java.jdk pkgs {
-    version = "21";
+    version = "25";
     distribution = "temurin";
   };
 
@@ -46,7 +47,7 @@ let
   scripting = {
     python = L.python.interpreter pkgs { version = "3.14"; };
     go = L.go.toolchain pkgs { version = "latest"; };
-    node = L.javascript.node pkgs { version = "22"; };
+    node = L.javascript.node pkgs { version = "24"; };
     bun = L.javascript.bun pkgs { };
     deno = L.javascript.deno pkgs { };
     typescript = L.javascript.typescript pkgs { };

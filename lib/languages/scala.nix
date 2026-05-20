@@ -19,15 +19,16 @@ let
 
   /**
     Default JDK paired with Scala 2/3 when the caller does not pass
-    `jdk`. Matches the default `ix.languages.java.jdk` returns for
-    OpenJDK 21 headless so a service that resolves both helpers
+    `jdk`. OpenJDK 25 headless to match `ix.languages.java`'s
+    `defaultJdkFor` and `ix.profiles.jvm`'s `temurin-jre-bin-25`, so a
+    service that resolves the Scala compiler and a Java runtime
     without overriding pulls one JDK into the closure rather than two.
 
     Hardcoded rather than imported from the java namespace to keep this
     file independent; if the java default moves, this constant moves
     with it (see [`./java/default.nix`](./java/default.nix)).
   */
-  defaultJdkFor = pkgs: pkgs.jdk21_headless;
+  defaultJdkFor = pkgs: pkgs.jdk25_headless;
 in
 {
   /**

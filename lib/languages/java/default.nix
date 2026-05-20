@@ -60,11 +60,14 @@ let
     Pulls from the same table as the `jdk` helper so a caller that
     overrides nothing gets one consistent JDK across the toolchain.
 
-    Hard-coded to OpenJDK 21 headless (the LTS line that every JVM
-    upstream in this repo currently targets); pass `jdk = ...`
+    Hard-coded to OpenJDK 25 headless: that is the current LTS (released
+    Sep 2025) and it matches `ix.profiles.jvm`'s `temurin-jre-bin-25`
+    default plus every JVM service module in the repo, so an image
+    resolving `maven` and `gradle` without overriding does not pick up
+    a second JDK store path on top of the runtime. Pass `jdk = ...`
     explicitly when a tool needs a different runtime.
   */
-  defaultJdkFor = pkgs: (jdksFor pkgs).openjdk."21";
+  defaultJdkFor = pkgs: (jdksFor pkgs).openjdk."25";
 
   /**
     Per-major-version Gradle attribute mapping. nixpkgs also exposes a
@@ -158,8 +161,9 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the Maven and JDK packages come from.
-    - `jdk`: optional resolved JDK package. Defaults to the same JDK
-      `ix.languages.java.jdk pkgs { }` returns (OpenJDK 21 headless).
+    - `jdk`: optional resolved JDK package. Defaults to OpenJDK 25
+      headless, matching `ix.profiles.jvm` and the rest of this
+      namespace.
 
     Example:
     ```nix
@@ -194,7 +198,7 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the Gradle and JDK packages come from.
-    - `jdk`: optional resolved JDK package. Defaults to OpenJDK 21
+    - `jdk`: optional resolved JDK package. Defaults to OpenJDK 25
       headless, the same JDK every other helper in this namespace
       assumes.
     - `version`: required, Gradle major as a string (`"7" | "8" |
