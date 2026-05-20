@@ -100,6 +100,32 @@ let
   };
 
   tests = import paths.tests { inherit nixpkgs ix; };
+
+  exampleFleets = ix.exampleFleetsFor system;
+
+  # Surface every example's `ix fleet <sub>` wrapper as a flake app.
+  # Each example contributes `apps.<system>.<example>-{up,health,...}`,
+  # which lets `nix run .#nginx-lifecycle-up` invoke the existing fleet
+  # plumbing without going through `nix build` + `result/bin/...`.
+  exampleApps =
+    let
+      fleetSubs = [
+        "up"
+        "health"
+        "replace"
+        "switch"
+        "diff"
+      ];
+    in
+    lib.concatMapAttrs (
+      name: fleet:
+      lib.listToAttrs (
+        map (sub: {
+          name = "${name}-${sub}";
+          value = mkApp fleet.${sub} "Run `ix fleet ${sub}` against the ${name} example fleet";
+        }) fleetSubs
+      )
+    ) exampleFleets;
 in
 {
   packages =
@@ -158,7 +184,8 @@ in
     mc-source = mkApp mcSource "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
     nix-cargo-unit = mkApp repoPackages.nix-cargo-unit "Render Cargo unit graphs as Nix derivations";
     python-mcp-server = mkApp repoPackages.python-mcp-server "Run a Python MCP server";
-  };
+  }
+  // exampleApps;
 
   checks =
     lib.optionalAttrs (system == ix.system) {

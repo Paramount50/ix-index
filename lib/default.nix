@@ -773,23 +773,36 @@ let
     lib.mapAttrs attach raw;
 
   /**
-    Discovered `examples/<name>/default.nix` fleets, each imported with
-    `{ index = { lib = ix; }; }` to match the contract examples already use.
-    Returns `{ <example-name> = fleet; ... }`.
+    Discovered `examples/<name>/default.nix` fleets, built for a given
+    host system. Each is imported with `{ index = { lib = ix; }; }` to
+    match the contract examples already use, with `mkFleet` swapped for
+    the host-system variant so the wrapper derivations under
+    `.up`/`.health`/`.replace` build for the requested system rather
+    than always pinning to the default.
 
-    Adding an example is `mkdir examples/<name> + edit default.nix`; this
-    aggregator picks it up on the next eval, no registry edits.
+    Adding an example is `mkdir examples/<name> + edit default.nix`;
+    this aggregator picks it up on the next eval, no registry edits.
   */
-  exampleFleets =
+  exampleFleetsFor =
+    hostSystem:
     let
       indexShim = {
-        lib = ixReturn;
+        lib = ixReturn // {
+          mkFleet = mkFleetFor hostSystem;
+        };
       };
       names = lib.filter (name: builtins.pathExists (paths.examples + "/${name}/default.nix")) (
         subdirs paths.examples
       );
     in
     lib.genAttrs names (name: import (paths.examples + "/${name}") { index = indexShim; });
+
+  /**
+    Default-system shortcut over `exampleFleetsFor`. Used by aggregators
+    like `examplesHealthChecks` that only need plan data (which is
+    system-independent), not the wrapper derivations.
+  */
+  exampleFleets = exampleFleetsFor system;
 
   /**
     `ix.healthChecks` declared by every example, keyed by example name and
@@ -816,6 +829,7 @@ let
       mkFleetFor
       discoverImages
       exampleFleets
+      exampleFleetsFor
       examplesHealthChecks
       artifacts
       buildBunSite
