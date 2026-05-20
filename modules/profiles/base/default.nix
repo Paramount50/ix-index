@@ -5,6 +5,7 @@
 # runtime dependencies still belong in the image or service that needs them.
 {
   config,
+  ix,
   lib,
   pkgs,
   ...
@@ -133,7 +134,26 @@ in
         # that the line-based three-way merge would otherwise mark. The
         # HM module wires the driver, sets `* merge=mergiraf` globally,
         # and forces conflictStyle = diff3 (required by the driver).
-        mergiraf.enable = true;
+        # `enableGitIntegration` is set explicitly because home-manager
+        # plans to flip the default in a future release.
+        mergiraf = {
+          enable = true;
+          enableGitIntegration = true;
+        };
+        # delta replaces git's pager for diffs and the interactive
+        # add/checkout selection screens. Side-by-side rendering and
+        # syntax highlighting make review usable over an SSH session.
+        # `enableGitIntegration` is set explicitly because home-manager
+        # deprecated the automatic-on-when-git-enabled behavior.
+        delta = {
+          enable = true;
+          enableGitIntegration = true;
+          options = {
+            navigate = true;
+            side-by-side = true;
+            features = "interactive";
+          };
+        };
         # Generic git defaults for any operator working in an ix VM.
         # Identity (user.name/email), commit signing, GPG/SSH agent
         # paths, and per-host credential helpers stay out of here: those
@@ -141,26 +161,15 @@ in
         # baked into every image.
         git = {
           enable = true;
-          # delta replaces git's pager for diffs and the interactive
-          # add/checkout selection screens. Side-by-side rendering and
-          # syntax highlighting make review usable over an SSH session.
-          delta = {
-            enable = true;
-            options = {
-              navigate = true;
-              side-by-side = true;
-              features = "interactive";
+          settings = {
+            alias = {
+              # Compact log: subject + short hash, one per line.
+              lg = "log --pretty=format:'%s %C(dim)%h%C(reset)'";
+              # Pull rebase then push, the recovery move after a rejected push.
+              sync = "!git pull --rebase && git push";
+              # Delete local branches whose remote-tracking branch is gone.
+              cleanup = "!git fetch --prune && git branch -vv | grep \": gone]\" | grep -v \"\\\\*\" | awk \"{print \\$1}\" | xargs -r git branch -d";
             };
-          };
-          aliases = {
-            # Compact log: subject + short hash, one per line.
-            lg = "log --pretty=format:'%s %C(dim)%h%C(reset)'";
-            # Pull rebase then push, the recovery move after a rejected push.
-            sync = "!git pull --rebase && git push";
-            # Delete local branches whose remote-tracking branch is gone.
-            cleanup = "!git fetch --prune && git branch -vv | grep \": gone]\" | grep -v \"\\\\*\" | awk \"{print \\$1}\" | xargs -r git branch -d";
-          };
-          extraConfig = {
             init.defaultBranch = "main";
             pull.rebase = true;
             push = {
@@ -300,59 +309,73 @@ in
       };
     };
 
-    environment.systemPackages = builtins.attrValues {
-      inherit (pkgs)
-        ast-grep
-        bat
-        bpftrace
-        btop
-        eza
-        fd
-        file
-        gdb
-        # gnutar, gzip, and zstd ride along so any VM switched once stays
-        # switchable: `ix switch --source` streams a tarball through
-        # `tar -x -I zstd` inside the guest, and these binaries are not
-        # on NixOS' default system PATH.
-        gnutar
-        gzip
-        # Alternative editors next to the default neovim. Helix is the
-        # modern single-binary editor; micro is the nano-style fallback
-        # for operators who want predictable bindings without modes.
-        helix
-        htop
-        micro
-        jq
-        lldb
-        lsof
-        mgrep
-        ncdu
-        # nh wraps nixos-rebuild/home-manager/darwin-rebuild with a
-        # build tree (via nom), pre-activation diffs (via dix), and
-        # confirmation prompts. nix-output-monitor is shipped
-        # separately so plain `nom nix build .#foo` works outside nh.
-        # nix-tree is the interactive TUI for exploring a derivation's
-        # dependency graph.
-        nh
-        nix-output-monitor
-        nix-tree
-        # Walks DWARF/BTF type info to pretty-print kernel and userspace
-        # structs out of core dumps, /proc/kcore, or VM RAM memfds. The
-        # canonical tool for "I have raw memory and I need to know what
-        # struct lives at this offset" — incident-debug ergonomics that
-        # don't fit inside gdb/lldb.
-        pahole
-        pv
-        ripgrep
-        strace
-        tcpdump
-        # Pane and tab multiplexer for one session. Connection survival
-        # across SSH drops is handled by ix itself (AGENTS.md "VM
-        # assumptions"), so zellij is shipped for splits, not reattach.
-        zellij
-        zstd
-        ;
-    };
+    environment.systemPackages =
+      (builtins.attrValues {
+        inherit (pkgs)
+          ast-grep
+          bat
+          bpftrace
+          btop
+          # Stack unwinder and ELF/DWARF inspector. `eu-stack` resolves
+          # stripped binaries against separate debuginfo, `eu-readelf`
+          # gives a saner view of section/note contents than `readelf`,
+          # and `eu-unstrip` recombines a stripped binary with its
+          # debug companion before feeding it to gdb/drgn/pahole.
+          elfutils
+          eza
+          fd
+          file
+          gdb
+          # gnutar, gzip, and zstd ride along so any VM switched once stays
+          # switchable: `ix switch --source` streams a tarball through
+          # `tar -x -I zstd` inside the guest, and these binaries are not
+          # on NixOS' default system PATH.
+          gnutar
+          gzip
+          # Alternative editors next to the default neovim. Helix is the
+          # modern single-binary editor; micro is the nano-style fallback
+          # for operators who want predictable bindings without modes.
+          helix
+          htop
+          micro
+          jq
+          lldb
+          lsof
+          mgrep
+          ncdu
+          # nh wraps nixos-rebuild/home-manager/darwin-rebuild with a
+          # build tree (via nom), pre-activation diffs (via dix), and
+          # confirmation prompts. nix-output-monitor is shipped
+          # separately so plain `nom nix build .#foo` works outside nh.
+          # nix-tree is the interactive TUI for exploring a derivation's
+          # dependency graph.
+          nh
+          nix-output-monitor
+          nix-tree
+          # Walks DWARF/BTF type info to pretty-print kernel and userspace
+          # structs out of core dumps, /proc/kcore, or VM RAM memfds. The
+          # canonical tool for "I have raw memory and I need to know what
+          # struct lives at this offset", which gdb/lldb both fumble.
+          pahole
+          pv
+          ripgrep
+          strace
+          tcpdump
+          # Pane and tab multiplexer for one session. Connection survival
+          # across SSH drops is handled by ix itself (AGENTS.md "VM
+          # assumptions"), so zellij is shipped for splits, not reattach.
+          zellij
+          zstd
+          ;
+      })
+      ++ [
+        # Persistent Python session exposed over MCP. Lets an agent inside
+        # the VM (or one shelling in via `ix shell`) hand structured Python
+        # off to a client without round-tripping shell quoting, and keeps
+        # the interpreter warm across calls so iterative debugging on a
+        # live process or memfd doesn't re-import every step.
+        ix.packages.python-mcp-server
+      ];
 
     # Pre-create the workspace at boot so login.nu can cd into it
     # without racing tmpfiles or relying on mkdir from the shell.
