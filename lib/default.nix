@@ -241,6 +241,7 @@ let
     cpp = import ./languages/cpp.nix { inherit errors; };
     elixir = import ./languages/elixir.nix { inherit errors; };
     erlang = import ./languages/erlang.nix { inherit errors; };
+    gleam = import ./languages/gleam.nix { };
     go = import ./languages/go.nix { inherit errors; };
     haskell = import ./languages/haskell.nix { inherit errors; };
     java = import ./languages/java { inherit errors lib; };
