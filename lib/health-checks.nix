@@ -3,27 +3,29 @@
   parallel, verifies the declared `ix.healthChecks` via the existing
   `ix-fleet up` polling loop, and tears the VMs down on completion.
 
-  Each example contributes a small Nushell lifecycle script that
-  force-deletes any leftover VM with the same node name, invokes
-  `fleet.up` (which boots and polls health checks), then force-deletes
-  the VM again so the next run starts from scratch and an unrelated VM
-  is never left running after a test.
+  Each example contributes a Nushell lifecycle script that sanity-checks
+  for the `ix` binary, force-deletes any leftover VM with the same node
+  name, invokes `fleet.up`, then force-deletes the VM again so the next
+  run starts from scratch and an unrelated VM is never left running
+  after a test.
 
-  The lifecycle scripts are run in parallel through `process-compose`.
-  A sentinel `_done` process depends on every example with
-  `process_completed` and triggers `exit_on_end`, so the supervisor
-  shuts down cleanly even when one or more examples fail. The exit
-  code from `process-compose up` is non-zero if any lifecycle exited
-  non-zero, so `nix run .#health-checks` propagates the test result.
+  The lifecycle scripts are run in parallel by `dag-runner`, the
+  repo-owned task runner. dag-runner reads a JSON spec describing the
+  graph, fans out per-node tokio tasks, surfaces an inline indicatif
+  spinner per task on a TTY (line output otherwise), captures stdout
+  and stderr so failed nodes' logs are dumped at the end, and exits
+  with the worst node exit code. Pass `--output json` to get an
+  NDJSON event stream instead.
 */
 {
   lib,
   pkgs,
   writeNushellApplication,
+  dagRunner,
 }:
 { exampleFleets }:
 let
-  yamlFormat = pkgs.formats.yaml { };
+  jsonFormat = pkgs.formats.json { };
 
   mkLifecycle =
     name: fleet:
@@ -34,6 +36,16 @@ let
           let home = ($env.HOME? | default "")
           if $home != "" {
             $env.PATH = [$"($home)/.local/bin"] ++ $env.PATH
+          }
+
+          if (which ix | is-empty) {
+            print -e $"[${name}] ix binary not found in PATH"
+            print -e "  PATH segments:"
+            for p in $env.PATH {
+              print -e $"    ($p)"
+            }
+            print -e "  install the ix CLI into ~/.local/bin (or another PATH directory) before running health-checks"
+            exit 1
           }
 
           let plan_data = (open ${fleet.plan} | from json)
@@ -65,37 +77,20 @@ let
 
   lifecycles = lib.mapAttrs mkLifecycle exampleFleets;
 
-  exampleProcesses = lib.mapAttrs (_name: lifecycle: {
-    command = lib.getExe lifecycle;
-    availability.restart = "no";
-  }) lifecycles;
-
-  doneProcess = {
-    command = "${lib.getExe' pkgs.coreutils "true"}";
-    depends_on = lib.mapAttrs (_name: _: {
-      condition = "process_completed";
+  spec = {
+    nodes = lib.mapAttrs (_name: lifecycle: {
+      command = [ (lib.getExe lifecycle) ];
     }) lifecycles;
-    availability = {
-      restart = "no";
-      exit_on_end = true;
-    };
   };
 
-  config = {
-    version = "0.5";
-    processes = exampleProcesses // {
-      _done = doneProcess;
-    };
-  };
-
-  configFile = yamlFormat.generate "health-checks-process-compose.yaml" config;
+  specFile = jsonFormat.generate "health-checks-dag.json" spec;
 in
 writeNushellApplication pkgs {
   name = "health-checks";
-  runtimeInputs = [ pkgs.process-compose ];
+  runtimeInputs = [ dagRunner ];
   text = ''
     def --wrapped main [...args] {
-      exec ${lib.getExe pkgs.process-compose} -f ${configFile} up ...$args
+      exec ${lib.getExe dagRunner} ...$args ${specFile}
     }
   '';
 }

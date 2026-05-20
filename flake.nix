@@ -52,6 +52,7 @@
             rcon = ./packages/minecraft/rcon;
             syncManaged = ./packages/minecraft/sync-managed;
           };
+          dagRunner = ./packages/dag-runner;
           llmClippy = ./packages/llm-clippy;
           minestom.servers.hello = ./packages/minestom/servers/hello;
           nixCargoUnit = ./packages/nix-cargo-unit;

@@ -546,6 +546,10 @@ let
         inherit pkgs;
       };
       basePackages = {
+        dag-runner = pkgs.callPackage paths.packages.dagRunner {
+          inherit pkgs;
+          ix = ixForPackages;
+        };
         ix-fleet = pkgs.callPackage paths.packages.ixFleet {
           ix = ixForPackages;
         };

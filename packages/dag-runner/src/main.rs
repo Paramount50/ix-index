@@ -1,0 +1,494 @@
+//! Run a JSON-described DAG of commands with inline progress.
+//!
+//! The spec is a flat map of nodes, each with an argv `command` and an
+//! optional `depends_on` list. Nodes whose deps have completed run as soon
+//! as they are unblocked, so the layout of the graph determines how much
+//! parallelism is achievable; there is no notion of "levels".
+//!
+//! Output modes:
+//! - `auto` (default): TUI on a TTY, plain otherwise.
+//! - `tui`: indicatif `MultiProgress` with one inline spinner per node.
+//! - `plain`: line-buffered "started" / "finished" lines, no spinners.
+//! - `json`: NDJSON event stream plus a final `summary` record.
+//!
+//! Exit code reflects the worst node outcome: zero if every node succeeded,
+//! the worst non-zero command exit code otherwise, or 1 if any node was
+//! skipped because a dep failed.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::IsTerminal;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::{Context, Result, bail};
+use clap::{Parser, ValueEnum};
+use futures::FutureExt;
+use futures::future::{BoxFuture, Shared};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use serde::{Deserialize, Serialize};
+use tokio::process::Command;
+use tokio::sync::Mutex;
+
+#[derive(Parser)]
+#[command(
+    about = "Run a JSON-described DAG of commands in parallel with inline progress.",
+    version
+)]
+struct Args {
+    /// Path to the JSON DAG spec.
+    spec: PathBuf,
+
+    /// Output mode.
+    #[arg(long, value_enum, default_value_t = OutputMode::Auto)]
+    output: OutputMode,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum OutputMode {
+    Auto,
+    Tui,
+    Plain,
+    Json,
+}
+
+#[derive(Deserialize)]
+struct Spec {
+    nodes: HashMap<String, NodeSpec>,
+}
+
+#[derive(Deserialize, Clone)]
+struct NodeSpec {
+    /// `argv`. `command[0]` is the program; the rest are arguments.
+    command: Vec<String>,
+    #[serde(default)]
+    depends_on: Vec<String>,
+}
+
+#[derive(Clone, Debug)]
+enum Outcome {
+    Succeeded,
+    Failed(i32),
+    Skipped,
+}
+
+impl Outcome {
+    const fn label(&self) -> &'static str {
+        match self {
+            Self::Succeeded => "succeeded",
+            Self::Failed(_) => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+struct NodeRecord {
+    outcome: Outcome,
+    duration: Duration,
+    stdout: String,
+    stderr: String,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+enum Event<'a> {
+    NodeStarted {
+        node: &'a str,
+        ts_ms: u128,
+    },
+    NodeFinished {
+        node: &'a str,
+        outcome: &'a str,
+        exit_code: Option<i32>,
+        duration_ms: u128,
+    },
+    Summary {
+        total: usize,
+        succeeded: usize,
+        failed: usize,
+        skipped: usize,
+        duration_ms: u128,
+    },
+}
+
+enum CycleColor {
+    Gray,
+    Black,
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+    let text = std::fs::read_to_string(&args.spec)
+        .with_context(|| format!("reading spec: {}", args.spec.display()))?;
+    let spec: Spec = serde_json::from_str(&text).context("parsing spec JSON")?;
+
+    validate(&spec)?;
+
+    let mode = resolve_mode(args.output);
+    let started = Instant::now();
+    let records = run(spec, mode, started).await?;
+
+    if matches!(mode, OutputMode::Json) {
+        emit_summary(&records, started);
+    } else {
+        print_summary(&records, started);
+    }
+
+    std::process::exit(exit_code(&records));
+}
+
+fn resolve_mode(requested: OutputMode) -> OutputMode {
+    match requested {
+        OutputMode::Auto => {
+            if std::io::stdout().is_terminal() {
+                OutputMode::Tui
+            } else {
+                OutputMode::Plain
+            }
+        }
+        m => m,
+    }
+}
+
+fn validate(spec: &Spec) -> Result<()> {
+    for (name, node) in &spec.nodes {
+        for dep in &node.depends_on {
+            if !spec.nodes.contains_key(dep) {
+                bail!("node {name} depends on unknown node {dep}");
+            }
+        }
+    }
+    detect_cycle(&spec.nodes)?;
+    Ok(())
+}
+
+fn detect_cycle(nodes: &HashMap<String, NodeSpec>) -> Result<()> {
+    let mut color: HashMap<&str, CycleColor> = HashMap::new();
+
+    let mut names: Vec<&str> = nodes.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    for name in names {
+        let mut stack = Vec::new();
+        visit_cycle(name, nodes, &mut color, &mut stack)?;
+    }
+    Ok(())
+}
+
+fn visit_cycle<'a>(
+    name: &'a str,
+    nodes: &'a HashMap<String, NodeSpec>,
+    color: &mut HashMap<&'a str, CycleColor>,
+    stack: &mut Vec<&'a str>,
+) -> Result<()> {
+    match color.get(name) {
+        Some(CycleColor::Gray) => {
+            stack.push(name);
+            bail!("cycle detected: {}", stack.join(" -> "));
+        }
+        Some(CycleColor::Black) => return Ok(()),
+        None => {}
+    }
+    color.insert(name, CycleColor::Gray);
+    stack.push(name);
+    for dep in &nodes[name].depends_on {
+        visit_cycle(dep, nodes, color, stack)?;
+    }
+    stack.pop();
+    color.insert(name, CycleColor::Black);
+    Ok(())
+}
+
+fn topological_order(nodes: &HashMap<String, NodeSpec>) -> Vec<String> {
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut order: Vec<String> = Vec::with_capacity(nodes.len());
+
+    // Deterministic walk so the spawn order matches the spec's lexicographic
+    // node order rather than a HashMap iteration accident; this keeps log
+    // output stable across runs.
+    let mut names: Vec<&String> = nodes.keys().collect();
+    names.sort();
+    for name in names {
+        visit_topo(name, nodes, &mut visited, &mut order);
+    }
+    order
+}
+
+fn visit_topo(
+    name: &str,
+    nodes: &HashMap<String, NodeSpec>,
+    visited: &mut HashSet<String>,
+    order: &mut Vec<String>,
+) {
+    if !visited.insert(name.to_string()) {
+        return;
+    }
+    for dep in &nodes[name].depends_on {
+        visit_topo(dep, nodes, visited, order);
+    }
+    order.push(name.to_string());
+}
+
+type SharedOutcome = Shared<BoxFuture<'static, Outcome>>;
+
+async fn run(
+    spec: Spec,
+    mode: OutputMode,
+    started: Instant,
+) -> Result<BTreeMap<String, NodeRecord>> {
+    let multi = matches!(mode, OutputMode::Tui).then(MultiProgress::new);
+    let records: Arc<Mutex<BTreeMap<String, NodeRecord>>> = Arc::new(Mutex::new(BTreeMap::new()));
+
+    let order = topological_order(&spec.nodes);
+    let mut futs: HashMap<String, SharedOutcome> = HashMap::new();
+
+    for name in &order {
+        let node = spec.nodes[name].clone();
+        let name_owned = name.clone();
+        let dep_futs: Vec<SharedOutcome> =
+            node.depends_on.iter().map(|d| futs[d].clone()).collect();
+        let pb = multi.as_ref().map(|m| make_spinner(m, &name_owned));
+        let records_for_task = records.clone();
+
+        let fut = async move {
+            for dep in &dep_futs {
+                let _ = dep.clone().await;
+            }
+
+            let any_dep_bad = {
+                let guard = records_for_task.lock().await;
+                node.depends_on
+                    .iter()
+                    .any(|d| !matches!(guard.get(d).map(|r| &r.outcome), Some(Outcome::Succeeded)))
+            };
+
+            if any_dep_bad {
+                report_finished(&name_owned, &Outcome::Skipped, started, mode, pb.as_ref());
+                records_for_task.lock().await.insert(
+                    name_owned.clone(),
+                    NodeRecord {
+                        outcome: Outcome::Skipped,
+                        duration: Duration::ZERO,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                    },
+                );
+                return Outcome::Skipped;
+            }
+
+            report_started(&name_owned, started, mode, pb.as_ref());
+            let node_started = Instant::now();
+            let (outcome, stdout, stderr) = run_command(&node).await;
+            let duration = node_started.elapsed();
+            report_finished(&name_owned, &outcome, started, mode, pb.as_ref());
+
+            records_for_task.lock().await.insert(
+                name_owned.clone(),
+                NodeRecord {
+                    outcome: outcome.clone(),
+                    duration,
+                    stdout,
+                    stderr,
+                },
+            );
+            outcome
+        }
+        .boxed()
+        .shared();
+
+        futs.insert(name.clone(), fut);
+    }
+
+    let handles: Vec<_> = futs.values().cloned().map(tokio::spawn).collect();
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    if let Some(multi) = multi {
+        let _ = multi.clear();
+    }
+
+    let final_records = std::mem::take(&mut *records.lock().await);
+    Ok(final_records)
+}
+
+fn make_spinner(multi: &MultiProgress, name: &str) -> ProgressBar {
+    let pb = multi.add(ProgressBar::new_spinner());
+    // The template uses indicatif's own substitution syntax, which clippy's
+    // literal-string-with-formatting-args lint mistakes for a `format!`
+    // template; allow it on this one call.
+    #[allow(clippy::literal_string_with_formatting_args)]
+    let style =
+        ProgressStyle::with_template("{spinner:.cyan} {prefix:.bold} {wide_msg} {elapsed:.dim}")
+            .expect("static template")
+            .tick_chars("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏ ");
+    pb.set_style(style);
+    pb.set_prefix(name.to_string());
+    pb.set_message("pending");
+    pb
+}
+
+async fn run_command(node: &NodeSpec) -> (Outcome, String, String) {
+    let mut cmd = Command::new(&node.command[0]);
+    cmd.args(&node.command[1..]);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    match cmd.output().await {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let outcome = if output.status.success() {
+                Outcome::Succeeded
+            } else {
+                Outcome::Failed(output.status.code().unwrap_or(1))
+            };
+            (outcome, stdout, stderr)
+        }
+        Err(e) => (Outcome::Failed(127), String::new(), format!("failed to spawn: {e}")),
+    }
+}
+
+fn report_started(name: &str, started: Instant, mode: OutputMode, pb: Option<&ProgressBar>) {
+    match mode {
+        OutputMode::Tui => {
+            if let Some(pb) = pb {
+                pb.set_message("running");
+                pb.enable_steady_tick(Duration::from_millis(100));
+            }
+        }
+        OutputMode::Plain => {
+            println!("[{:>6.1}s] {} started", started.elapsed().as_secs_f64(), name);
+        }
+        OutputMode::Json => {
+            emit(&Event::NodeStarted {
+                node: name,
+                ts_ms: started.elapsed().as_millis(),
+            });
+        }
+        OutputMode::Auto => unreachable!("auto resolved earlier"),
+    }
+}
+
+fn report_finished(
+    name: &str,
+    outcome: &Outcome,
+    started: Instant,
+    mode: OutputMode,
+    pb: Option<&ProgressBar>,
+) {
+    match mode {
+        OutputMode::Tui => {
+            if let Some(pb) = pb {
+                let suffix: String = match outcome {
+                    Outcome::Succeeded => "✓ succeeded".to_string(),
+                    Outcome::Failed(code) => format!("✗ failed (exit {code})"),
+                    Outcome::Skipped => "⊘ skipped (dep failed)".to_string(),
+                };
+                pb.disable_steady_tick();
+                pb.finish_with_message(suffix);
+            }
+        }
+        OutputMode::Plain => {
+            println!(
+                "[{:>6.1}s] {} {}",
+                started.elapsed().as_secs_f64(),
+                name,
+                outcome.label()
+            );
+        }
+        OutputMode::Json => {
+            let exit_code_value = match outcome {
+                Outcome::Failed(c) => Some(*c),
+                _ => None,
+            };
+            emit(&Event::NodeFinished {
+                node: name,
+                outcome: outcome.label(),
+                exit_code: exit_code_value,
+                duration_ms: started.elapsed().as_millis(),
+            });
+        }
+        OutputMode::Auto => unreachable!("auto resolved earlier"),
+    }
+}
+
+fn emit<T: Serialize>(event: &T) {
+    if let Ok(line) = serde_json::to_string(event) {
+        println!("{line}");
+    }
+}
+
+fn exit_code(records: &BTreeMap<String, NodeRecord>) -> i32 {
+    let mut worst = 0i32;
+    for record in records.values() {
+        let code = match &record.outcome {
+            Outcome::Succeeded => 0,
+            Outcome::Failed(c) => *c,
+            Outcome::Skipped => 1,
+        };
+        if code > worst {
+            worst = code;
+        }
+    }
+    worst
+}
+
+fn print_summary(records: &BTreeMap<String, NodeRecord>, started: Instant) {
+    let total = records.len();
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+    let mut skipped = 0usize;
+    for record in records.values() {
+        match record.outcome {
+            Outcome::Succeeded => succeeded += 1,
+            Outcome::Failed(_) => failed += 1,
+            Outcome::Skipped => skipped += 1,
+        }
+    }
+    eprintln!(
+        "{total} task{plural}: {succeeded} succeeded, {failed} failed, {skipped} skipped in {:.1}s",
+        started.elapsed().as_secs_f64(),
+        plural = if total == 1 { "" } else { "s" }
+    );
+    for (name, record) in records {
+        eprintln!(
+            "  {name}: {} ({:.1}s)",
+            record.outcome.label(),
+            record.duration.as_secs_f64()
+        );
+    }
+    // Dump captured output from failed nodes so a CI log includes everything
+    // needed to diagnose, since indicatif ate the live streams in TUI mode
+    // and Stdio::piped() ate them everywhere else.
+    for (name, record) in records {
+        if matches!(record.outcome, Outcome::Failed(_))
+            && (!record.stdout.is_empty() || !record.stderr.is_empty())
+        {
+            eprintln!("--- {name} stdout ---");
+            eprintln!("{}", record.stdout.trim_end());
+            eprintln!("--- {name} stderr ---");
+            eprintln!("{}", record.stderr.trim_end());
+        }
+    }
+}
+
+fn emit_summary(records: &BTreeMap<String, NodeRecord>, started: Instant) {
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+    let mut skipped = 0usize;
+    for record in records.values() {
+        match record.outcome {
+            Outcome::Succeeded => succeeded += 1,
+            Outcome::Failed(_) => failed += 1,
+            Outcome::Skipped => skipped += 1,
+        }
+    }
+    emit(&Event::Summary {
+        total: records.len(),
+        succeeded,
+        failed,
+        skipped,
+        duration_ms: started.elapsed().as_millis(),
+    });
+}

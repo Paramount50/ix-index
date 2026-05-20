@@ -130,6 +130,7 @@ let
   healthChecks = import ./health-checks.nix {
     inherit lib pkgs;
     inherit (ix) writeNushellApplication;
+    dagRunner = repoPackages.dag-runner;
   } { inherit exampleFleets; };
 in
 {
@@ -162,6 +163,7 @@ in
         };
 
       inherit (repoPackages)
+        dag-runner
         ix-fleet
         mc-probe
         minecraft-nbt
