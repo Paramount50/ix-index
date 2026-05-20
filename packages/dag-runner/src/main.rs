@@ -29,6 +29,7 @@ use futures::FutureExt;
 use futures::future::{BoxFuture, Shared};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
@@ -284,7 +285,7 @@ async fn run(
 
             report_started(&name_owned, started, mode, pb.as_ref());
             let node_started = Instant::now();
-            let (outcome, stdout, stderr) = run_command(&node).await;
+            let (outcome, stdout, stderr) = run_command(&node, pb.as_ref()).await;
             let duration = node_started.elapsed();
             report_finished(&name_owned, &outcome, started, mode, pb.as_ref());
 
@@ -334,24 +335,80 @@ fn make_spinner(multi: &MultiProgress, name: &str) -> ProgressBar {
     pb
 }
 
-async fn run_command(node: &NodeSpec) -> (Outcome, String, String) {
+async fn run_command(node: &NodeSpec, pb: Option<&ProgressBar>) -> (Outcome, String, String) {
     let mut cmd = Command::new(&node.command[0]);
-    cmd.args(&node.command[1..]);
-    cmd.envs(&node.env);
-    cmd.stdout(Stdio::piped());
-    cmd.stderr(Stdio::piped());
-    match cmd.output().await {
-        Ok(output) => {
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-            let outcome = if output.status.success() {
+    cmd.args(&node.command[1..])
+        .envs(&node.env)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        // If we panic or drop the future for any reason, don't leak a child
+        // into the surrounding shell.
+        .kill_on_drop(true);
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return (Outcome::Failed(127), String::new(), format!("failed to spawn: {e}\n")),
+    };
+
+    let stdout_pipe = child.stdout.take().expect("stdout piped");
+    let stderr_pipe = child.stderr.take().expect("stderr piped");
+    let stdout_task = tokio::spawn(tee_lines(stdout_pipe, pb.cloned()));
+    let stderr_task = tokio::spawn(tee_lines(stderr_pipe, pb.cloned()));
+
+    let outcome = match child.wait().await {
+        Ok(status) => {
+            if status.success() {
                 Outcome::Succeeded
             } else {
-                Outcome::Failed(output.status.code().unwrap_or(1))
-            };
-            (outcome, stdout, stderr)
+                Outcome::Failed(status.code().unwrap_or(1))
+            }
         }
-        Err(e) => (Outcome::Failed(127), String::new(), format!("failed to spawn: {e}")),
+        Err(e) => {
+            return (Outcome::Failed(1), String::new(), format!("wait failed: {e}\n"));
+        }
+    };
+
+    let stdout = stdout_task.await.unwrap_or_default();
+    let stderr = stderr_task.await.unwrap_or_default();
+    (outcome, stdout, stderr)
+}
+
+/// Read `stream` line-by-line, returning the full captured text and, when a
+/// spinner is wired up, updating its message with the most recent non-empty
+/// line so a long-running node looks alive instead of just ticking elapsed.
+async fn tee_lines(stream: impl AsyncRead + Unpin, pb: Option<ProgressBar>) -> String {
+    let mut reader = BufReader::new(stream);
+    let mut captured = String::new();
+    let mut line = String::new();
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) | Err(_) => break,
+            Ok(_) => {
+                captured.push_str(&line);
+                if let Some(pb) = &pb {
+                    let trimmed = line.trim_end_matches(['\n', '\r']);
+                    if !trimmed.is_empty() {
+                        pb.set_message(truncate_for_spinner(trimmed));
+                    }
+                }
+            }
+        }
+    }
+    captured
+}
+
+/// Clip a line to a single-row display width. Char-aware so multibyte
+/// terminal output doesn't get sliced mid-codepoint.
+fn truncate_for_spinner(line: &str) -> String {
+    const MAX: usize = 80;
+    let count = line.chars().count();
+    if count <= MAX {
+        line.to_string()
+    } else {
+        let mut out: String = line.chars().take(MAX - 1).collect();
+        out.push('…');
+        out
     }
 }
 
@@ -622,5 +679,29 @@ mod tests {
         let mut records = BTreeMap::new();
         records.insert("a".into(), record(Outcome::Skipped));
         assert_eq!(exit_code(&records), 1);
+    }
+
+    #[test]
+    fn truncate_for_spinner_preserves_short_strings() {
+        assert_eq!(truncate_for_spinner("hello"), "hello");
+    }
+
+    #[test]
+    fn truncate_for_spinner_clips_with_ellipsis() {
+        let long: String = "x".repeat(200);
+        let out = truncate_for_spinner(&long);
+        assert!(out.chars().count() <= 80);
+        assert!(out.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_for_spinner_is_char_safe() {
+        // 100 four-byte emoji; byte-slicing would split a codepoint.
+        let s: String = "🦀".repeat(100);
+        let out = truncate_for_spinner(&s);
+        assert!(out.chars().count() <= 80);
+        assert!(out.ends_with('…'));
+        // Round-trips as valid UTF-8 (no panic from char-count above).
+        assert!(out.is_char_boundary(out.len()));
     }
 }
