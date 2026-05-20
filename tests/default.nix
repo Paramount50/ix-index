@@ -669,7 +669,10 @@ let
           null
         else
           pkgs.linkFarmFromDrvs "cargo-unit-real-workspace-${name}-tests" (
-            builtins.attrValues testWorkspace.tests
+            # `tests.<binary>` is now `{ all; cases; }` after the per-#[test]
+            # split (854b662); `.all` keeps the link-farm at one entry per
+            # test binary, the same shape this script expects.
+            map (entry: entry.all) (builtins.attrValues testWorkspace.tests)
           );
     };
 
