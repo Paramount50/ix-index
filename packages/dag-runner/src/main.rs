@@ -492,3 +492,126 @@ fn emit_summary(records: &BTreeMap<String, NodeRecord>, started: Instant) {
         duration_ms: started.elapsed().as_millis(),
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(deps: &[&str]) -> NodeSpec {
+        NodeSpec {
+            command: vec!["true".into()],
+            depends_on: deps.iter().map(|s| (*s).to_string()).collect(),
+        }
+    }
+
+    fn spec_of(nodes: &[(&str, &[&str])]) -> Spec {
+        Spec {
+            nodes: nodes.iter().map(|(n, d)| ((*n).to_string(), node(d))).collect(),
+        }
+    }
+
+    fn record(outcome: Outcome) -> NodeRecord {
+        NodeRecord {
+            outcome,
+            duration: Duration::ZERO,
+            stdout: String::new(),
+            stderr: String::new(),
+        }
+    }
+
+    #[test]
+    fn spec_round_trips_through_json() {
+        let text = r#"{"nodes":{"a":{"command":["true"]},"b":{"command":["echo","x"],"depends_on":["a"]}}}"#;
+        let spec: Spec = serde_json::from_str(text).unwrap();
+        assert_eq!(spec.nodes.len(), 2);
+        assert_eq!(spec.nodes["a"].command, vec!["true"]);
+        assert!(spec.nodes["a"].depends_on.is_empty());
+        assert_eq!(spec.nodes["b"].depends_on, vec!["a"]);
+    }
+
+    #[test]
+    fn validate_rejects_missing_dependency() {
+        let spec = spec_of(&[("a", &["ghost"])]);
+        let err = validate(&spec).unwrap_err().to_string();
+        assert!(err.contains("ghost"), "error should name the missing dep, got: {err}");
+        assert!(err.contains('a'), "error should name the offending node, got: {err}");
+    }
+
+    #[test]
+    fn detect_cycle_catches_self_loop() {
+        let spec = spec_of(&[("a", &["a"])]);
+        let err = validate(&spec).unwrap_err().to_string();
+        assert!(err.contains("cycle"), "expected cycle error, got: {err}");
+    }
+
+    #[test]
+    fn detect_cycle_catches_indirect_cycle() {
+        let spec = spec_of(&[("a", &["b"]), ("b", &["c"]), ("c", &["a"])]);
+        let err = validate(&spec).unwrap_err().to_string();
+        assert!(err.contains("cycle"), "expected cycle error, got: {err}");
+    }
+
+    #[test]
+    fn validate_accepts_diamond() {
+        let spec = spec_of(&[("a", &[]), ("b", &["a"]), ("c", &["a"]), ("d", &["b", "c"])]);
+        validate(&spec).unwrap();
+    }
+
+    #[test]
+    fn topological_order_places_root_first_and_sink_last() {
+        let spec = spec_of(&[("a", &[]), ("b", &["a"]), ("c", &["a"]), ("d", &["b", "c"])]);
+        let order = topological_order(&spec.nodes);
+        let pos = |n: &str| order.iter().position(|x| x == n).unwrap();
+        assert_eq!(pos("a"), 0);
+        assert_eq!(pos("d"), 3);
+        assert!(pos("b") < pos("d"));
+        assert!(pos("c") < pos("d"));
+    }
+
+    #[test]
+    fn topological_order_is_deterministic_for_independent_nodes() {
+        let spec = spec_of(&[("c", &[]), ("a", &[]), ("b", &[])]);
+        assert_eq!(
+            topological_order(&spec.nodes),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+    }
+
+    #[test]
+    fn exit_code_zero_when_all_succeeded() {
+        let mut records = BTreeMap::new();
+        records.insert("a".into(), record(Outcome::Succeeded));
+        records.insert("b".into(), record(Outcome::Succeeded));
+        assert_eq!(exit_code(&records), 0);
+    }
+
+    #[test]
+    fn exit_code_empty_is_zero() {
+        let records = BTreeMap::new();
+        assert_eq!(exit_code(&records), 0);
+    }
+
+    #[test]
+    fn exit_code_propagates_single_failure() {
+        let mut records = BTreeMap::new();
+        records.insert("a".into(), record(Outcome::Failed(7)));
+        assert_eq!(exit_code(&records), 7);
+    }
+
+    #[test]
+    fn exit_code_picks_worst_failure_over_skipped() {
+        let mut records = BTreeMap::new();
+        records.insert("a".into(), record(Outcome::Succeeded));
+        records.insert("b".into(), record(Outcome::Failed(3)));
+        records.insert("c".into(), record(Outcome::Skipped));
+        records.insert("d".into(), record(Outcome::Failed(9)));
+        assert_eq!(exit_code(&records), 9);
+    }
+
+    #[test]
+    fn exit_code_skipped_only_is_one() {
+        let mut records = BTreeMap::new();
+        records.insert("a".into(), record(Outcome::Skipped));
+        assert_eq!(exit_code(&records), 1);
+    }
+}
