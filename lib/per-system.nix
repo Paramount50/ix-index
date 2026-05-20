@@ -74,35 +74,6 @@ let
     ];
   };
 
-  examplesHealthChecksJson = pkgs.writeText "examples-health-checks.json" (
-    builtins.toJSON ix.examplesHealthChecks
-  );
-
-  healthChecks = ix.writeNushellApplication pkgs {
-    name = "health-checks";
-    text = ''
-      def main [] {
-        open ${examplesHealthChecksJson}
-          | transpose example nodes
-          | each {|e|
-              $e.nodes | transpose node checks
-                | each {|n|
-                    $n.checks | transpose check spec
-                      | each {|c| {
-                          example: $e.example
-                          node: $n.node
-                          check: $c.check
-                          from: $c.spec.from
-                          description: $c.spec.description
-                        } }
-                  }
-                | flatten
-            }
-          | flatten
-      }
-    '';
-  };
-
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };
 
   repoPackages = ix.packageSetFor pkgs;
@@ -185,7 +156,6 @@ in
     ix-fleet = mkApp repoPackages.ix-fleet "Render ix fleet plans and commands";
     ix-shell-sync-ignored = mkApp ixShellSyncIgnored "Copy git-ignored files into an ix shell workspace";
     mc-source = mkApp mcSource "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
-    health-checks = mkApp healthChecks "List every ix.healthChecks entry declared by examples";
     nix-cargo-unit = mkApp repoPackages.nix-cargo-unit "Render Cargo unit graphs as Nix derivations";
     python-mcp-server = mkApp repoPackages.python-mcp-server "Run a Python MCP server";
   };
