@@ -17,7 +17,6 @@ let
     native = pkgs.kotlin-native;
   };
 
-  defaultTarget = "jvm";
 in
 {
   /**
@@ -35,14 +34,14 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the compiler comes from.
-    - `target`: one of `"jvm" | "native"`. Defaults to `"jvm"`.
+    - `target`: required, one of `"jvm" | "native"`.
 
     Example:
     ```nix
     { pkgs, ix, ... }:
     let
-      jdk = ix.languages.java.jdk pkgs { version = "21"; };
-      kotlinc = ix.languages.kotlin.compiler pkgs { };
+      jdk = ix.languages.java.jdk pkgs { version = "21"; distribution = "openjdk"; };
+      kotlinc = ix.languages.kotlin.compiler pkgs { target = "jvm"; };
     in {
       environment = {
         systemPackages = [ jdk kotlinc ];
@@ -53,10 +52,13 @@ in
   */
   compiler =
     pkgs:
-    {
-      target ? defaultTarget,
-    }:
+    args:
     let
+      target = errors.requireArg {
+        context = "ix.languages.kotlin.compiler";
+        inherit args;
+        name = "target";
+      };
       checkedTarget = errors.assertEnum {
         name = "ix.languages.kotlin.compiler.target";
         value = target;

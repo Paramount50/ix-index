@@ -14,7 +14,6 @@ let
     "28" = pkgs.erlang_28;
   };
 
-  defaultVersion = "latest";
 in
 {
   /**
@@ -27,8 +26,8 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the toolchain comes from.
-    - `version`: one of `"latest" | "26" | "27" | "28"`. Defaults to
-      `"latest"`.
+    - `version`: required, one of `"latest" | "26" | "27" | "28"`. Pass
+      `"latest"` to follow `pkgs.erlang`.
 
     Example:
     ```nix
@@ -39,9 +38,14 @@ in
   */
   toolchain =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
+    args:
+    let
+      version = errors.requireArg {
+        context = "ix.languages.erlang.toolchain";
+        inherit args;
+        name = "version";
+      };
+    in
     errors.requireAttr {
       context = "ix.languages.erlang.toolchain: unknown version";
       attrset = toolchainsFor pkgs;

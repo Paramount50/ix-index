@@ -20,7 +20,6 @@ let
     "9.14" = pkgs.haskell.compiler.ghc914;
   };
 
-  defaultVersion = "latest";
 in
 {
   /**
@@ -39,11 +38,11 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the compiler comes from.
-    - `version`: one of `"latest" | "9.6" | "9.8" | "9.10" | "9.12" |
-      "9.14"`. Defaults to `"latest"`. Pin a specific minor when an
-      upstream library has a known incompatibility with a newer GHC
-      (typeclass-resolution changes between 9.x lines are still a
-      regular source of build breakage).
+    - `version`: required, one of `"latest" | "9.6" | "9.8" | "9.10" |
+      "9.12" | "9.14"`. Pass `"latest"` to follow `pkgs.ghc`; pin a
+      specific minor when an upstream library has a known
+      incompatibility with a newer GHC (typeclass-resolution changes
+      between 9.x lines are still a regular source of build breakage).
 
     Example:
     ```nix
@@ -54,9 +53,14 @@ in
   */
   compiler =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
+    args:
+    let
+      version = errors.requireArg {
+        context = "ix.languages.haskell.compiler";
+        inherit args;
+        name = "version";
+      };
+    in
     errors.requireAttr {
       context = "ix.languages.haskell.compiler: unknown version";
       attrset = compilersFor pkgs;

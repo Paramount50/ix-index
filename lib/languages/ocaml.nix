@@ -17,14 +17,19 @@ let
     "5.4" = pkgs.ocaml-ng.ocamlPackages_5_4;
   };
 
-  defaultVersion = "latest";
-
   packageSetFor =
     pkgs: version:
     errors.requireAttr {
       context = "ix.languages.ocaml: unknown version";
       attrset = ocamlPackagesFor pkgs;
       key = version;
+    };
+
+  requireVersion =
+    context: args:
+    errors.requireArg {
+      inherit context args;
+      name = "version";
     };
 in
 {
@@ -39,10 +44,10 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the compiler comes from.
-    - `version`: one of `"latest" | "4.14" | "5.1" | "5.2" | "5.3"
-      | "5.4"`. Defaults to `"latest"`. Pin `"4.14"` only for an
-      upstream that has not migrated past the pre-multicore runtime;
-      the long-term destination is the 5.x line.
+    - `version`: required, one of `"latest" | "4.14" | "5.1" | "5.2"
+      | "5.3" | "5.4"`. Pin `"4.14"` only for an upstream that has not
+      migrated past the pre-multicore runtime; the long-term
+      destination is the 5.x line.
 
     Example:
     ```nix
@@ -57,10 +62,8 @@ in
   */
   compiler =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
-    (packageSetFor pkgs version).ocaml;
+    args:
+    (packageSetFor pkgs (requireVersion "ix.languages.ocaml.compiler" args)).ocaml;
 
   /**
     Return Dune, the default OCaml build tool, from the matching
@@ -72,10 +75,8 @@ in
   */
   dune =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
-    (packageSetFor pkgs version).dune_3;
+    args:
+    (packageSetFor pkgs (requireVersion "ix.languages.ocaml.dune" args)).dune_3;
 
   /**
     Return opam, the OCaml package manager. Resolves dependencies
@@ -101,10 +102,8 @@ in
   */
   utop =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
-    (packageSetFor pkgs version).utop;
+    args:
+    (packageSetFor pkgs (requireVersion "ix.languages.ocaml.utop" args)).utop;
 
   /**
     Return `ocaml-lsp`, the OCaml language server, built against the
@@ -114,8 +113,6 @@ in
   */
   languageServer =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
-    (packageSetFor pkgs version).ocaml-lsp;
+    args:
+    (packageSetFor pkgs (requireVersion "ix.languages.ocaml.languageServer" args)).ocaml-lsp;
 }

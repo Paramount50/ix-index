@@ -253,10 +253,17 @@ let
     scala = import ./languages/scala.nix { inherit errors; };
     zig = import ./languages/zig.nix { inherit errors; };
   };
-  rustNightlyToolchainFor = pkgs: languages.rust.toolchain pkgs { };
+  rustNightlyToolchainFor =
+    pkgs:
+    languages.rust.toolchain pkgs {
+      channel = "nightly";
+      version = languages.rust.defaultNightlyDate;
+    };
   rustNightlyClippyToolchainFor =
     pkgs:
     languages.rust.toolchain pkgs {
+      channel = "nightly";
+      version = languages.rust.defaultNightlyDate;
       components = [
         "cargo"
         "llvm-tools"

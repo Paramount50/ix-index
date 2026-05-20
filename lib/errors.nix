@@ -97,6 +97,34 @@ in
       '';
 
   /**
+    Look up `name` in `args` and return the value. Throws naming the
+    helper and the missing argument when absent, so a caller that drops
+    a required field gets a fixable error at the call site instead of
+    `attribute 'version' missing` from inside the helper's body.
+
+    Use at every helper boundary where the argument has no sensible
+    default (version pins, vendor selection, target architecture).
+
+    `context` should name the helper (for example
+    `"ix.languages.go.toolchain"`).
+
+    Arguments:
+    - `context`: helper path for the error message.
+    - `args`: the caller's argument attrset.
+    - `name`: required attribute name.
+  */
+  requireArg =
+    {
+      context,
+      args,
+      name,
+    }:
+    args.${name} or (throw ''
+      ix: ${context}
+        Missing required argument '${name}'.
+    '');
+
+  /**
     Look up `key` in `attrset` and return the value. Throws with the list
     of available keys when the lookup misses, so a typo in a catalog key
     or a missing entry produces a fixable error instead of `attribute

@@ -17,13 +17,11 @@ let
     "3" = pkgs.scala_3;
   };
 
-  defaultVersion = "3";
-
   /**
     Default JDK paired with Scala 2/3 when the caller does not pass
-    `jdk`. Matches `ix.languages.java.jdk pkgs { }` (OpenJDK 21
-    headless) so a service that resolves both helpers with defaults
-    pulls one JDK into the closure rather than two.
+    `jdk`. Matches the default `ix.languages.java.jdk` returns for
+    OpenJDK 21 headless so a service that resolves both helpers
+    without overriding pulls one JDK into the closure rather than two.
 
     Hardcoded rather than imported from the java namespace to keep this
     file independent; if the java default moves, this constant moves
@@ -43,8 +41,8 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the compiler and JDK come from.
-    - `version`: Scala major, `"2" | "3"`. Defaults to `"3"`. Pick `"2"`
-      only when an upstream library has not migrated; the long-term
+    - `version`: required, Scala major (`"2" | "3"`). Pick `"2"` only
+      when an upstream library has not migrated; the long-term
       destination is `"3"`.
     - `jdk`: optional resolved JDK. Defaults to OpenJDK 21 headless.
 
@@ -52,8 +50,8 @@ in
     ```nix
     { pkgs, ix, ... }:
     let
-      jdk = ix.languages.java.jdk pkgs { version = "21"; };
-      scala = ix.languages.scala.compiler pkgs { inherit jdk; };
+      jdk = ix.languages.java.jdk pkgs { version = "21"; distribution = "openjdk"; };
+      scala = ix.languages.scala.compiler pkgs { version = "3"; inherit jdk; };
     in {
       environment = {
         systemPackages = [ jdk scala ];
@@ -64,11 +62,16 @@ in
   */
   compiler =
     pkgs:
-    {
-      version ? defaultVersion,
+    args@{
       jdk ? defaultJdkFor pkgs,
+      ...
     }:
     let
+      version = errors.requireArg {
+        context = "ix.languages.scala.compiler";
+        inherit args;
+        name = "version";
+      };
       checkedVersion = errors.assertEnum {
         name = "ix.languages.scala.compiler.version";
         value = version;

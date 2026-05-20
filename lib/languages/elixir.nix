@@ -18,7 +18,6 @@ let
     "1.19" = pkgs.elixir_1_19;
   };
 
-  defaultVersion = "latest";
 in
 {
   /**
@@ -36,8 +35,8 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the toolchain comes from.
-    - `version`: one of `"latest" | "1.15" | "1.16" | "1.17" | "1.18" |
-      "1.19"`. Defaults to `"latest"`.
+    - `version`: required, one of `"latest" | "1.15" | "1.16" | "1.17"
+      | "1.18" | "1.19"`. Pass `"latest"` to follow `pkgs.elixir`.
 
     Example:
     ```nix
@@ -48,9 +47,14 @@ in
   */
   toolchain =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
+    args:
+    let
+      version = errors.requireArg {
+        context = "ix.languages.elixir.toolchain";
+        inherit args;
+        name = "version";
+      };
+    in
     errors.requireAttr {
       context = "ix.languages.elixir.toolchain: unknown version";
       attrset = toolchainsFor pkgs;

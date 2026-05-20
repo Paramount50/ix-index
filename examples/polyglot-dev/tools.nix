@@ -14,10 +14,10 @@ let
 
   jvm = {
     inherit jdk;
-    kotlin = L.kotlin.compiler pkgs { };
-    scala = L.scala.compiler pkgs { inherit jdk; };
+    kotlin = L.kotlin.compiler pkgs { target = "jvm"; };
+    scala = L.scala.compiler pkgs { version = "3"; inherit jdk; };
     maven = L.java.maven pkgs { inherit jdk; };
-    gradle = L.java.gradle pkgs { inherit jdk; };
+    gradle = L.java.gradle pkgs { version = "9"; inherit jdk; };
   };
 
   native = {
@@ -27,6 +27,7 @@ let
     # nightly-feature foot-cannon.
     rust = L.rust.toolchain pkgs {
       channel = "stable";
+      version = "latest";
       components = [
         "cargo"
         "clippy"
@@ -36,15 +37,15 @@ let
         "rustfmt"
       ];
     };
-    cpp = L.cpp.compiler pkgs { vendor = "gcc"; };
+    cpp = L.cpp.compiler pkgs { vendor = "gcc"; version = "latest"; };
     cmake = L.cpp.cmake pkgs { };
     ninja = L.cpp.ninja pkgs { };
-    zig = L.zig.toolchain pkgs { };
+    zig = L.zig.toolchain pkgs { version = "latest"; };
   };
 
   scripting = {
-    python = L.python.interpreter pkgs { };
-    go = L.go.toolchain pkgs { };
+    python = L.python.interpreter pkgs { version = "3.14"; };
+    go = L.go.toolchain pkgs { version = "latest"; };
     node = L.javascript.node pkgs { version = "22"; };
     bun = L.javascript.bun pkgs { };
     deno = L.javascript.deno pkgs { };
@@ -52,15 +53,15 @@ let
   };
 
   functional = {
-    haskell = L.haskell.compiler pkgs { };
+    haskell = L.haskell.compiler pkgs { version = "latest"; };
     cabal = L.haskell.cabal pkgs { };
-    ocaml = L.ocaml.compiler pkgs { };
-    dune = L.ocaml.dune pkgs { };
+    ocaml = L.ocaml.compiler pkgs { version = "latest"; };
+    dune = L.ocaml.dune pkgs { version = "latest"; };
   };
 
   beam = {
-    erlang = L.erlang.toolchain pkgs { };
-    elixir = L.elixir.toolchain pkgs { };
+    erlang = L.erlang.toolchain pkgs { version = "latest"; };
+    elixir = L.elixir.toolchain pkgs { version = "latest"; };
     # Gleam is the BEAM-targeting statically-typed cousin whose compiler
     # itself is written in Rust; pairs with `erlang` above for the runtime.
     gleam = L.gleam.compiler pkgs { };
@@ -69,7 +70,9 @@ let
   # Language servers stay together so an editor inside the VM finds the
   # whole set in one PATH lookup. `scala.languageServer` (Metals) needs
   # the same JDK the compiler was overridden against so loaded sources
-  # parse against one runtime; the rest are JDK-independent.
+  # parse against one runtime; `ocaml.languageServer` is
+  # compiler-version-coupled so it takes the same OCaml version as the
+  # `compiler` above; the rest are JDK- and version-independent.
   languageServers = [
     (L.cpp.languageServer pkgs { })
     (L.go.languageServer pkgs { })
@@ -77,7 +80,7 @@ let
     (L.java.languageServer pkgs { })
     (L.javascript.languageServer pkgs { })
     (L.kotlin.languageServer pkgs { })
-    (L.ocaml.languageServer pkgs { })
+    (L.ocaml.languageServer pkgs { version = "latest"; })
     (L.scala.languageServer pkgs { inherit jdk; })
     (L.zig.languageServer pkgs { })
   ];

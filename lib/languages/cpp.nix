@@ -40,8 +40,6 @@ let
     };
   };
 
-  defaultVendor = "gcc";
-  defaultVersion = "latest";
 in
 {
   /**
@@ -55,11 +53,12 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the compiler comes from.
-    - `vendor`: `"gcc" | "clang"`. Defaults to `"gcc"` because the repo
-      base layer is already znver5-tuned gcc; matching saves a second
-      C++ stdlib in the closure.
-    - `version`: `"latest"` or a vendor-specific major. gcc covers
-      9-15, clang covers 16-22.
+    - `vendor`: required, `"gcc" | "clang"`. Pick `"gcc"` to match the
+      repo's znver5-tuned base layer (saves a second C++ stdlib in the
+      closure); pick `"clang"` when an upstream needs libc++ or
+      AddressSanitizer features clang ships ahead of.
+    - `version`: required, `"latest"` or a vendor-specific major. gcc
+      covers 9-15, clang covers 16-22.
 
     Example:
     ```nix
@@ -74,11 +73,19 @@ in
   */
   compiler =
     pkgs:
-    {
-      vendor ? defaultVendor,
-      version ? defaultVersion,
-    }:
+    args:
     let
+      vendor = errors.requireArg {
+        context = "ix.languages.cpp.compiler";
+        inherit args;
+        name = "vendor";
+      };
+      version = errors.requireArg {
+        context = "ix.languages.cpp.compiler";
+        inherit args;
+        name = "version";
+      };
+
       checkedVendor = errors.assertEnum {
         name = "ix.languages.cpp.compiler.vendor";
         value = vendor;

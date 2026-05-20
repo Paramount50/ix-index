@@ -15,7 +15,6 @@ let
     "0.16" = pkgs.zig_0_16;
   };
 
-  defaultVersion = "latest";
 in
 {
   /**
@@ -29,9 +28,9 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the toolchain comes from.
-    - `version`: one of `"latest" | "0.12" | "0.13" | "0.14" | "0.15"
-      | "0.16"`. Defaults to `"latest"`. Pin a specific minor because
-      Zig is pre-1.0 and breaks source-level compatibility regularly.
+    - `version`: required, one of `"latest" | "0.12" | "0.13" | "0.14"
+      | "0.15" | "0.16"`. Pin a specific minor because Zig is pre-1.0
+      and breaks source-level compatibility regularly.
 
     Example:
     ```nix
@@ -42,9 +41,14 @@ in
   */
   toolchain =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
+    args:
+    let
+      version = errors.requireArg {
+        context = "ix.languages.zig.toolchain";
+        inherit args;
+        name = "version";
+      };
+    in
     errors.requireAttr {
       context = "ix.languages.zig.toolchain: unknown version";
       attrset = toolchainsFor pkgs;

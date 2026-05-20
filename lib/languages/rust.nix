@@ -16,19 +16,14 @@ let
   ];
 
   /**
-    Default nightly date used when the caller does not pin one. Bumping
-    this advances every consumer that did not opt out, including the
-    repo's own clippy and policy-check pipelines.
+    Repo-wide pinned nightly date. Exposed below as
+    `ix.languages.rust.defaultNightlyDate` so the internal
+    `rustNightlyToolchainFor` in `lib/default.nix` can grep-stably
+    forward it through `toolchain`. Bumping this advances every
+    consumer that calls `toolchain pkgs { channel = "nightly"; version
+    = languages.rust.defaultNightlyDate; }`.
   */
   defaultNightlyDate = "2026-05-17";
-
-  /**
-    Channel-specific defaults for `version`. Stable/beta default to the
-    rust-overlay `latest` alias so routine bumps follow the overlay
-    flake update. Nightly pins a date so a wider rust-overlay update
-    cannot silently shift the toolchain underneath a build.
-  */
-  defaultVersionFor = channel: if channel == "nightly" then defaultNightlyDate else "latest";
 
   /**
     Toolchain components everyone gets by default. The shape mirrors
@@ -72,6 +67,8 @@ let
       "${channel}-${version}";
 in
 {
+  inherit defaultNightlyDate;
+
   /**
     Build a rust-overlay toolchain.
 
@@ -81,13 +78,12 @@ in
     valid alternatives listed so a typo is fixable from the message
     alone.
 
-    Arguments (all optional):
-    - `channel`: one of `"stable" | "beta" | "nightly"`. Default
-      `"nightly"`.
-    - `version`: `"latest"`, a semver like `"1.83.0"`, or an ISO date
-      like `"2025-12-01"` (date is only valid on nightly). Defaults to
-      the repo-wide pinned nightly date when channel is `"nightly"`,
-      otherwise `"latest"`.
+    Arguments:
+    - `channel`: required, one of `"stable" | "beta" | "nightly"`.
+    - `version`: required, `"latest"`, a semver like `"1.83.0"`, or an
+      ISO date like `"2025-12-01"` (date is only valid on nightly).
+      The repo's `rustNightlyToolchainFor` passes the pinned date
+      `${defaultNightlyDate}` so that pin stays grep-able.
     - `components`: rustup components to include. Defaults to the
       minimal `[ "cargo" "rust-std" "rustc" ]` set; pass an extended
       list (for example `[ ... "rust-src" "rust-analyzer" ]`) when the
@@ -112,14 +108,24 @@ in
   */
   toolchain =
     pkgs:
-    {
-      channel ? "nightly",
-      version ? defaultVersionFor channel,
+    args@{
       components ? defaultComponents,
       targets ? [ ],
       profile ? "minimal",
+      ...
     }:
     let
+      channel = errors.requireArg {
+        context = "ix.languages.rust.toolchain";
+        inherit args;
+        name = "channel";
+      };
+      version = errors.requireArg {
+        context = "ix.languages.rust.toolchain";
+        inherit args;
+        name = "version";
+      };
+
       checkedChannel = errors.assertEnum {
         name = "ix.languages.rust.toolchain.channel";
         value = channel;

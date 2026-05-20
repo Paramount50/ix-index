@@ -14,7 +14,6 @@ let
     "25" = pkgs.nodejs_25;
   };
 
-  defaultNodeVersion = "latest";
 in
 {
   /**
@@ -29,9 +28,9 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the Node package comes from.
-    - `version`: one of `"latest" | "20" | "22" | "24" | "25"`. Defaults
-      to `"latest"`. Pin a specific even-major when the build needs
-      stable ABI compatibility for native modules.
+    - `version`: required, one of `"latest" | "20" | "22" | "24" | "25"`.
+      Pin a specific even-major when the build needs stable ABI
+      compatibility for native modules.
 
     Example:
     ```nix
@@ -42,9 +41,14 @@ in
   */
   node =
     pkgs:
-    {
-      version ? defaultNodeVersion,
-    }:
+    args:
+    let
+      version = errors.requireArg {
+        context = "ix.languages.javascript.node";
+        inherit args;
+        name = "version";
+      };
+    in
     errors.requireAttr {
       context = "ix.languages.javascript.node: unknown major";
       attrset = nodesFor pkgs;

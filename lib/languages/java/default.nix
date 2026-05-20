@@ -54,16 +54,17 @@ let
     };
   };
 
-  defaultDistribution = "openjdk";
-  defaultVersion = "21";
-
   /**
     Resolve the JDK package this namespace defaults to when a sibling
     helper (`maven`, `gradle`) does not get an explicit `jdk` argument.
     Pulls from the same table as the `jdk` helper so a caller that
     overrides nothing gets one consistent JDK across the toolchain.
+
+    Hard-coded to OpenJDK 21 headless (the LTS line that every JVM
+    upstream in this repo currently targets); pass `jdk = ...`
+    explicitly when a tool needs a different runtime.
   */
-  defaultJdkFor = pkgs: (jdksFor pkgs).${defaultDistribution}.${defaultVersion};
+  defaultJdkFor = pkgs: (jdksFor pkgs).openjdk."21";
 
   /**
     Per-major-version Gradle attribute mapping. nixpkgs also exposes a
@@ -75,8 +76,6 @@ let
     "8" = pkgs.gradle_8;
     "9" = pkgs.gradle_9;
   };
-
-  defaultGradleVersion = "9";
 in
 {
   /**
@@ -93,11 +92,11 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the JDK comes from.
-    - `version`: major version as a string (`"8" | "11" | "17" | "21" |
-      "23" | "24" | "25"`). Defaults to `"21"`, the current
+    - `version`: required, major version as a string (`"8" | "11" |
+      "17" | "21" | "23" | "24" | "25"`). `"21"` is the current
       long-term-support line.
-    - `distribution`: one of `"openjdk" | "temurin" | "corretto" |
-      "zulu"`. Defaults to `"openjdk"`.
+    - `distribution`: required, one of `"openjdk" | "temurin" |
+      "corretto" | "zulu"`.
 
     Example:
     ```nix
@@ -117,11 +116,19 @@ in
   */
   jdk =
     pkgs:
-    {
-      version ? defaultVersion,
-      distribution ? defaultDistribution,
-    }:
+    args:
     let
+      version = errors.requireArg {
+        context = "ix.languages.java.jdk";
+        inherit args;
+        name = "version";
+      };
+      distribution = errors.requireArg {
+        context = "ix.languages.java.jdk";
+        inherit args;
+        name = "distribution";
+      };
+
       checkedDistribution = errors.assertEnum {
         name = "ix.languages.java.jdk.distribution";
         value = distribution;
@@ -187,18 +194,24 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the Gradle and JDK packages come from.
-    - `jdk`: optional resolved JDK package. Defaults to the same JDK
-      `ix.languages.java.jdk pkgs { }` returns (OpenJDK 21 headless).
-    - `version`: Gradle major as a string (`"7" | "8" | "9"`). Defaults to
-      `"9"`, which matches `lib/build-gradle-fat-jar.nix`.
+    - `jdk`: optional resolved JDK package. Defaults to OpenJDK 21
+      headless, the same JDK every other helper in this namespace
+      assumes.
+    - `version`: required, Gradle major as a string (`"7" | "8" |
+      "9"`). `"9"` matches `lib/build-gradle-fat-jar.nix`.
   */
   gradle =
     pkgs:
-    {
+    args@{
       jdk ? defaultJdkFor pkgs,
-      version ? defaultGradleVersion,
+      ...
     }:
     let
+      version = errors.requireArg {
+        context = "ix.languages.java.gradle";
+        inherit args;
+        name = "version";
+      };
       gradlePackage = errors.requireAttr {
         context = "ix.languages.java.gradle: unknown Gradle major";
         attrset = gradlesFor pkgs;

@@ -17,7 +17,6 @@ let
     "1.26" = pkgs.go_1_26;
   };
 
-  defaultVersion = "latest";
 in
 {
   /**
@@ -31,10 +30,10 @@ in
 
     Arguments:
     - `pkgs`: nixpkgs instance the toolchain comes from.
-    - `version`: one of `"latest" | "1.23" | "1.25" | "1.26"`. Defaults
-      to `"latest"`. Pin a specific minor when the build needs a known
-      compiler version (race-detector internals, generic-inference
-      changes, std-lib API additions between releases).
+    - `version`: required, one of `"latest" | "1.23" | "1.25" | "1.26"`.
+      Pass `"latest"` to follow `pkgs.go`, or a specific minor when the
+      build needs a known compiler version (race-detector internals,
+      generic-inference changes, std-lib API additions between releases).
 
     Example:
     ```nix
@@ -45,9 +44,14 @@ in
   */
   toolchain =
     pkgs:
-    {
-      version ? defaultVersion,
-    }:
+    args:
+    let
+      version = errors.requireArg {
+        context = "ix.languages.go.toolchain";
+        inherit args;
+        name = "version";
+      };
+    in
     errors.requireAttr {
       context = "ix.languages.go.toolchain: unknown version";
       attrset = toolchainsFor pkgs;
