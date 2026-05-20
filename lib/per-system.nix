@@ -177,6 +177,7 @@ in
           };
         };
 
+      health-checks = healthChecks;
       inherit (repoPackages)
         dag-runner
         drgn
