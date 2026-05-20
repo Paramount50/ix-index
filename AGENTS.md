@@ -286,6 +286,16 @@ For minecraft this means:
 - Enabling a loader auto-enables the runtime via `mkDefault`.
 - Enabling two loaders is a module-merge conflict → loud eval error.
 
+## Typed NBT
+
+Generated `.nbt`/`.snbt`/`.nbt.gz` files (datapack structures, scoreboard sidecars, anything that goes through `mkMinecraftNbtFormat`) live under `services.minecraft.serverFiles`, `services.minecraft.configFiles`, or `services.minecraft.datapacks.<name>.files`. The encoder needs the NBT type of every value because Minecraft cares whether a number is a `Short` or an `Int` and JSON erases that distinction. `ix.minecraft.nbt` exposes the constructors that tag a value with its intended NBT type (`byte`, `short`, `int`, `long`, `float`, `double`, `string`, `list`, `compound`, `byteArray`, `intArray`, `longArray`, `root`, `bool`).
+
+When a file uses more than two or three NBT values, alias the constructor set as `tags` (plural) in a `let` binding and reference `tags.short 20`, `tags.compound { ... }`, and so on. `tags` matches nixpkgs convention for collection-namespaces (`lib.types`, `lib.licenses`, `pkgs.formats`, `lib.attrsets`); the alias drops in unambiguously and reads as "from the tag set, pull the short constructor". Do not alias as `tag` (singular) — each call returns a single tag but the namespace itself is a collection, and the singular form reads as a field access rather than a constructor pick. Do not alias as `nbt` either — the path-preservation rule applies to nested data like `minecraft.paper.config`, not to a flat constructor set hanging off a namespace.
+
+For one-shot uses (a single NBT value in an otherwise non-NBT file), skip the alias and write `ix.minecraft.nbt.short 20` directly. The alias only earns its keep when the local file is dense with typed values.
+
+Bare Nix scalars still work where the implicit NBT type matches Minecraft's expectation: a string becomes `TAG_String`, a bool becomes `TAG_Byte` 0/1, an integer becomes `TAG_Int` or `TAG_Long` depending on width, a float becomes `TAG_Double`. Reach for the typed constructors when the implicit choice is wrong (most spawner and tile-entity NBT, where the field is a `Short` and an `Int` either gets silently misread or rejected).
+
 ## Mods
 
 All mods go in `services.minecraft.mods`, keyed by Modrinth slug. Empty `{}` includes the jar with defaults. Attrsets with fields configure the mod.
