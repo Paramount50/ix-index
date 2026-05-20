@@ -242,24 +242,10 @@ let
     python = import ./languages/python.nix { inherit errors; };
     rust = import ./languages/rust.nix { inherit errors rust-overlay; };
   };
-  rustNightlyChannel = "nightly-2026-05-17";
-  pkgsWithRustOverlayFor =
-    pkgs: if builtins.hasAttr "rust-bin" pkgs then pkgs else pkgs.extend rust-overlay.overlays.default;
-  rustNightlyToolchainFor =
-    pkgs:
-    (pkgsWithRustOverlayFor pkgs).rust-bin.fromRustupToolchain {
-      channel = rustNightlyChannel;
-      components = [
-        "cargo"
-        "rust-std"
-        "rustc"
-      ];
-      profile = "minimal";
-    };
+  rustNightlyToolchainFor = pkgs: languages.rust pkgs { };
   rustNightlyClippyToolchainFor =
     pkgs:
-    (pkgsWithRustOverlayFor pkgs).rust-bin.fromRustupToolchain {
-      channel = rustNightlyChannel;
+    languages.rust pkgs {
       components = [
         "cargo"
         "llvm-tools"
@@ -269,11 +255,10 @@ let
         "rustc-dev"
         "rustfmt"
       ];
-      profile = "minimal";
     };
   llmClippyFor =
     pkgs:
-    (pkgsWithRustOverlayFor pkgs).callPackage paths.packages.llmClippy {
+    pkgs.callPackage paths.packages.llmClippy {
       rustToolchain = rustNightlyClippyToolchainFor pkgs;
     };
   rustFor =
