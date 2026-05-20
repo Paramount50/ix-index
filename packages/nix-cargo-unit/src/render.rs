@@ -1844,12 +1844,12 @@ fn render_test_entries_for(roots: &[usize], units: &[Unit], prepared: &PreparedG
             prepared.names[*index].clone()
         };
         let unit_ref = format!("${{units.{}}}", nix_attr(&prepared.names[*index]));
-        let binary = format!("\"{unit_ref}/bin/{}\"", unit.target.name);
+        let binary = format!("{unit_ref}/bin/{}", unit.target.name);
         let _ = writeln!(
             entries,
-            "    {} = pkgs.runCommand {} {{ }} ''\n      export RUST_TEST_THREADS=\"$NIX_BUILD_CORES\"\n      {binary}\n      mkdir -p \"$out\"\n    '';",
+            "    {} = mkTestEntry {{ name = {}; binary = \"{binary}\"; }};",
             nix_attr(&key),
-            nix_attr(&format!("cargo-unit-test-{key}")),
+            nix_attr(&key),
         );
     }
 
@@ -2028,9 +2028,11 @@ mod tests {
         .unwrap();
 
         assert!(rendered.contains("tests = {"));
-        assert!(rendered.contains("\"hello\" = pkgs.runCommand \"cargo-unit-test-hello\""));
+        assert!(rendered.contains("\"hello\" = mkTestEntry { name = \"hello\";"));
+        assert!(rendered.contains("/bin/hello\";"));
+        assert!(rendered.contains("mkTestEntry ="));
         assert!(rendered.contains("RUST_TEST_THREADS"));
-        assert!(rendered.contains("/bin/hello"));
+        assert!(rendered.contains("mkTestCases ="));
     }
 
     #[test]

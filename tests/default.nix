@@ -2254,7 +2254,8 @@ let
     grep -q 'hello from cargo-unit' cargo-unit-hello.out
     ${cargoUnitBinaries.cargo-unit-goodbye}/bin/cargo-unit-goodbye > cargo-unit-goodbye.out
     grep -q 'goodbye from cargo-unit' cargo-unit-goodbye.out
-    test -d ${cargoUnitWorkspace.targetSets.test.tests.cargo_unit_hello}
+    test -d ${cargoUnitWorkspace.targetSets.test.tests.cargo_unit_hello.all}
+    test -d ${cargoUnitWorkspace.targetSets.test.tests.cargo_unit_hello.cases."tests::returns_greeting"}
 
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
     test -d ${bunSite.bunNodeModules}/node_modules/clsx

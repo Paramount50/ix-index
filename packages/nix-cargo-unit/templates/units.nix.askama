@@ -11,6 +11,11 @@
   extraPolicyChecks ? {},
   extraRustcArgs ? [],
   extraRustcArgsForPlatform ? _platform: [],
+  # When true, `tests.<binary>.cases` also includes #[ignore]'d tests.
+  # Off by default to match `cargo test`. Toggling this only affects
+  # what shows up under `cases`; `all` always runs the harness without
+  # --include-ignored.
+  includeIgnored ? false,
 }:
 
 let
@@ -97,6 +102,69 @@ let
 
   units = rec {
 {{ unit_entries }}  };
+
+  # `<bin> --list --format terse` writes one `name: test` or `name: bench`
+  # line per item plus a trailing summary line. Keep the `: test` lines and
+  # strip the suffix.
+  parseTestList = path:
+    let
+      lines = pkgs.lib.splitString "\n" (builtins.readFile path);
+    in
+    map (pkgs.lib.removeSuffix ": test") (
+      builtins.filter (line: pkgs.lib.hasSuffix ": test" line) lines
+    );
+
+  # Derivation names forbid `:`, and Rust paths separate modules with `::`.
+  # Map both to ASCII-safe runs without losing the path shape.
+  sanitizeTestName = pkgs.lib.replaceStrings [ "::" ":" " " ] [ "--" "_" "_" ];
+
+  mkTestListDrv =
+    { name, binary, ignored }:
+    pkgs.runCommand
+      "cargo-unit-test-list-${name}${pkgs.lib.optionalString ignored "-ignored"}"
+      { }
+      ''
+        ${binary} --list --format terse ${pkgs.lib.optionalString ignored "--ignored"} > "$out"
+      '';
+
+  mkTestCases =
+    { name, binary, ignored }:
+    let
+      listDrv = mkTestListDrv { inherit name binary ignored; };
+      runFlag = pkgs.lib.optionalString ignored "--include-ignored ";
+    in
+    pkgs.lib.listToAttrs (
+      map (testName: {
+        name = testName;
+        value =
+          pkgs.runCommand
+            "cargo-unit-test-${name}-${sanitizeTestName testName}"
+            { }
+            ''
+              ${binary} --exact --nocapture ${runFlag}${pkgs.lib.escapeShellArg testName}
+              mkdir -p "$out"
+            '';
+      }) (parseTestList listDrv)
+    );
+
+  mkTestEntry =
+    { name, binary }:
+    {
+      # Runs the whole test binary in one derivation, mirroring `cargo test`.
+      all = pkgs.runCommand "cargo-unit-test-${name}" { } ''
+        export RUST_TEST_THREADS="$NIX_BUILD_CORES"
+        ${binary}
+        mkdir -p "$out"
+      '';
+      # One derivation per #[test]. Forces an IFD per accessed entry, so it
+      # only fires when a consumer reaches into `cases`.
+      cases =
+        mkTestCases { inherit name binary; ignored = false; }
+        // pkgs.lib.optionalAttrs includeIgnored (
+          mkTestCases { inherit name binary; ignored = true; }
+        );
+    };
+
   policyChecks = {
 {{ policy_check_entries }}  } // extraPolicyChecks;
   withPolicyChecks = package:
