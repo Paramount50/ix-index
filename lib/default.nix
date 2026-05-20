@@ -841,15 +841,23 @@ let
     lib.mapAttrs attach raw;
 
   /**
-    Discovered `examples/<name>/default.nix` fleets, built for a given
-    host system. Each is imported with `{ index = { lib = ix; }; }` to
-    match the contract examples already use, with `mkFleet` swapped for
-    the host-system variant so the wrapper derivations under
+    Discovered example fleets, built for a given host system. Discovery
+    walks two layouts side by side: flat `examples/<name>/default.nix`
+    and nested `examples/<category>/<name>/default.nix`. A directory is
+    treated as a category when it has no `default.nix` of its own. Keys
+    in the returned attrset are always the example's own name; the
+    category is organizational, mirroring how `discoverImages` flattens
+    `images/<cat>/<name>/` into bare names.
+
+    Each fleet is imported with `{ index = { lib = ix; }; }` to match
+    the contract examples already use, with `mkFleet` swapped for the
+    host-system variant so the wrapper derivations under
     `.up`/`.health`/`.replace` build for the requested system rather
     than always pinning to the default.
 
-    Adding an example is `mkdir examples/<name> + edit default.nix`;
-    this aggregator picks it up on the next eval, no registry edits.
+    Adding an example is `mkdir examples/<category>/<name> + edit
+    default.nix`; this aggregator picks it up on the next eval, no
+    registry edits.
   */
   exampleFleetsFor =
     {
@@ -867,11 +875,34 @@ let
           mkFleet = spec: (mkFleetFor hostSystem) (spec // { inherit nodePrefix; });
         };
       };
-      names = lib.filter (name: builtins.pathExists (paths.examples + "/${name}/default.nix")) (
-        subdirs paths.examples
-      );
+
+      isExampleDir = path: builtins.pathExists (path + "/default.nix");
+
+      topEntries = subdirs paths.examples;
+
+      flatPairs = map (name: {
+        inherit name;
+        path = paths.examples + "/${name}";
+      }) (lib.filter (name: isExampleDir (paths.examples + "/${name}")) topEntries);
+
+      categoryDirs = lib.filter (name: !(isExampleDir (paths.examples + "/${name}"))) topEntries;
+
+      nestedPairs = lib.concatMap (
+        cat:
+        let
+          catPath = paths.examples + "/${cat}";
+        in
+        map (name: {
+          inherit name;
+          path = catPath + "/${name}";
+        }) (lib.filter (name: isExampleDir (catPath + "/${name}")) (subdirs catPath))
+      ) categoryDirs;
     in
-    lib.genAttrs names (name: import (paths.examples + "/${name}") { index = indexShim; });
+    lib.listToAttrs (
+      map (e: lib.nameValuePair e.name (import e.path { index = indexShim; })) (
+        flatPairs ++ nestedPairs
+      )
+    );
 
   /**
     Default-system shortcut over `exampleFleetsFor`. Used by aggregators

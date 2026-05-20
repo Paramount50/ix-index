@@ -1,9 +1,9 @@
 { index }:
 
 index.lib.mkFleet {
-  defaults = [ { ix.image.tag = "survival-server"; } ];
+  defaults = [ { ix.image.tag = "crazy-terrain"; } ];
 
-  nodes.survival = {
+  nodes.crazy-terrain = {
     deployment = {
       ipv4 = true;
       healthChecks = [ "minecraft" ];

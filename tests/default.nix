@@ -848,7 +848,7 @@ let
 
   factionsExample =
     let
-      fleet = import ../examples/factions-server {
+      fleet = import ../examples/minecraft/factions {
         index = {
           lib = ix;
         };
@@ -869,7 +869,7 @@ let
 
   survivalExample =
     let
-      fleet = import ../examples/survival-server {
+      fleet = import ../examples/minecraft/survival {
         index = {
           lib = ix;
         };
@@ -1159,17 +1159,17 @@ let
       }
     ];
 
-    factions-server = [
+    factions = [
       {
-        assertion = factionsExample.config.ix.image.tag == "factions-server";
-        message = "factions-server example should set a stable replacement image tag";
+        assertion = factionsExample.config.ix.image.tag == "factions";
+        message = "factions example should set a stable replacement image tag";
       }
       {
         assertion =
           factionsExample.cfg.worldBorder.enable
           && factionsExample.cfg.worldBorder.diameter == 12000
           && factionsExample.cfg.properties."max-world-size" == 6000;
-        message = "factions-server example should declare a managed world border";
+        message = "factions example should declare a managed world border";
       }
       {
         assertion =
@@ -1179,11 +1179,11 @@ let
           builtins.elem factionsExample.cfg.port ports
           && builtins.elem 8100 ports
           && !(builtins.elem factionsExample.cfg.rcon.port ports);
-        message = "factions-server example should keep RCON private while exposing Minecraft and BlueMap";
+        message = "factions example should keep RCON private while exposing Minecraft and BlueMap";
       }
       {
         assertion = builtins.elem 24454 factionsExample.config.networking.firewall.allowedUDPPorts;
-        message = "factions-server example should expose Simple Voice Chat on the default UDP port";
+        message = "factions example should expose Simple Voice Chat on the default UDP port";
       }
       {
         assertion =
@@ -1198,7 +1198,7 @@ let
           ]
           && claims.simple-voice-chat.protocol == "udp"
           && claims.simple-voice-chat.port == 24454;
-        message = "factions-server example should register every service listener in ix.networking.portClaims";
+        message = "factions example should register every service listener in ix.networking.portClaims";
       }
       {
         assertion =
@@ -1243,14 +1243,14 @@ let
           && lib.any (
             package: lib.getName package == "mc-probe"
           ) factionsExample.config.environment.systemPackages;
-        message = "factions-server should layer systemctl + SLP-with-MOTD + host TCP probes";
+        message = "factions should layer systemctl + SLP-with-MOTD + host TCP probes";
       }
     ];
 
-    survival-server = [
+    survival = [
       {
-        assertion = survivalExample.config.ix.image.tag == "survival-server";
-        message = "survival-server example should set a stable replacement image tag";
+        assertion = survivalExample.config.ix.image.tag == "survival";
+        message = "survival example should set a stable replacement image tag";
       }
       {
         assertion =
@@ -1258,14 +1258,14 @@ let
           && survivalExample.velocity.servers.survival == "127.0.0.1:25566"
           && survivalExample.velocity.try == [ "survival" ]
           && survivalExample.velocity.forwarding.mode == "modern";
-        message = "survival-server example should route Velocity to the local Paper backend";
+        message = "survival example should route Velocity to the local Paper backend";
       }
       {
         assertion =
           survivalExample.geyser.enable
           && survivalExample.geyser.remote.authType == "floodgate"
           && survivalExample.floodgate.enable;
-        message = "survival-server example should enable Geyser with Floodgate auth";
+        message = "survival example should enable Geyser with Floodgate auth";
       }
       {
         assertion =
@@ -1274,7 +1274,7 @@ let
           && survivalExample.minecraft.port == 25566
           && !survivalExample.minecraft.openFirewall
           && !survivalExample.minecraft.properties."online-mode";
-        message = "survival-server example should keep Paper behind the proxy";
+        message = "survival example should keep Paper behind the proxy";
       }
       {
         assertion =
@@ -1284,11 +1284,11 @@ let
           builtins.elem 25565 ports
           && !(builtins.elem 25566 ports)
           && !(builtins.elem survivalExample.minecraft.rcon.port ports);
-        message = "survival-server example should expose Velocity while keeping backend and RCON private";
+        message = "survival example should expose Velocity while keeping backend and RCON private";
       }
       {
         assertion = builtins.elem 19132 survivalExample.config.networking.firewall.allowedUDPPorts;
-        message = "survival-server example should expose Geyser's Bedrock UDP listener";
+        message = "survival example should expose Geyser's Bedrock UDP listener";
       }
       {
         assertion =
@@ -1305,7 +1305,7 @@ let
           && claims.minecraft.port == 25566
           && claims.geyser.protocol == "udp"
           && claims.geyser.port == 19132;
-        message = "survival-server example should register proxy, backend, RCON, and Bedrock listeners";
+        message = "survival example should register proxy, backend, RCON, and Bedrock listeners";
       }
       {
         assertion =
@@ -1349,7 +1349,7 @@ let
               "--motd-contains"
               "ix Survival"
             ];
-        message = "survival-server should expose layered guest/host probes with MOTD-aware SLP on both proxy and backend";
+        message = "survival should expose layered guest/host probes with MOTD-aware SLP on both proxy and backend";
       }
     ];
 
@@ -2377,7 +2377,7 @@ let
   # --- Per-image build-time checks ------------------------------------------
 
   buildScripts = {
-    factions-server = ''
+    factions = ''
       grep -q '^QuickShop-Hikari$' ${factionsExample.managed.dropins}/quickshop-hikari.jar.plugin-name
       grep -q '^Vault$' ${factionsExample.managed.dropins}/vaultunlocked.jar.plugin-name
       grep -q '^Essentials$' ${factionsExample.managed.dropins}/essentialsx.jar.plugin-name
@@ -2401,7 +2401,7 @@ let
       grep -q 'worldborder set 12000' ${factionsExample.service.serviceConfig.ExecStart}
     '';
 
-    survival-server = ''
+    survival = ''
       test -L ${survivalExample.managed.velocityPlugins}/Geyser-Velocity.jar
       test -L ${survivalExample.managed.velocityPlugins}/floodgate-velocity.jar
       grep -q 'bind = "0.0.0.0:25565"' ${survivalExample.managed.velocityConfig}/velocity.toml
