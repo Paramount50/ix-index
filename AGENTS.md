@@ -12,6 +12,8 @@ Contributor setup and local checks are in @CONTRIBUTING.md.
 
 Work directly in the shared checkout on `development` unless the user asks for a branch or separate worktree. Pull before starting, then commit and push to `development` after checks pass.
 
+When the shared checkout already has unrelated in-progress edits, name them (paths and a one-line summary) and move the new work into a worktree (`git worktree add ../<short-name>-<branch> -b <branch> development`). Do not `git stash` the WIP out of the way: stashing is silently destructive from the working operator's perspective and ties the new work's success to a clean unstash later. Land worktree commits with `git push origin <branch>:development` (the pre-commit lint runs over the worktree, so it stays green even when the main checkout is dirty), then `git worktree remove ../<short-name>-<branch>` and `git branch -d <branch>`.
+
 ### Branch model
 
 `development` is the GitHub default branch. PRs target `development`; routine work lands there after local checks and review.
