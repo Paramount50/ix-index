@@ -1719,19 +1719,33 @@ fn scan_rust_includes_into_closure(
         if !resolved.starts_with(source_boundary) {
             continue;
         }
-        // A single referenced file almost always sits next to siblings the
-        // package also loads (`testdata/*.toml`, `fixtures/*.json`); promote
-        // to the parent directory rather than tracking one path at a time.
-        let include_root = if resolved.is_dir() {
-            resolved.clone()
-        } else {
-            resolved.parent().map(Path::to_path_buf).unwrap_or(resolved)
+        let Some(include_root) = include_closure_root(&resolved, source_boundary) else {
+            continue;
         };
         if !path_is_covered_by_roots(&include_root, included_roots) {
             queue.push_back(include_root.clone());
             included_roots.insert(include_root);
         }
     }
+}
+
+fn include_closure_root(resolved: &Path, source_boundary: &Path) -> Option<PathBuf> {
+    let include_root = if resolved.is_dir() {
+        resolved
+    } else {
+        resolved.parent().unwrap_or(resolved)
+    };
+
+    if include_root == source_boundary {
+        // A boundary file such as vendorDir/README.md must stay a file;
+        // promoting it to vendorDir walks every vendored crate symlink.
+        if resolved == source_boundary {
+            return None;
+        }
+        return Some(resolved.to_path_buf());
+    }
+
+    Some(include_root.to_path_buf())
 }
 
 /// Lift path arguments out of `include!`, `include_bytes!`, and
@@ -2760,6 +2774,85 @@ const CRLF: &str = include_str!("../../testdata/crlf.toml");
         .unwrap();
 
         assert!(rendered.contains("[ \"regex-lite\" \"testdata\" ]"));
+        fs::remove_dir_all(workspace).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn include_macro_does_not_promote_vendor_root_to_source_closure() {
+        let workspace = std::env::temp_dir().join(format!(
+            "nix-cargo-unit-vendor-include-boundary-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        let vendor = workspace.join("vendor");
+        let real = workspace.join("real");
+        let clap = real.join("clap-4.6.1");
+        let derive_arbitrary = real.join("derive_arbitrary-1.4.2");
+        fs::create_dir_all(clap.join("src")).unwrap();
+        fs::create_dir_all(derive_arbitrary.join("src")).unwrap();
+        fs::create_dir_all(&vendor).unwrap();
+        fs::write(
+            clap.join("Cargo.toml"),
+            r#"[package]
+name = "clap"
+version = "4.6.1"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            clap.join("src/lib.rs"),
+            r#"#![doc = include_str!("../../README.md")]
+"#,
+        )
+        .unwrap();
+        fs::write(derive_arbitrary.join("src/lib.rs"), "pub fn marker() {}\n").unwrap();
+        fs::write(vendor.join("README.md"), "vendor readme\n").unwrap();
+        std::os::unix::fs::symlink(&clap, vendor.join("clap-4.6.1")).unwrap();
+        std::os::unix::fs::symlink(&derive_arbitrary, vendor.join("derive_arbitrary-1.4.2"))
+            .unwrap();
+        let src_path = vendor.join("clap-4.6.1/src/lib.rs");
+        let graph: UnitGraph = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "units": [
+                {
+                    "pkg_id": "registry+https://github.com/rust-lang/crates.io-index#clap@4.6.1",
+                    "target": {
+                        "kind": ["lib"],
+                        "crate_types": ["lib"],
+                        "name": "clap",
+                        "src_path": src_path,
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "build",
+                    "dependencies": []
+                }
+            ],
+            "roots": [0]
+        }))
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: workspace.clone(),
+                vendor_root: Some(vendor),
+                cargo_lock_sources: cargo_lock_sources(&[(
+                    "clap",
+                    "4.6.1",
+                    "registry+https://github.com/rust-lang/crates.io-index",
+                )]),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("[ \"README.md\" \"clap-4.6.1\" ]"));
+        assert!(!rendered.contains("derive_arbitrary-1.4.2"));
         fs::remove_dir_all(workspace).unwrap();
     }
 
