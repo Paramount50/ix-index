@@ -448,6 +448,19 @@ let
         };
     };
 
+  remoteDesktopModuleDefault =
+    let
+      config = evalConfig [
+        {
+          services.remote-desktop.enable = true;
+        }
+      ];
+    in
+    {
+      inherit config;
+      cfg = config.services.remote-desktop;
+    };
+
   resourceMonitor =
     let
       config = evalConfig [
@@ -991,6 +1004,26 @@ let
       services.resource-monitor = {
         enable = true;
         port = 6080;
+      };
+    }
+  ];
+
+  remoteDesktopUnauthenticatedFirewallFailures = failedAssertionsFor [
+    {
+      services.remote-desktop = {
+        enable = true;
+        openFirewall = true;
+      };
+    }
+  ];
+
+  remoteDesktopSettingsAuthFirewallFailures = failedAssertionsFor [
+    {
+      services.remote-desktop = {
+        enable = true;
+        openFirewall = true;
+        auth = "file";
+        settings.auth = "none";
       };
     }
   ];
@@ -1983,7 +2016,37 @@ let
       }
       {
         assertion = remoteDesktop.cfg.auth == "none";
-        message = "remote-desktop should keep the current unauthenticated ix image contract explicit";
+        message = "remote-desktop image should use the explicit unauthenticated Xpra contract";
+      }
+      {
+        assertion = remoteDesktop.cfg.openFirewall;
+        message = "remote-desktop image should explicitly open the browser port";
+      }
+      {
+        assertion = remoteDesktop.cfg.allowUnauthenticated;
+        message = "remote-desktop image should explicitly allow unauthenticated browser access";
+      }
+      {
+        assertion = !remoteDesktopModuleDefault.cfg.openFirewall;
+        message = "remote-desktop module should keep the browser port closed unless callers opt in";
+      }
+      {
+        assertion = samePorts remoteDesktopModuleDefault.config.networking.firewall.allowedTCPPorts baseFirewallTcpPorts;
+        message = "remote-desktop module default should leave only ix sidecar TCP ports open";
+      }
+      {
+        assertion = lib.any (
+          failure:
+          lib.hasInfix "rendered Xpra auth = \"none\" requires services.remote-desktop.allowUnauthenticated = true" failure.message
+        ) remoteDesktopUnauthenticatedFirewallFailures;
+        message = "remote-desktop should reject unauthenticated firewall exposure unless it is explicit";
+      }
+      {
+        assertion = lib.any (
+          failure:
+          lib.hasInfix "rendered Xpra auth = \"none\" requires services.remote-desktop.allowUnauthenticated = true" failure.message
+        ) remoteDesktopSettingsAuthFirewallFailures;
+        message = "remote-desktop should check settings.auth overrides before opening the firewall";
       }
       {
         assertion = remoteDesktop.service.unit.description == "Xpra remote desktop";

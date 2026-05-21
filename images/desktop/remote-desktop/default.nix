@@ -8,5 +8,9 @@
     pkgs.firefox
   ];
 
-  services.remote-desktop.enable = true;
+  services.remote-desktop = {
+    enable = true;
+    openFirewall = true;
+    allowUnauthenticated = true;
+  };
 }

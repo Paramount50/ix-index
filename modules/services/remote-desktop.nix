@@ -39,6 +39,7 @@ let
   ];
 
   flags = lib.cli.toCommandLineGNU { } cfg.settings;
+  effectiveAuth = cfg.settings.auth or cfg.auth;
 
   launcher = ix.writeNushellApplication pkgs {
     name = "ix-remote-desktop";
@@ -79,6 +80,12 @@ in
       description = "Address Xpra binds for browser clients.";
     };
 
+    openFirewall = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Whether to open the Xpra browser port in the in-guest firewall.";
+    };
+
     display = mkOption {
       type = types.str;
       default = ":100";
@@ -104,6 +111,16 @@ in
       description = "Xpra authentication module for incoming clients.";
     };
 
+    allowUnauthenticated = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Permit `openFirewall = true` while `auth = "none"`. This is explicit
+        because it exposes an unauthenticated desktop to every network path
+        that can reach the VM.
+      '';
+    };
+
     settings = mkOption {
       type = types.attrsOf flagValueType;
       default = { };
@@ -119,6 +136,13 @@ in
   };
 
   config = mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = !cfg.openFirewall || effectiveAuth != "none" || cfg.allowUnauthenticated;
+        message = ''services.remote-desktop.openFirewall with rendered Xpra auth = "none" requires services.remote-desktop.allowUnauthenticated = true'';
+      }
+    ];
+
     ix.networking.portClaims.remote-desktop = {
       protocol = "tcp";
       inherit (cfg) port;
@@ -151,7 +175,7 @@ in
       pkgs.xterm
     ];
 
-    networking.firewall.allowedTCPPorts = [ cfg.port ];
+    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [ cfg.port ];
 
     users.groups.remote-desktop = { };
     users.users.remote-desktop = {
