@@ -62,5 +62,5 @@ in
     drops completions. The floating `pkgs.zls` matches `pkgs.zig`; pin
     both together if `toolchain` is on a non-default minor.
   */
-  languageServer = pkgs: { }: pkgs.zls;
+  languageServer = pkgs: _: pkgs.zls;
 }

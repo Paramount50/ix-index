@@ -230,7 +230,7 @@ in
     in-VM neovim/vscode workflow). Runtime-only server images that just
     execute compiled `.jar` artifacts do not need it.
   */
-  languageServer = pkgs: { }: pkgs.jdt-language-server;
+  languageServer = pkgs: _: pkgs.jdt-language-server;
 
   /**
     YourKit profiler integration for JVM services.

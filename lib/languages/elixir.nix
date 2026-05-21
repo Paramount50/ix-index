@@ -66,5 +66,5 @@ in
     Intended for dev VMs that host an editor; runtime-only servers
     executing compiled BEAM `.beam`/`.ez` artifacts do not need it.
   */
-  languageServer = pkgs: { }: pkgs.elixir-ls;
+  languageServer = pkgs: _: pkgs.elixir-ls;
 }

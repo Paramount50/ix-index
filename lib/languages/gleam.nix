@@ -1,5 +1,4 @@
-{ ... }:
-{
+_: {
   /**
     Return the Gleam compiler.
 
@@ -34,5 +33,5 @@
     }
     ```
   */
-  compiler = pkgs: { }: pkgs.gleam;
+  compiler = pkgs: _: pkgs.gleam;
 }

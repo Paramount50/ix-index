@@ -77,11 +77,11 @@ in
     workstation pattern, remote-desktop images). Runtime-only server
     images that just execute compiled `.jar` artifacts do not need it.
   */
-  languageServer = pkgs: { }: pkgs.kotlin-language-server;
+  languageServer = pkgs: _: pkgs.kotlin-language-server;
 
   /**
     Return the Kotlin interactive shell (`ki`, the official REPL/scratch
     runner) for ad-hoc evaluation inside a VM.
   */
-  repl = pkgs: { }: pkgs.kotlin-interactive-shell;
+  repl = pkgs: _: pkgs.kotlin-interactive-shell;
 }

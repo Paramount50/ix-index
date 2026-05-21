@@ -75,7 +75,7 @@ in
     versions above; override only if a project pins a cabal feature
     older releases lack.
   */
-  cabal = pkgs: { }: pkgs.cabal-install;
+  cabal = pkgs: _: pkgs.cabal-install;
 
   /**
     Return Stack.
@@ -85,7 +85,7 @@ in
     Relevant when an upstream project commits a `stack.yaml` and the
     snapshot is what guarantees the dependency closure.
   */
-  stack = pkgs: { }: pkgs.stack;
+  stack = pkgs: _: pkgs.stack;
 
   /**
     Return the Haskell language server package.
@@ -97,5 +97,5 @@ in
     should rebuild HLS against that GHC via
     `pkgs.haskell-language-server.override { supportedGhcVersions = [ "..." ]; }`.
   */
-  languageServer = pkgs: { }: pkgs.haskell-language-server;
+  languageServer = pkgs: _: pkgs.haskell-language-server;
 }

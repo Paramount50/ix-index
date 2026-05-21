@@ -68,7 +68,7 @@ in
     caller and returns the floating `pkgs.delve`; a service that pins Go
     and Delve to one minor should rebuild Delve itself with that Go.
   */
-  delve = pkgs: { }: pkgs.delve;
+  delve = pkgs: _: pkgs.delve;
 
   /**
     Return the gopls language server package.
@@ -79,5 +79,5 @@ in
     above. Pin and override only if a workspace needs a gopls feature
     older releases lacked.
   */
-  languageServer = pkgs: { }: pkgs.gopls;
+  languageServer = pkgs: _: pkgs.gopls;
 }

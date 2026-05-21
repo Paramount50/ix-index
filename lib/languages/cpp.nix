@@ -107,27 +107,27 @@ in
     Return CMake. The default modern build orchestrator for C/C++
     projects; reads `CMakeLists.txt`, drives ninja/make underneath.
   */
-  cmake = pkgs: { }: pkgs.cmake;
+  cmake = pkgs: _: pkgs.cmake;
 
   /**
     Return Ninja. Generator backend used by CMake and Meson when low
     incremental-build latency matters; faster than `make` for parallel
     rebuilds because it does not re-stat the entire dep graph.
   */
-  ninja = pkgs: { }: pkgs.ninja;
+  ninja = pkgs: _: pkgs.ninja;
 
   /**
     Return Meson. Build-system alternative to CMake, used by GNOME,
     systemd, and a non-trivial slice of nixpkgs C-language packages.
   */
-  meson = pkgs: { }: pkgs.meson;
+  meson = pkgs: _: pkgs.meson;
 
   /**
     Return GNU Make. Lowest common denominator; still right when a
     project's `Makefile` is the build interface and Ninja/CMake would
     be added complexity.
   */
-  make = pkgs: { }: pkgs.gnumake;
+  make = pkgs: _: pkgs.gnumake;
 
   /**
     Return clang-tools (provides `clangd`, the C/C++ language server,
@@ -139,5 +139,5 @@ in
     end is what parses the source, independent of which compiler
     actually builds the binaries.
   */
-  languageServer = pkgs: { }: pkgs.clang-tools;
+  languageServer = pkgs: _: pkgs.clang-tools;
 }

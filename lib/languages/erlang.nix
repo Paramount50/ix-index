@@ -81,5 +81,5 @@ in
     Intended for dev VMs that host an editor; runtime-only BEAM servers
     do not need it.
   */
-  languageServer = pkgs: { }: pkgs.erlang-language-platform;
+  languageServer = pkgs: _: pkgs.erlang-language-platform;
 }

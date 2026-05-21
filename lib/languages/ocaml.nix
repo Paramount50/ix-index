@@ -82,13 +82,13 @@ in
     OCaml version: it manages OCaml installations, it does not run
     inside one.
   */
-  opam = pkgs: { }: pkgs.opam;
+  opam = pkgs: _: pkgs.opam;
 
   /**
     Return `ocamlformat`, the canonical OCaml formatter. Project
     formatting is configured via `.ocamlformat` in the project root.
   */
-  ocamlformat = pkgs: { }: pkgs.ocamlformat;
+  ocamlformat = pkgs: _: pkgs.ocamlformat;
 
   /**
     Return `utop`, the modern OCaml REPL with completion and history.

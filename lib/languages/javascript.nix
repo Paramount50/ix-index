@@ -63,7 +63,7 @@ in
     builds; this helper exposes the same binary for runtime images that
     run a Bun server.
   */
-  bun = pkgs: { }: pkgs.bun;
+  bun = pkgs: _: pkgs.bun;
 
   /**
     Return the Deno runtime.
@@ -73,7 +73,7 @@ in
     can touch; that is a service-module concern, not a package-selection
     one, so the helper just returns the binary.
   */
-  deno = pkgs: { }: pkgs.deno;
+  deno = pkgs: _: pkgs.deno;
 
   /**
     Return the TypeScript compiler (`tsc`).
@@ -84,7 +84,7 @@ in
     runtime's own type-stripping (Node 22+ and Bun strip types at load
     but do not type-check).
   */
-  typescript = pkgs: { }: pkgs.typescript;
+  typescript = pkgs: _: pkgs.typescript;
 
   /**
     Return the TypeScript language server package.
@@ -93,5 +93,5 @@ in
     `tsserver` from the `typescript` package and serves both `.ts` and
     `.js` files. Intended for dev VMs that host an editor.
   */
-  languageServer = pkgs: { }: pkgs.typescript-language-server;
+  languageServer = pkgs: _: pkgs.typescript-language-server;
 }
