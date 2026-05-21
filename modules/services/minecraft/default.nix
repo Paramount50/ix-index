@@ -466,6 +466,10 @@ let
         yml = pkgs.formats.yaml { };
         properties = pkgs.formats.keyValue { };
         mcmeta = pkgs.formats.json { };
+        # Vanilla world-state files (level.dat, raids.dat, scoreboard.dat, the
+        # mod-side PersistentState dats) are all gzipped NBT, even though the
+        # extension hides the compression.
+        dat = nbtFormats.nbtGzip;
         inherit (nbtFormats) nbt snbt;
       }
       .${ext} or (throw "minecraft managed files: unsupported extension .${ext} on '${path}'");
@@ -953,7 +957,7 @@ in
     configFiles = mkOption {
       type = types.attrsOf formatValueType;
       default = { };
-      description = "Config files to place under config/. Keys are relative paths (format inferred from extension: .conf, .toml, .json, .yaml, .yml, .properties, .snbt, .nbt, .nbt.gz, .nbt.zlib). Values are Nix attrsets.";
+      description = "Config files to place under config/. Keys are relative paths (format inferred from extension: .conf, .toml, .json, .yaml, .yml, .properties, .snbt, .nbt, .nbt.gz, .nbt.zlib, .dat). Values are Nix attrsets.";
     };
 
     properties = mkOption {
