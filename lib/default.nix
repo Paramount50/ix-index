@@ -160,10 +160,24 @@ let
         pkgs = final;
         ix = ixForOverlay;
       };
+      # The znver5 host platform forces every package in the closure to
+      # build from source, which is where the four overrides below earn
+      # their keep. Applied unconditionally they also invalidate the host
+      # pkgs on a developer's darwin or generic-linux machine, so
+      # `nix run .#lint` ends up rebuilding GHC for nixfmt instead of
+      # substituting from cache.nixos.org. Gate on the actual reason.
+      znver5 = prev.stdenv.hostPlatform.gcc.arch or null == "znver5";
     in
     {
       drgn = final.callPackage paths.packages.drgn { };
 
+      minecraft-hot-reload-agent = final.callPackage paths.packages.minecraft.hotReloadAgent { };
+      minecraft-rcon = final.callPackage paths.packages.minecraft.rcon {
+        writePythonApplication = writePythonApplication final;
+      };
+      oci-image-builder = checkedOciImageBuilder.passthru.unchecked or checkedOciImageBuilder;
+    }
+    // lib.optionalAttrs znver5 {
       # GitHub's x86_64 runners cannot execute znver5-tuned zlib test
       # binaries, but CI has to build the same znver5 closures images use.
       zlib = prev.zlib.overrideAttrs (_: {
@@ -209,12 +223,6 @@ let
           ];
         };
       });
-
-      minecraft-hot-reload-agent = final.callPackage paths.packages.minecraft.hotReloadAgent { };
-      minecraft-rcon = final.callPackage paths.packages.minecraft.rcon {
-        writePythonApplication = writePythonApplication final;
-      };
-      oci-image-builder = checkedOciImageBuilder.passthru.unchecked or checkedOciImageBuilder;
     };
   overlays = [ overlay ];
 
