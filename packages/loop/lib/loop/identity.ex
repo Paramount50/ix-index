@@ -49,6 +49,13 @@ defmodule Loop.Identity do
     end
   end
 
+  @doc """
+  Public view of the operator's git identity, for callers that need to
+  pass it through agent-specific config (codex's `commit_attribution`,
+  etc.) rather than env vars.
+  """
+  def git_user, do: identity()
+
   defp identity do
     with {name, 0} <- System.cmd("git", ["config", "user.name"]),
          {email, 0} <- System.cmd("git", ["config", "user.email"]),

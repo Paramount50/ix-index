@@ -59,26 +59,42 @@ defmodule Loop.Runner do
   end
 
   defp codex_argv(cfg) do
-    # Force every GIT_* identity var through codex's shell_environment_policy
-    # so internal git operations attribute to the operator, not to the
-    # `codex@example.com` placeholder that ships in codex's default git
-    # identity (openai/codex#18095).
-    git_passthrough =
-      ~s|shell_environment_policy.include=["GIT_AUTHOR_NAME","GIT_AUTHOR_EMAIL","GIT_COMMITTER_NAME","GIT_COMMITTER_EMAIL"]|
-
     base = [
       "exec",
       "--cd",
       ".",
       "-c",
-      ~s|model_reasoning_effort="#{cfg.reasoning_effort}"|,
-      "-c",
-      git_passthrough
+      ~s|model_reasoning_effort="#{cfg.reasoning_effort}"|
     ]
 
+    base = base ++ codex_identity_overrides()
     base = if cfg.bypass_sandbox, do: base ++ ["--dangerously-bypass-approvals-and-sandbox"], else: base
     base ++ [cfg.prompt]
   end
+
+  # Force codex's internal `git commit` to attribute to the operator instead
+  # of the `Codex <codex@openai.com>` default. Codex passes its own
+  # `-c user.name=... -c user.email=...` to git, so plain env vars are not
+  # enough — we have to use codex's own attribution surface (PR
+  # openai/codex#21379), which is gated on the `codex_git_commit` feature.
+  defp codex_identity_overrides do
+    case Loop.Identity.git_user() do
+      {name, email} ->
+        [
+          "-c",
+          ~s|features.codex_git_commit=true|,
+          "-c",
+          ~s|commit_attribution.name="#{escape(name)}"|,
+          "-c",
+          ~s|commit_attribution.email="#{escape(email)}"|
+        ]
+
+      :unconfigured ->
+        []
+    end
+  end
+
+  defp escape(value), do: String.replace(value, ~s|"|, ~s|\\"|)
 
   defp halt(reason) do
     LogBus.publish("HALT: #{reason}")
