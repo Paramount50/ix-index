@@ -122,26 +122,25 @@ let
     '';
   };
 
-  # One zellij tab per lifecycle. Operator switches with Alt+h/l (or the
-  # tab bar) and reads each fleet's scrollback independently. Panes stay
-  # open after their command exits so the post-mortem output is reachable;
-  # quit the session with Ctrl+q.
+  # One tab with a pane per lifecycle so the whole run is visible at once.
+  # Panes stay open after their command exits so the post-mortem output is
+  # reachable; quit the session with Ctrl+q.
   zellijLayout = pkgs.writeText "health-checks-layout.kdl" ''
     layout {
+      tab name="health-checks" {
     ${lib.concatStringsSep "\n" (
       map (name: ''
-        tab name="${name}" {
-          pane name="${name}" command="nix" {
-            args "run" ".#health-check-${name}"
-          }
+        pane name="${name}" command="nix" {
+          args "run" ".#health-check-${name}"
         }'') exampleNames
     )}
+      }
     }
   '';
 
   zellij = writeNushellApplication pkgs {
     name = "health-checks-zellij";
-    meta.description = "Boot every example fleet, run its health checks, and view each in a zellij tab";
+    meta.description = "Boot every example fleet, run its health checks, and view each in a zellij pane";
     runtimeInputs = [ pkgs.zellij ];
     text = ''
       def main [] {
