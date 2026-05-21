@@ -294,7 +294,7 @@ async def push_replacement_image(node: FleetNode, *, dry_run: bool) -> str:
         if not Path(source).exists():
             raise RuntimeError(f"OCI image derivation did not realise to an existing path: {source}")
 
-    out = run_cli(["ix", "push", source, image.destination], dry_run=dry_run)
+    out = run_cli(["ix", "image", "push", source, image.destination], dry_run=dry_run)
     refs = [line.strip() for line in out.splitlines() if line.strip()]
     return refs[-1] if refs else image.destination
 
