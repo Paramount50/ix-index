@@ -901,6 +901,21 @@ let
       true
   );
 
+  fleetUnknownDependencyEval = builtins.tryEval (
+    builtins.deepSeq
+      (ix.mkFleet {
+        nodes.web = {
+          dependsOn = [ "db" ];
+          modules = [
+            {
+              services.remote-desktop.enable = true;
+            }
+          ];
+        };
+      }).planValue.nodes.web.dependsOn
+      true
+  );
+
   factionsExample =
     let
       fleet = import ../examples/minecraft/factions {
@@ -2604,6 +2619,10 @@ let
       {
         assertion = !fleetIpv4HealthCheckEval.success;
         message = "fleet plans should reject host-side IPv4 checks on private nodes";
+      }
+      {
+        assertion = !fleetUnknownDependencyEval.success;
+        message = "fleet plans should reject unknown dependsOn entries during eval";
       }
       {
         assertion = fleet.planValue.secrets.sessionKey.generate;

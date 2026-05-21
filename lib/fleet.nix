@@ -118,6 +118,17 @@ let
 
   rawNodeSpecs = lib.mapAttrs normalizeNode prefixedNodes;
   nodeSpecs = lib.mergeAttrsList (lib.mapAttrsToList expandReplicas rawNodeSpecs);
+  knownDependency = dep: builtins.hasAttr dep rawNodeSpecs || builtins.hasAttr dep nodeSpecs;
+  unknownDependencies = lib.filterAttrs (_: deps: deps != [ ]) (
+    lib.mapAttrs (_name: spec: lib.filter (dep: !(knownDependency dep)) spec.dependsOn) rawNodeSpecs
+  );
+  renderUnknownDependencies = name: deps: "${name}: ${lib.concatStringsSep ", " deps}";
+  checkedNodeSpecs =
+    assert lib.assertMsg (unknownDependencies == { }) ''
+      fleet nodes reference unknown dependencies:
+        ${lib.concatStringsSep "\n  " (lib.mapAttrsToList renderUnknownDependencies unknownDependencies)}
+    '';
+    nodeSpecs;
   expandDependency =
     dep:
     if builtins.hasAttr dep rawNodeSpecs then
@@ -145,7 +156,7 @@ let
       ]
       ++ spec.modules;
     }
-  ) nodeSpecs;
+  ) checkedNodeSpecs;
 
   # Module-args `nodes` is keyed by the example's base node names so cross-node
   # references like `nodes.file-server.config.ix.networking.eastWest.hostName`
@@ -225,7 +236,7 @@ let
       dependsOn = lib.concatMap expandDependency spec.dependsOn;
       healthChecks = planHealthChecks config;
     }
-  ) nodeSpecs;
+  ) checkedNodeSpecs;
 
   planValue = {
     order = builtins.attrNames nodeSpecs;
