@@ -128,7 +128,11 @@ let
     inherit (plugin) fileName;
     path = plugin.src;
   }) enabledPlugins;
-  invalidPluginFileNames = ix.relativePath.unsafeNames (map (plugin: plugin.fileName) pluginJars);
+  pluginFileNames = map (plugin: plugin.fileName) pluginJars;
+  invalidPluginFileNames = ix.relativePath.unsafeNames pluginFileNames;
+  duplicatePluginFileNames = lib.filter (
+    fileName: builtins.length (lib.filter (candidate: candidate == fileName) pluginFileNames) > 1
+  ) (lib.unique pluginFileNames);
 
   mkManaged =
     label: files:
@@ -574,6 +578,10 @@ in
       {
         assertion = invalidPluginFileNames == [ ];
         message = "services.velocity.plugins contains unsafe plugin file names: ${lib.concatStringsSep ", " invalidPluginFileNames}";
+      }
+      {
+        assertion = duplicatePluginFileNames == [ ];
+        message = "services.velocity.plugins contains duplicate plugin file names: ${lib.concatStringsSep ", " duplicatePluginFileNames}";
       }
     ];
 

@@ -1125,6 +1125,25 @@ let
     }
   ];
 
+  velocityDuplicatePluginFileNameFailures = failedAssertionsFor [
+    {
+      services.velocity = {
+        enable = true;
+        plugins = {
+          first = {
+            src = pkgs.writeText "velocity-test-first-plugin.jar" "";
+            fileName = "shared.jar";
+          };
+
+          second = {
+            src = pkgs.writeText "velocity-test-second-plugin.jar" "";
+            fileName = "shared.jar";
+          };
+        };
+      };
+    }
+  ];
+
   relativePathUnsafeShellEval = builtins.tryEval (
     builtins.deepSeq (ix.relativePath.shellPath "$out" "../bad") true
   );
@@ -1707,6 +1726,13 @@ let
           failure: lib.hasInfix "services.velocity.plugins contains unsafe plugin file names" failure.message
         ) velocityUnsafeManagedPathFailures;
         message = "velocity plugin file names should reject nested or unsafe paths at eval time";
+      }
+      {
+        assertion = lib.any (
+          failure:
+          lib.hasInfix "services.velocity.plugins contains duplicate plugin file names" failure.message
+        ) velocityDuplicatePluginFileNameFailures;
+        message = "velocity plugin file names should reject duplicate managed jar names at eval time";
       }
     ];
 
