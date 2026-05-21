@@ -54,6 +54,7 @@
         examples = ./examples;
         tests = ./tests;
         bench.filesystem = ./bench/filesystem;
+        site = ./site;
         minecraftMods = ./images/games/minecraft/mods;
         minecraftPaperPlugins = ./images/games/minecraft/plugins/paper;
         minecraftVelocityPlugins = ./images/games/minecraft/plugins/velocity;

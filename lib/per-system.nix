@@ -85,6 +85,29 @@ let
 
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };
 
+  siteSrc = fs.toSource {
+    root = paths.site;
+    fileset = fs.intersection (fs.gitTracked paths.site) (
+      fs.unions [
+        (paths.site + "/package.json")
+        (paths.site + "/package-lock.json")
+        (paths.site + "/svelte.config.js")
+        (paths.site + "/vite.config.ts")
+        (paths.site + "/tsconfig.json")
+        (paths.site + "/eslint.config.js")
+        (paths.site + "/src")
+        (paths.site + "/static")
+      ]
+    );
+  };
+
+  site = ix.buildNpmSite pkgs {
+    pname = "ix-site";
+    version = "0.1.0";
+    src = siteSrc;
+    distDir = "build";
+  };
+
   repoPackages = ix.packageSetFor pkgs;
 
   rustPackageTests =
@@ -181,6 +204,7 @@ in
         };
 
       health-checks = healthChecks;
+      inherit site;
       inherit (repoPackages)
         dag-runner
         drgn
