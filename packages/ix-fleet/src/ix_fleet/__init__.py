@@ -93,15 +93,24 @@ class FleetPlan(BaseModel):
 
     @model_validator(mode="after")
     def validate_graph(self) -> typing.Self:
+        ordered: set[str] = set()
         for name in self.order:
+            if name in ordered:
+                raise ValueError(f"order contains duplicate node {name!r}")
             if name not in self.nodes:
                 raise ValueError(f"order references missing node {name!r}")
+            ordered.add(name)
         for key, node in self.nodes.items():
             if key != node.name:
                 raise ValueError(f"node key {key!r} does not match name {node.name!r}")
             for dep in node.dependsOn:
                 if dep not in self.nodes:
                     raise ValueError(f"node {key!r} depends on unknown node {dep!r}")
+        missing_order = sorted(set(self.nodes) - ordered)
+        if missing_order:
+            label = "node" if len(missing_order) == 1 else "nodes"
+            names = ", ".join(repr(name) for name in missing_order)
+            raise ValueError(f"order is missing {label} {names}")
         return self
 
 
