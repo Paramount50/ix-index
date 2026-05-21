@@ -35,9 +35,13 @@ let
       };
     });
 
-  lint = ix.writeNushellApplication pkgs {
-    name = "lint";
-    meta.description = "Run all Nix formatting and lint checks";
+  # Each lint stage is one subcommand on a single binary so the spec keys
+  # off `lib.getExe lintStage` without registering four sibling packages.
+  # The Nu wrapper checks syntax at build time, so a typo in a stage shows
+  # up in the `lint` derivation build, not at `nix run` time.
+  lintStage = ix.writeNushellApplication pkgs {
+    name = "lint-stage";
+    meta.description = "One lint stage (nixfmt | statix | deadnix | ast-grep); driven by `lint`";
     runtimeInputs = [
       pkgs.ast-grep
       pkgs.deadnix
@@ -46,20 +50,47 @@ let
       pkgs.statix
     ];
     text = ''
-      def main [] {
+      def "main nixfmt" [] {
         let nix_files = (fd --extension nix | lines)
-
-        print "nixfmt"
         nixfmt --check ...$nix_files
+      }
+      def "main statix" [] { statix check . }
+      def "main deadnix" [] { deadnix --fail --no-lambda-pattern-names . }
+      def "main ast-grep" [] { ast-grep scan --error . }
+      def main [] {
+        error make { msg: "specify a stage: nixfmt | statix | deadnix | ast-grep" }
+      }
+    '';
+  };
 
-        print "statix"
-        statix check .
+  lintSpec = (pkgs.formats.json { }).generate "lint-dag.json" {
+    nodes = {
+      nixfmt.command = [
+        (lib.getExe lintStage)
+        "nixfmt"
+      ];
+      statix.command = [
+        (lib.getExe lintStage)
+        "statix"
+      ];
+      deadnix.command = [
+        (lib.getExe lintStage)
+        "deadnix"
+      ];
+      "ast-grep".command = [
+        (lib.getExe lintStage)
+        "ast-grep"
+      ];
+    };
+  };
 
-        print "deadnix"
-        deadnix --fail --no-lambda-pattern-names .
-
-        print "ast-grep"
-        ast-grep scan --error .
+  lint = ix.writeNushellApplication pkgs {
+    name = "lint";
+    meta.description = "Run all Nix formatting and lint checks in parallel via dag-runner";
+    runtimeInputs = [ repoPackages.dag-runner ];
+    text = ''
+      def --wrapped main [...args] {
+        exec dag-runner ...$args ${lintSpec}
       }
     '';
   };
