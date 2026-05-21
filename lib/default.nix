@@ -654,7 +654,32 @@ let
           ix = ixForPackages;
         };
         llm-clippy = llmClippyFor pkgs;
-        loop = pkgs.callPackage paths.packages.loop { };
+        loop =
+          let
+            loopSiteSrc = lib.fileset.toSource {
+              root = paths.packages.loop + "/site";
+              fileset = lib.fileset.intersection (lib.fileset.gitTracked (paths.packages.loop + "/site")) (
+                lib.fileset.unions [
+                  (paths.packages.loop + "/site/package.json")
+                  (paths.packages.loop + "/site/package-lock.json")
+                  (paths.packages.loop + "/site/index.html")
+                  (paths.packages.loop + "/site/svelte.config.js")
+                  (paths.packages.loop + "/site/tsconfig.json")
+                  (paths.packages.loop + "/site/vite.config.ts")
+                  (paths.packages.loop + "/site/src")
+                ]
+              );
+            };
+            viewer = buildNpmSite pkgs {
+              pname = "loop-viewer";
+              version = "0.1.0";
+              src = loopSiteSrc;
+            };
+          in
+          pkgs.callPackage paths.packages.loop {
+            inherit pkgs viewer;
+            ix = ixForPackages;
+          };
         mc-probe = pkgs.callPackage paths.packages.minecraft.probe {
           ix = ixForPackages;
         };

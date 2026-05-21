@@ -118,7 +118,7 @@ let
     meta.description = "Copy git-ignored files into an ix shell workspace";
   };
 
-  # Bake the repo's lint program into the Elixir loop escript so
+  # Bake the repo's lint program into the loop runner so
   # `nix run .#loop` matches the historical Python wrapper's UX. The
   # underlying binary still accepts `--lint-program` as an override.
   loop =
@@ -238,6 +238,7 @@ let
       {
         inherit lib pkgs;
         inherit (ix) writeNushellApplication;
+        inherit (repoPackages) loop;
         dagRunner = repoPackages.dag-runner;
       }
       {
@@ -275,6 +276,7 @@ in
         };
 
       health-checks = healthChecks.dag;
+      health-checks-loro = healthChecks.loro;
       health-checks-zellij = healthChecks.zellij;
       inherit lint loop site;
       bench-filesystem = benchFilesystem;

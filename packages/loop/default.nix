@@ -1,66 +1,37 @@
 {
+  ix,
   lib,
-  beamPackages,
-  erlang,
-  makeWrapper,
+  pkgs,
+  viewer,
 }:
 
-# Hex deps come from `deps.nix`, which is hand-maintained against `mix.lock`.
-# `nix shell nixpkgs#mix2nix -c mix2nix mix.lock` is a hint for new
-# per-hex `sha256` values; the file itself avoids `rec` and `with self;` so
-# the repo's lint rules pass. Hashes are materialised from the lockfile, so
-# there is no floating FOD and no `lib.fakeHash` placeholder in tracked Nix.
-let
-  mixNixDeps = import ./deps.nix {
-    inherit lib;
-    inherit (beamPackages) beamPackages;
-  };
-  fs = lib.fileset;
-  src = fs.toSource {
+ix.buildRustPackage pkgs {
+  pname = "loop";
+  version = "0.1.0";
+
+  src = lib.fileset.toSource {
     root = ./.;
-    fileset = fs.intersection (fs.gitTracked ./.) (
-      fs.unions [
-        ./mix.exs
-        ./mix.lock
-        ./lib
+    fileset = lib.fileset.intersection (lib.fileset.gitTracked ./.) (
+      lib.fileset.unions [
+        ./Cargo.toml
+        ./Cargo.lock
+        ./src
       ]
     );
   };
-in
-beamPackages.mixRelease {
-  pname = "loop";
-  version = "0.1.0";
-  inherit src mixNixDeps;
 
-  nativeBuildInputs = [ makeWrapper ];
+  cargoLock.lockFile = ./Cargo.lock;
 
-  # Build an escript instead of a mix release: the loop tool is invoked as
-  # a one-shot CLI (`loop --lint-program ... --once`), not a long-lived
-  # OTP node that an operator attaches to. Escripts package the whole BEAM
-  # closure into one self-extracting file and start the supervised app on
-  # boot via `Application.ensure_all_started/1` in `Loop.CLI.main/1`.
-  buildPhase = ''
-    runHook preBuild
-    mix escript.build --no-deps-check
-    runHook postBuild
+  postInstall = ''
+    wrapProgram "$out/bin/loop" \
+      --set LOOP_VIEWER_DIR "${viewer}/share/loop-viewer"
   '';
 
-  installPhase = ''
-    runHook preInstall
-
-    mkdir -p "$out/libexec" "$out/bin"
-    cp loop "$out/libexec/loop"
-
-    makeWrapper ${erlang}/bin/escript "$out/bin/loop" \
-      --add-flags "$out/libexec/loop"
-
-    runHook postInstall
-  '';
+  nativeBuildInputs = [ pkgs.makeWrapper ];
 
   meta = {
-    description = "Run an agent CLI in a commit-and-push loop with a live web UI";
+    description = "Run agent loops and health checks with a Loro-backed web UI";
     mainProgram = "loop";
     license = lib.licenses.mit;
-    platforms = erlang.meta.platforms;
   };
 }

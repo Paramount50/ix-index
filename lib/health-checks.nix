@@ -33,6 +33,7 @@
   pkgs,
   writeNushellApplication,
   dagRunner,
+  loop,
 }:
 {
   exampleFleets,
@@ -147,6 +148,23 @@ let
     '';
   };
 
+  loro = writeNushellApplication pkgs {
+    name = "health-checks-loro";
+    meta.description = "Boot every example fleet, run health checks, and view the Loro event stream";
+    runtimeInputs = [ loop ];
+    text = ''
+      def --wrapped main [...args] {
+        if ($args | any {|arg| $arg in ["--help", "-h"] }) {
+          exec ${lib.getExe loop} health-checks-loro ${specFile} ...$args
+        }
+
+        ${ixTokenPrompt}
+
+        exec ${lib.getExe loop} health-checks-loro ${specFile} ...$args
+      }
+    '';
+  };
+
   # One tab with a pane per lifecycle so the whole run is visible at once.
   # Panes stay open after their command exits so the post-mortem output is
   # reachable; quit the session with Ctrl+q.
@@ -182,5 +200,10 @@ let
   };
 in
 {
-  inherit dag lifecyclePackages zellij;
+  inherit
+    dag
+    lifecyclePackages
+    loro
+    zellij
+    ;
 }
