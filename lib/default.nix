@@ -903,8 +903,8 @@ let
       # Prepend this to every example node name. The health-checks runner
       # uses "health-check-" so its lifecycle scripts cannot collide with
       # real production VMs that share the natural names (`nginx`,
-      # `factions`, ...). Default empty so the regular `apps.<example>-*`
-      # wrappers see no change.
+      # `factions`, ...). Default empty so the regular
+      # `packages.<example>-*` wrappers see no change.
       nodePrefix ? "",
     }:
     let
@@ -950,8 +950,8 @@ let
   /**
     `ix.healthChecks` declared by every example, keyed by example name and
     fleet node. Plain-data attrset suitable for `nix eval --json` and `jq`
-    pipelines; the `apps.health-checks` Nu wrapper pretty-prints the same
-    data as a table.
+    pipelines; the `health-checks` Nu wrapper pretty-prints the same data
+    as a table.
   */
   examplesHealthChecks = lib.mapAttrs (
     _name: fleet: lib.mapAttrs (_node: nodePlan: nodePlan.healthChecks) fleet.planValue.nodes

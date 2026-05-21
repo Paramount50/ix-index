@@ -101,6 +101,7 @@ let
 in
 writeNushellApplication pkgs {
   name = "health-checks";
+  meta.description = "Boot every example fleet in parallel, run its health checks, and tear the VMs down";
   runtimeInputs = [ dagRunner ];
   text = ''
     def --wrapped main [...args] {

@@ -214,7 +214,7 @@ flake.nix                                  # manifest: inputs + delegated output
 .envrc, .githooks/pre-commit               # direnv sets core.hooksPath -> nix run .#lint
 lib/
   default.nix                              # mkImage, discoverImages, ix.artifacts, helpers
-  per-system.nix                           # per-system packages / apps / checks / formatter
+  per-system.nix                           # per-system packages / checks / formatter
   ix-platform.nix                          # target platform: EPYC Gen 5 (znver5), container mode
   ix-oci-layer.nix                         # OCI packaging, base profile
   minecraft-loader.nix                     # helper used by loader modules
@@ -257,6 +257,8 @@ Do not put inside `flake.nix`:
 Target: `flake.nix` fits comfortably in a single screen and its body would look almost unsurprising as JSON. The cost of an inline helper today is the year-from-now untangle. Pay the structure cost up front.
 
 Flake outputs stay on the standard schema: `packages`, `apps`, `checks`, `formatter`, `devShells`, `templates`, `overlays`, `nixosModules`, `lib`. Use `nixosModules` (plural, namespaced) for module exports. Do not add a flat top-level `modules` key: it is non-standard, not validated by `nix flake check`, and may not be discovered by downstream tooling.
+
+The `apps` flake output is unused. A workflow command goes under `packages.<system>.<name>` with `meta.mainProgram` set; `nix run .#<name>` resolves the program through that metadata, and `nix build .#<name>` gives the same artifact on disk. Going through `apps` doubles the surface area and hides the underlying derivation behind a `{ type = "app"; program = ...; }` attrset that nothing else can consume. The repo's [`writeNushellApplication`](lib/default.nix) and [`writePythonApplication`](lib/default.nix) helpers already set `meta.mainProgram = name`; add `meta.description` at the call site when `nix flake show` should carry one. Do not introduce a `mkApp` helper or re-register packages under `apps` for backwards-compatibility with the older shape.
 
 ## Adding an image
 
@@ -486,7 +488,7 @@ Example code should stay on the consumer side of the module boundary. It compose
 
 Presets must not inline URLs, hashes, or pinned version strings for fetched artifacts. Mod jars, plugin jars, server jars, datasets, JDKs, and source-fetched packages all live in the repo's library surface (`ix.lib.artifacts.*`, `ix.packages`, module options, generated catalogs under `images/`), and presets consume them by name. If a preset needs an artifact the library does not expose yet, extend the library first: add the slug to the relevant catalog and regenerate it with `nix run .#update-mods`, add a new entry to `ix.lib.artifacts`, or grow the relevant module option. Then point the preset at the named surface. Presets are consumer tests for whether the library is sufficiently specified. A missing entry is a gap in the repo; fix it in the library so every consumer benefits.
 
-In-repo presets that exercise this repo's library, modules, fleets, or pinned artifacts should be exposed from the root `flake.nix` as `apps`/`packages` and share the root `flake.lock`. Keep the actual fleet or image value in the preset's `default.nix` so tests and root outputs can import it. Do not add a nested preset `flake.lock` that pins this same repo; it will drift from the API under test.
+In-repo presets that exercise this repo's library, modules, fleets, or pinned artifacts should be exposed from the root `flake.nix` as `packages` (with `meta.mainProgram` for the runnable wrappers) and share the root `flake.lock`. Keep the actual fleet or image value in the preset's `default.nix` so tests and root outputs can import it. Do not add a nested preset `flake.lock` that pins this same repo; it will drift from the API under test.
 
 Use a standalone template or `examples/<name>` flake only when it is intentionally a downstream consumer. In that case its inputs should look like a real external user's inputs (`github:indexable-inc/index`, registry refs, etc.), not `path:../..` or `git+file:../..` backedges into the parent checkout. Do not add template-local artifact inputs when the root flake already exposes the locked artifact through `ix.lib.artifacts`.
 
@@ -503,7 +505,7 @@ Do not explain what happens behind that command. Do not spell out lower level
 image plumbing such as `nix build`, image pushes, or `ix new` unless that
 plumbing is the point of the example. Example `flake.nix` files expose the
 values ix needs plus any local package the example owns. Leave
-`plan`/`diff`/`up`/`switch`/`replace` apps and matching wrapper packages out of
+`plan`/`diff`/`up`/`switch`/`replace` wrapper packages out of
 standalone consumer examples. Keep examples focused on the shape being taught:
 files, modules, service settings, data paths, and the specific operational
 caveats that are unusual for that example.
@@ -574,7 +576,7 @@ When adding new modules or packages, do not override compiler flags per-package.
 - **No backwards compat.** This repo is young and has no external consumers. Rename freely, change signatures, delete dead code. No shims, no aliases, no `// removed` comments, no feature flags for the old way. Update callers in the same change.
 - **Auto-discover, don't enumerate.** `flake.nix` walks `images/`. Adding an image is `mkdir + edit one file`. Hand-wired registries rot.
 - **Aggregate views live in `lib/`, not in callers.** When a workflow needs "all X across the repo" (health checks, port claims, listening ports, declared secrets), add a small `lib/` helper that walks the canonical source directory and exposes a plain-data attrset under `lib.<name>`. Don't hand-list inputs in `per-system.nix`, duplicate the walk inside an app, or bury the aggregation in a one-off script: the lib version is reachable by other Nix code, by `jq`, and by any wrapper at once.
-- **Prefer `nix eval --json` plus the local shell over bespoke wrappers.** Once a value is exposed as `lib.<name>`, `nix eval .#lib.<name> --json | from json` (Nushell) or `| jq` already turns it into a table, a filter, or a one-off transform. That covers most "let me look at X" needs without adding code. Only add an `apps.<name>` wrapper when the formatting is non-trivial (custom layout, multi-source join, follow-up actions, output that has to survive being passed to another tool) and document the wrapper as a shortcut over the same eval, not as the only way in. A new app that runs `nix eval … | from json | <one-liner>` is the form to delete, not the form to add.
+- **Prefer `nix eval --json` plus the local shell over bespoke wrappers.** Once a value is exposed as `lib.<name>`, `nix eval .#lib.<name> --json | from json` (Nushell) or `| jq` already turns it into a table, a filter, or a one-off transform. That covers most "let me look at X" needs without adding code. Only add a `packages.<name>` wrapper (with `meta.mainProgram` so it doubles as a `nix run` target) when the formatting is non-trivial (custom layout, multi-source join, follow-up actions, output that has to survive being passed to another tool) and document the wrapper as a shortcut over the same eval, not as the only way in. A new wrapper that runs `nix eval … | from json | <one-liner>` is the form to delete, not the form to add.
 - **DRY at the data layer, not the abstraction layer.** `inherit (pkgs) ...` over a wrapper helper. `lib.collect` over a parallel list. Don't introduce a function unless it has at least two callers; the minecraft-loader helper qualifies because eight loaders share the same shape.
 - **Comments explain why, not what.** Headers say what each file is for and what's load-bearing (e.g. `maxLayers = 67` with the registry-cap rationale, base profile auto-enabled). Don't restate what the code obviously does.
 - **Trust module merging.** Layer per-version overlays via the module system, not by passing args to factory functions. Service families (runtime + variants) compose through option slots, not through wrappers.

@@ -119,7 +119,6 @@
       nixosModules = import ./modules;
       overlays.default = ix.overlay;
       packages = collect "packages";
-      apps = collect "apps";
       checks = collect "checks";
       formatter = collect "formatter";
     };

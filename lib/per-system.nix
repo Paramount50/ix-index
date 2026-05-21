@@ -1,8 +1,11 @@
-# Per-system flake outputs (packages / apps / checks / formatter).
+# Per-system flake outputs (packages / checks / formatter).
 #
 # Kept out of flake.nix so the flake top-level can read as a manifest of
-# inputs and output categories. Composition logic for apps and lint plumbing
-# lives here.
+# inputs and output categories. Composition logic for workflow tools and
+# lint plumbing lives here. Workflow tools (lint, update-mods, ...) are
+# exposed under `packages.<system>.<name>` with `meta.mainProgram` set, so
+# `nix run .#<name>` and `nix build .#<name>` both work without an `apps`
+# entry (see AGENTS.md "Flake.nix style").
 {
   system,
   ix,
@@ -21,14 +24,20 @@ let
   };
   fs = lib.fileset;
 
-  mkApp = program: description: {
-    type = "app";
-    program = lib.getExe program;
-    meta = { inherit description; };
-  };
+  # Add `meta.description` to a derivation without rewriting the original
+  # call site. Used for repoPackages entries and generated fleet wrappers
+  # whose derivations are constructed elsewhere.
+  withDescription =
+    description: drv:
+    drv.overrideAttrs (old: {
+      meta = (old.meta or { }) // {
+        inherit description;
+      };
+    });
 
   lint = ix.writeNushellApplication pkgs {
     name = "lint";
+    meta.description = "Run all Nix formatting and lint checks";
     runtimeInputs = [
       pkgs.ast-grep
       pkgs.deadnix
@@ -58,12 +67,14 @@ let
   updateMods = ix.writePythonApplication pkgs {
     name = "update-mods";
     src = paths.tools.updateMods;
+    meta.description = "Regenerate Minecraft mod catalogs";
   };
 
   updateIxCli = ix.writePythonApplication pkgs {
     name = "update-ix-cli";
     src = paths.tools.updateIxCli;
     runtimeInputs = [ pkgs.nix ];
+    meta.description = "Re-prefetch the ix.dev CLI binaries and bump packages/ix/default.nix hashes";
   };
 
   ixShellSyncIgnored = ix.writePythonApplication pkgs {
@@ -73,6 +84,7 @@ let
       pkgs.git
       pkgs.gnutar
     ];
+    meta.description = "Copy git-ignored files into an ix shell workspace";
   };
 
   mcSource = ix.writeNushellApplication pkgs {
@@ -81,6 +93,7 @@ let
     runtimeInputs = [
       (pkgs.callPackage paths.packages.vineflower { })
     ];
+    meta.description = "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
   };
 
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };
@@ -144,11 +157,12 @@ let
     nodePrefix = "health-check-";
   };
 
-  # Surface every example's `ix fleet <sub>` wrapper as a flake app.
-  # Each example contributes `apps.<system>.<example>-{up,health,...}`,
+  # Surface every example's `ix fleet <sub>` wrapper as a flake package.
+  # Each example contributes `packages.<system>.<example>-{up,health,...}`,
   # which lets `nix run .#nginx-lifecycle-up` invoke the existing fleet
-  # plumbing without going through `nix build` + `result/bin/...`.
-  exampleApps =
+  # plumbing through the wrapper's `meta.mainProgram`, and
+  # `nix build .#nginx-lifecycle-up` produce the wrapper script on disk.
+  examplePackages =
     let
       fleetSubs = [
         "up"
@@ -163,7 +177,7 @@ let
       lib.listToAttrs (
         map (sub: {
           name = "${name}-${sub}";
-          value = mkApp fleet.${sub} "Run `ix fleet ${sub}` against the ${name} example fleet";
+          value = withDescription "Run `ix fleet ${sub}` against the ${name} example fleet" fleet.${sub};
         }) fleetSubs
       )
     ) exampleFleets;
@@ -204,7 +218,12 @@ in
         };
 
       health-checks = healthChecks;
-      inherit site;
+      inherit lint site;
+      bench-filesystem = benchFilesystem;
+      update-mods = updateMods;
+      update-ix-cli = updateIxCli;
+      ix-shell-sync-ignored = ixShellSyncIgnored;
+      mc-source = mcSource;
       inherit (repoPackages)
         dag-runner
         drgn
@@ -219,26 +238,13 @@ in
         ;
       minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
     }
+    // examplePackages
     // lib.optionalAttrs (repoPackages ? ix) {
       inherit (repoPackages) ix;
     }
     // lib.optionalAttrs (system == ix.system) {
       inherit (repoPackages) tonbo-artifacts;
     };
-
-  apps = {
-    lint = mkApp lint "Run all Nix formatting and lint checks";
-    bench-filesystem = mkApp benchFilesystem "Benchmark file-system behavior from inside an ix VM";
-    update-mods = mkApp updateMods "Regenerate Minecraft mod catalogs";
-    update-ix-cli = mkApp updateIxCli "Re-prefetch the ix.dev CLI binaries and bump packages/ix/default.nix hashes";
-    ix-fleet = mkApp repoPackages.ix-fleet "Render ix fleet plans and commands";
-    ix-shell-sync-ignored = mkApp ixShellSyncIgnored "Copy git-ignored files into an ix shell workspace";
-    mc-source = mkApp mcSource "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
-    nix-cargo-unit = mkApp repoPackages.nix-cargo-unit "Render Cargo unit graphs as Nix derivations";
-    python-mcp-server = mkApp repoPackages.python-mcp-server "Run a Python MCP server";
-    health-checks = mkApp healthChecks "Boot every example fleet in parallel, run its health checks, and tear the VMs down";
-  }
-  // exampleApps;
 
   checks =
     lib.optionalAttrs (system == ix.system) {
