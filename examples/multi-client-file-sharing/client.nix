@@ -12,10 +12,9 @@ let
   serverHost = nodes.file-server.config.ix.networking.eastWest.hostName;
 in
 {
-  # The real dependency is host-side: `linux-ix` must build in CIFS support or
-  # provide `cifs.ko` for the host to load. This image only supplies
-  # `mount.cifs`; a `boot.isContainer = true` guest cannot fix a missing host
-  # kernel module with `boot.supportedFilesystems`.
+  # The real dependency is the ix guest kernel: `linux-ix` must build in CIFS
+  # support or ship `cifs.ko` in the module tree injected at
+  # `/ix-guest/lib/modules`. This image only supplies `mount.cifs`.
   # Linux's cifs translates `flock()` to a byte-range lock on the whole file
   # (kernel >= 5.4), so both `flock` and `fcntl` byte-range locks reach the
   # server's lock manager and coordinate across mounts.
