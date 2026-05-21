@@ -15,6 +15,7 @@ let
 
   cfg = config.services.resource-monitor;
   fs = lib.fileset;
+  runtimeDirectory = lib.removePrefix "/run/" cfg.runtimeDirectory;
 
   siteSrc = fs.toSource {
     root = ./site;
@@ -132,6 +133,18 @@ in
   };
 
   config = mkIf cfg.enable {
+    assertions = [
+      {
+        assertion =
+          lib.hasPrefix "/run/" cfg.runtimeDirectory
+          && cfg.runtimeDirectory != "/run/"
+          && !lib.hasSuffix "/" cfg.runtimeDirectory
+          && !lib.hasInfix "/../" cfg.runtimeDirectory
+          && !lib.hasSuffix "/.." cfg.runtimeDirectory;
+        message = "services.resource-monitor.runtimeDirectory must be a managed /run subdirectory without a trailing slash or '..' segment";
+      }
+    ];
+
     ix.networking.portClaims.resource-monitor = {
       protocol = "tcp";
       inherit (cfg) port;
@@ -142,9 +155,10 @@ in
     systemd.services.resource-monitor = {
       description = "VM resource monitor stats";
       wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
+      serviceConfig = ix.systemdHardening // {
         Type = "simple";
-        RuntimeDirectory = builtins.baseNameOf cfg.runtimeDirectory;
+        DynamicUser = true;
+        RuntimeDirectory = runtimeDirectory;
         RuntimeDirectoryMode = "0755";
         ExecStart = lib.escapeShellArgs [
           (lib.getExe statsWriter)

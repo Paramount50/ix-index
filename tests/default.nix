@@ -448,6 +448,27 @@ let
         };
     };
 
+  resourceMonitor =
+    let
+      config = evalConfig [
+        {
+          services.resource-monitor = {
+            enable = true;
+            runtimeDirectory = "/run/ix/resource-monitor";
+          };
+        }
+      ];
+      unit = config.systemd.services.resource-monitor;
+    in
+    {
+      inherit config;
+      cfg = config.services.resource-monitor;
+      service = {
+        inherit unit;
+        config = unit.serviceConfig;
+      };
+    };
+
   kernelDev =
     let
       config = evalConfig [ ../images/dev/kernel-dev ];
@@ -970,6 +991,15 @@ let
       services.resource-monitor = {
         enable = true;
         port = 6080;
+      };
+    }
+  ];
+
+  resourceMonitorRuntimeDirectoryFailures = failedAssertionsFor [
+    {
+      services.resource-monitor = {
+        enable = true;
+        runtimeDirectory = "/var/lib/resource-monitor";
       };
     }
   ];
@@ -1992,6 +2022,42 @@ let
       {
         assertion = !(remoteDesktop.config.systemd.services ? novnc);
         message = "remote-desktop should not use a separate noVNC websockify service";
+      }
+    ];
+
+    resource-monitor = [
+      {
+        assertion = resourceMonitor.service.config.DynamicUser;
+        message = "resource-monitor stats writer should run as a dynamic systemd user";
+      }
+      {
+        assertion = resourceMonitor.service.config.NoNewPrivileges;
+        message = "resource-monitor stats writer should reject new privileges";
+      }
+      {
+        assertion = resourceMonitor.service.config.ProtectSystem == "strict";
+        message = "resource-monitor stats writer should use the shared strict filesystem hardening";
+      }
+      {
+        assertion = resourceMonitor.service.config.RuntimeDirectory == "ix/resource-monitor";
+        message = "resource-monitor should preserve nested /run runtime directory paths";
+      }
+      {
+        assertion = lib.hasInfix "/run/ix/resource-monitor" resourceMonitor.service.config.ExecStart;
+        message = "resource-monitor stats writer should write to the configured runtime directory";
+      }
+      {
+        assertion =
+          resourceMonitor.config.services.nginx.virtualHosts.resource-monitor.locations."/stats.json".root
+          == "/run/ix/resource-monitor";
+        message = "resource-monitor nginx should serve stats from the configured runtime directory";
+      }
+      {
+        assertion = lib.any (
+          failure:
+          lib.hasInfix "services.resource-monitor.runtimeDirectory must be a managed /run subdirectory" failure.message
+        ) resourceMonitorRuntimeDirectoryFailures;
+        message = "resource-monitor should reject runtime directories outside /run";
       }
     ];
 
