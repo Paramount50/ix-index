@@ -81,19 +81,25 @@ struct InefficientPath {
     path: String,
     occurrences: usize,
     cumulative_size: u64,
-    minimum_size: u64,
+    required_size: u64,
 }
 
 impl InefficientPath {
     const fn wasted_bytes(&self) -> u64 {
-        self.cumulative_size.saturating_sub(self.minimum_size)
+        self.cumulative_size.saturating_sub(self.required_size)
     }
 }
 
 struct PathStats {
     occurrences: usize,
     cumulative_size: u64,
-    minimum_size: u64,
+    required_size: u64,
+    last_layer: usize,
+}
+
+enum Whiteout {
+    Remove(String),
+    Opaque(String),
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -324,10 +330,9 @@ fn make_customisation_layer(
 fn analyze_layer_efficiency(layers: &[Layer]) -> Result<LayerEfficiency, Box<dyn Error>> {
     let mut entries = 0;
     let mut paths = BTreeMap::new();
-    let mut live_paths = BTreeMap::new();
 
-    for layer in layers {
-        read_layer_entries(&layer.tar_path, &mut entries, &mut paths, &mut live_paths)?;
+    for (index, layer) in layers.iter().enumerate() {
+        read_layer_entries(index + 1, &layer.tar_path, &mut entries, &mut paths)?;
     }
 
     let mut required_bytes = 0;
@@ -336,19 +341,19 @@ fn analyze_layer_efficiency(layers: &[Layer]) -> Result<LayerEfficiency, Box<dyn
     let mut inefficient_paths = Vec::new();
 
     for (path, stats) in &paths {
-        required_bytes += stats.minimum_size;
+        required_bytes += stats.required_size;
         discovered_bytes += stats.cumulative_size;
 
         if stats.occurrences > 1 {
             repeated_paths += 1;
         }
 
-        if stats.cumulative_size > stats.minimum_size {
+        if stats.cumulative_size > stats.required_size {
             inefficient_paths.push(InefficientPath {
                 path: path.clone(),
                 occurrences: stats.occurrences,
                 cumulative_size: stats.cumulative_size,
-                minimum_size: stats.minimum_size,
+                required_size: stats.required_size,
             });
         }
     }
@@ -378,10 +383,10 @@ fn analyze_layer_efficiency(layers: &[Layer]) -> Result<LayerEfficiency, Box<dyn
 }
 
 fn read_layer_entries(
+    layer_index: usize,
     tar_path: &Path,
     entries: &mut usize,
     paths: &mut BTreeMap<String, PathStats>,
-    live_paths: &mut BTreeMap<String, u64>,
 ) -> Result<(), Box<dyn Error>> {
     let file = File::open(tar_path)?;
     let mut archive = tar::Archive::new(file);
@@ -395,10 +400,11 @@ fn read_layer_entries(
             continue;
         }
 
-        if let Some(target) = whiteout_target(&path) {
-            let removed_size = removed_path_size(live_paths, &target);
-            record_path(paths, &target, removed_size);
-            remove_live_path(live_paths, &target);
+        if let Some(whiteout) = whiteout_for(&path) {
+            match whiteout {
+                Whiteout::Remove(target) => remove_path(paths, &target, layer_index),
+                Whiteout::Opaque(parent) => remove_children(paths, &parent, layer_index),
+            }
             continue;
         }
 
@@ -408,59 +414,74 @@ fn read_layer_entries(
         } else {
             0
         };
-        record_path(paths, &path, size);
-
-        if entry_type.is_dir() {
-            live_paths.entry(path).or_insert(0);
-        } else {
-            live_paths.insert(path, size);
-        }
+        record_path(paths, &path, size, layer_index);
     }
 
     Ok(())
 }
 
-fn whiteout_target(path: &str) -> Option<String> {
+fn whiteout_for(path: &str) -> Option<Whiteout> {
     let (parent, name) = path.rsplit_once('/').unwrap_or(("", path));
+    if name == ".wh..wh..opq" {
+        return Some(Whiteout::Opaque(parent.to_owned()));
+    }
+
     let target_name = name.strip_prefix(".wh.")?;
-    if target_name == ".wh..opq" {
-        return None;
-    }
-
     if parent.is_empty() {
-        Some(target_name.to_owned())
+        Some(Whiteout::Remove(target_name.to_owned()))
     } else {
-        Some(format!("{parent}/{target_name}"))
+        Some(Whiteout::Remove(format!("{parent}/{target_name}")))
     }
 }
 
-fn removed_path_size(live_paths: &BTreeMap<String, u64>, target: &str) -> u64 {
+fn remove_path(paths: &mut BTreeMap<String, PathStats>, target: &str, layer_index: usize) {
     let prefix = format!("{target}/");
-    live_paths
-        .iter()
-        .filter_map(|(path, size)| (path == target || path.starts_with(&prefix)).then_some(*size))
-        .sum()
+    for (path, stats) in paths {
+        if (path == target || path.starts_with(&prefix)) && stats.last_layer < layer_index {
+            stats.occurrences += 1;
+            stats.required_size = 0;
+            stats.last_layer = layer_index;
+        }
+    }
 }
 
-fn remove_live_path(live_paths: &mut BTreeMap<String, u64>, target: &str) {
-    let prefix = format!("{target}/");
-    live_paths.retain(|path, _| path != target && !path.starts_with(&prefix));
+fn remove_children(paths: &mut BTreeMap<String, PathStats>, parent: &str, layer_index: usize) {
+    let prefix = if parent.is_empty() {
+        String::new()
+    } else {
+        format!("{parent}/")
+    };
+
+    for (path, stats) in paths {
+        if path.starts_with(&prefix) && path != parent && stats.last_layer < layer_index {
+            stats.occurrences += 1;
+            stats.required_size = 0;
+            stats.last_layer = layer_index;
+        }
+    }
 }
 
-fn record_path(paths: &mut BTreeMap<String, PathStats>, path: &str, size: u64) {
+fn record_path(
+    paths: &mut BTreeMap<String, PathStats>,
+    path: &str,
+    size: u64,
+    layer_index: usize,
+) {
     match paths.entry(path.to_owned()) {
         Entry::Vacant(entry) => {
             entry.insert(PathStats {
                 occurrences: 1,
                 cumulative_size: size,
-                minimum_size: size,
+                required_size: size,
+                last_layer: layer_index,
             });
         }
         Entry::Occupied(mut entry) => {
             let stats = entry.get_mut();
             stats.occurrences += 1;
             stats.cumulative_size += size;
-            stats.minimum_size = stats.minimum_size.min(size);
+            stats.required_size = size;
+            stats.last_layer = layer_index;
         }
     }
 }
