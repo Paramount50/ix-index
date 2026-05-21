@@ -4,6 +4,7 @@
 
   import { reduceEvents } from './lib/reduce';
   import { parseApiState, parseSnapshot } from './lib/schema';
+  import { tokenize } from './lib/highlight';
 
   let rawEvents = $state<unknown[]>([]);
 
@@ -39,10 +40,10 @@
 
 <main>
   {#if view.current}
-    <pre class="line running">$ {view.current.text}</pre>
+    <div class="line running"><span class="prompt">$</span> {#each tokenize(view.current.text) as t}<span class={t.kind}>{t.text}</span>{/each}</div>
   {/if}
   {#each past as cmd}
-    <pre class="line" class:failed={cmd.status === 'failed'}>$ {cmd.text}</pre>
+    <div class="line" class:failed={cmd.status === 'failed'}><span class="prompt">$</span> {#each tokenize(cmd.text) as t}<span class={t.kind}>{t.text}</span>{/each}</div>
   {/each}
 </main>
 
@@ -64,12 +65,45 @@
     overflow-wrap: anywhere;
   }
 
-  .line.failed {
+  .prompt {
+    color: #52525b;
+    user-select: none;
+  }
+
+  .cmd {
+    color: #86efac;
+  }
+  .path {
+    color: #cbd5e1;
+  }
+  .flag {
+    color: #93c5fd;
+  }
+  .string {
+    color: #fde68a;
+  }
+  .var {
+    color: #c4b5fd;
+  }
+  .op {
+    color: #f472b6;
+  }
+  .comment {
+    color: #52525b;
+    font-style: italic;
+  }
+  .arg {
+    color: #a1a1aa;
+  }
+  .space {
+    color: inherit;
+  }
+
+  .line.failed :is(.cmd, .path, .flag, .string, .var, .op, .arg, .prompt) {
     color: #f87171;
   }
 
   .running {
-    color: #fafafa;
     animation: flash 1.1s ease-in-out infinite;
   }
 
