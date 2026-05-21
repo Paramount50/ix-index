@@ -5,79 +5,86 @@ const base = z.object({
   kind: z.string()
 });
 
-const serverEvent = base.extend({
+const serverEvent = z.object({
+  ts_ms: z.number(),
   kind: z.literal('server'),
   url: z.string().optional(),
   mode: z.string().optional()
 });
 
-const iterationStart = base.extend({
+const iterationStart = z.object({
+  ts_ms: z.number(),
   kind: z.literal('iteration-start'),
   iteration: z.number().optional()
 });
 
-const iterationClean = base.extend({
+const iterationClean = z.object({
+  ts_ms: z.number(),
   kind: z.literal('iteration-clean'),
   iteration: z.number().optional()
 });
 
-const pushed = base.extend({
+const pushed = z.object({
+  ts_ms: z.number(),
   kind: z.literal('pushed'),
   iteration: z.number().optional(),
   path_count: z.number().optional()
 });
 
-const processStart = base.extend({
+const processStart = z.object({
+  ts_ms: z.number(),
   kind: z.literal('process-start'),
   name: z.string().optional(),
   program: z.string().optional(),
   args: z.array(z.string()).optional()
 });
 
-const processFinish = base.extend({
+const processFinish = z.object({
+  ts_ms: z.number(),
   kind: z.literal('process-finish'),
   name: z.string().optional(),
   exit_code: z.number().optional()
 });
 
-const nodeStart = base.extend({
+const nodeStart = z.object({
+  ts_ms: z.number(),
   kind: z.literal('node-start'),
   node: z.string().optional()
 });
 
-const nodeFinish = base.extend({
+const nodeFinish = z.object({
+  ts_ms: z.number(),
   kind: z.literal('node-finish'),
   node: z.string().optional(),
   exit_code: z.number().optional()
 });
 
-const line = base.extend({
+const line = z.object({
+  ts_ms: z.number(),
   kind: z.literal('line'),
   name: z.string().optional(),
   stream: z.enum(['stdout', 'stderr']).default('stdout'),
   text: z.string().optional()
 });
 
-const healthChecksComplete = base.extend({
+const healthChecksComplete = z.object({
+  ts_ms: z.number(),
   kind: z.literal('health-checks-complete'),
   exit_code: z.number().optional()
 });
 
-const codexNested: z.ZodType<CodexPayload> = z.lazy(() =>
-  z
-    .object({
-      id: z.string().optional(),
-      type: z.string().optional(),
-      kind: z.string().optional(),
-      text: z.string().optional(),
-      message: z.string().optional(),
-      content: z.string().optional(),
-      item: codexNested.optional(),
-      payload: codexNested.optional(),
-      data: codexNested.optional()
-    })
-    .passthrough()
-);
+const knownEvent = z.discriminatedUnion('kind', [
+  serverEvent,
+  iterationStart,
+  iterationClean,
+  pushed,
+  processStart,
+  processFinish,
+  nodeStart,
+  nodeFinish,
+  line,
+  healthChecksComplete
+]);
 
 export type CodexPayload = {
   id?: string;
@@ -92,48 +99,53 @@ export type CodexPayload = {
   [key: string]: unknown;
 };
 
-const codex = base.extend({
-  kind: z.string().regex(/^codex-/),
+const codexPayload: z.ZodType<CodexPayload> = z.lazy(() =>
+  z
+    .object({
+      id: z.string().optional(),
+      type: z.string().optional(),
+      kind: z.string().optional(),
+      text: z.string().optional(),
+      message: z.string().optional(),
+      content: z.string().optional(),
+      item: codexPayload.optional(),
+      payload: codexPayload.optional(),
+      data: codexPayload.optional()
+    })
+    .passthrough()
+);
+
+const codexEvent = z.object({
+  ts_ms: z.number(),
+  kind: z.string(),
   name: z.string().optional(),
   stream: z.string().optional(),
   text: z.string().optional(),
-  event: codexNested.optional()
+  event: codexPayload.optional()
 });
 
-const fallback = base.passthrough();
+const fallbackEvent = base.passthrough();
 
-export const eventSchema = z.union([
-  serverEvent,
-  iterationStart,
-  iterationClean,
-  pushed,
-  processStart,
-  processFinish,
-  nodeStart,
-  nodeFinish,
-  line,
-  healthChecksComplete,
-  codex,
-  fallback
-]);
+export type KnownEvent = z.infer<typeof knownEvent>;
+export type CodexEvent = z.infer<typeof codexEvent>;
+export type FallbackEvent = z.infer<typeof fallbackEvent>;
 
-export type LoopEvent = z.infer<typeof eventSchema>;
+export type ParsedEvent =
+  | { tag: 'known'; event: KnownEvent }
+  | { tag: 'codex'; event: CodexEvent }
+  | { tag: 'fallback'; event: FallbackEvent };
 
-export type ServerEvent = z.infer<typeof serverEvent>;
-export type IterationStart = z.infer<typeof iterationStart>;
-export type IterationClean = z.infer<typeof iterationClean>;
-export type Pushed = z.infer<typeof pushed>;
-export type ProcessStart = z.infer<typeof processStart>;
-export type ProcessFinish = z.infer<typeof processFinish>;
-export type NodeStart = z.infer<typeof nodeStart>;
-export type NodeFinish = z.infer<typeof nodeFinish>;
-export type LineEvent = z.infer<typeof line>;
-export type CodexEvent = z.infer<typeof codex>;
-
-/** Parse a raw event payload, falling back to a tolerant pass-through. */
-export const parseEvent = (input: unknown): LoopEvent | null => {
-  const result = eventSchema.safeParse(input);
-  return result.success ? result.data : null;
+export const parseEvent = (input: unknown): ParsedEvent | null => {
+  const head = base.safeParse(input);
+  if (!head.success) return null;
+  if (head.data.kind.startsWith('codex-')) {
+    const parsed = codexEvent.safeParse(input);
+    return parsed.success ? { tag: 'codex', event: parsed.data } : null;
+  }
+  const known = knownEvent.safeParse(input);
+  if (known.success) return { tag: 'known', event: known.data };
+  const fallback = fallbackEvent.safeParse(input);
+  return fallback.success ? { tag: 'fallback', event: fallback.data } : null;
 };
 
 const stateSchema = z.object({
