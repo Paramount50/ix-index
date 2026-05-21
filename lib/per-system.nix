@@ -118,6 +118,18 @@ let
     meta.description = "Copy git-ignored files into an ix shell workspace";
   };
 
+  loop = ix.writePythonApplication pkgs {
+    name = "loop";
+    src = paths.tools.codexLoop;
+    args = [
+      "--lint-program"
+      (lib.getExe lint)
+    ];
+    check = false;
+    runtimeInputs = [ pkgs.git ];
+    meta.description = "Run Codex exec in a checked commit-and-push loop";
+  };
+
   mcSource = ix.writeNushellApplication pkgs {
     name = "mc-source";
     text = builtins.readFile paths.tools.mcSource;
@@ -256,7 +268,7 @@ in
 
       health-checks = healthChecks.dag;
       health-checks-zellij = healthChecks.zellij;
-      inherit lint site;
+      inherit lint loop site;
       bench-filesystem = benchFilesystem;
       update-mods = updateMods;
       update-ix-cli = updateIxCli;

@@ -79,6 +79,7 @@
           vineflower = ./packages/vineflower;
         };
         tools = {
+          codexLoop = ./tools/codex-loop.py;
           ixShellSyncIgnored = ./tools/ix-shell-sync-ignored.py;
           mcSource = ./tools/mc-source.nu;
           updateIxCli = ./tools/update-ix-cli.py;
