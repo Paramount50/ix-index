@@ -8,31 +8,34 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use axum::{
+    Json, Router,
     extract::State,
     response::{
-        sse::{Event, KeepAlive, Sse},
         IntoResponse,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::get,
-    Json, Router,
 };
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use clap::{Args, Parser, Subcommand};
 use futures::{stream, stream::Stream};
 use loro::{ExportMode, LoroDoc, ToJson};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
-    sync::{broadcast, Mutex},
+    sync::{Mutex, broadcast},
 };
 use tower_http::services::{ServeDir, ServeFile};
 
 #[derive(Parser)]
-#[command(version, about = "Run agent loops and health checks with a Loro-backed web view")]
+#[command(
+    version,
+    about = "Run agent loops and health checks with a Loro-backed web view"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<CommandMode>,
@@ -136,7 +139,11 @@ async fn main() -> Result<()> {
 async fn run_agent_loop(args: LoopArgs) -> Result<()> {
     let state = AppState::new()?;
     let addr = serve(state.clone(), args.port, args.viewer_dir.clone()).await?;
-    publish(&state, json!({"kind": "server", "url": format!("http://{addr}")})).await?;
+    publish(
+        &state,
+        json!({"kind": "server", "url": format!("http://{addr}")}),
+    )
+    .await?;
     println!("loop: web ui at http://{}:{}", web_host(), args.port);
 
     let runner = tokio::spawn(agent_loop(args, state.clone()));
@@ -156,7 +163,11 @@ async fn run_health_checks(args: HealthChecksArgs) -> Result<()> {
         json!({"kind": "server", "url": format!("http://{addr}"), "mode": "health-checks-loro"}),
     )
     .await?;
-    println!("health-checks-loro: web ui at http://{}:{}", web_host(), args.port);
+    println!(
+        "health-checks-loro: web ui at http://{}:{}",
+        web_host(),
+        args.port
+    );
 
     let spec: DagSpec = serde_json::from_slice(
         &tokio::fs::read(&args.spec)
@@ -207,7 +218,11 @@ async fn agent_loop(args: LoopArgs, state: AppState) -> Result<()> {
             return Ok(());
         }
 
-        publish(&state, json!({"kind": "iteration-start", "iteration": iteration})).await?;
+        publish(
+            &state,
+            json!({"kind": "iteration-start", "iteration": iteration}),
+        )
+        .await?;
         ensure_branch(&args.branch).await?;
         ensure_clean().await?;
         git(&["fetch", "origin", &args.branch]).await?;
@@ -220,9 +235,14 @@ async fn agent_loop(args: LoopArgs, state: AppState) -> Result<()> {
 
         let paths = changed_paths().await?;
         if paths.is_empty() {
-            publish(&state, json!({"kind": "iteration-clean", "iteration": iteration})).await?;
+            publish(
+                &state,
+                json!({"kind": "iteration-clean", "iteration": iteration}),
+            )
+            .await?;
         } else {
-            let lint_status = run_streamed(&lint_program, &[], &state, "lint").await?;
+            let lint_status =
+                run_streamed(&lint_program, &[], &state, "lint", StreamMode::Lines).await?;
             if lint_status != 0 {
                 bail!("lint failed ({lint_status})");
             }
@@ -244,23 +264,36 @@ async fn agent_loop(args: LoopArgs, state: AppState) -> Result<()> {
 }
 
 async fn run_agent(args: &LoopArgs, prompt: &str, state: &AppState) -> Result<i32> {
-    let command_args = if args
+    let is_codex = args
         .agent_program
         .file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name == "codex")
-    {
+        .is_some_and(|name| name == "codex");
+
+    let command_args = if is_codex {
         codex_argv(args, prompt).await?
     } else {
         vec![prompt.to_owned()]
     };
 
-    run_streamed(&args.agent_program, &command_args, state, "agent").await
+    run_streamed(
+        &args.agent_program,
+        &command_args,
+        state,
+        "agent",
+        if is_codex {
+            StreamMode::CodexJson
+        } else {
+            StreamMode::Lines
+        },
+    )
+    .await
 }
 
 async fn codex_argv(args: &LoopArgs, prompt: &str) -> Result<Vec<String>> {
     let mut command_args = vec![
         "exec".to_owned(),
+        "--json".to_owned(),
         "--cd".to_owned(),
         ".".to_owned(),
         "-c".to_owned(),
@@ -274,7 +307,10 @@ async fn codex_argv(args: &LoopArgs, prompt: &str) -> Result<Vec<String>> {
             "-c".to_owned(),
             format!("commit_attribution.name=\"{}\"", escape_toml_string(&name)),
             "-c".to_owned(),
-            format!("commit_attribution.email=\"{}\"", escape_toml_string(&email)),
+            format!(
+                "commit_attribution.email=\"{}\"",
+                escape_toml_string(&email)
+            ),
         ]);
     }
 
@@ -294,7 +330,7 @@ async fn run_health_node(state: AppState, name: String, command: Vec<String>) ->
     publish(&state, json!({"kind": "node-start", "node": name})).await?;
     let program = PathBuf::from(&command[0]);
     let args = command[1..].to_vec();
-    let status = run_streamed(&program, &args, &state, &name).await?;
+    let status = run_streamed(&program, &args, &state, &name, StreamMode::Lines).await?;
     publish(
         &state,
         json!({"kind": "node-finish", "node": name, "exit_code": status}),
@@ -308,6 +344,7 @@ async fn run_streamed(
     args: &[String],
     state: &AppState,
     stream_name: &str,
+    mode: StreamMode,
 ) -> Result<i32> {
     publish(
         state,
@@ -332,10 +369,10 @@ async fn run_streamed(
     let name_stderr = stream_name.to_owned();
 
     let stdout_task = tokio::spawn(async move {
-        stream_lines(state_stdout, name_stdout, "stdout", stdout).await
+        stream_lines(state_stdout, name_stdout, "stdout", stdout, mode).await
     });
     let stderr_task = tokio::spawn(async move {
-        stream_lines(state_stderr, name_stderr, "stderr", stderr).await
+        stream_lines(state_stderr, name_stderr, "stderr", stderr, mode).await
     });
 
     let status = child.wait().await.context("wait for child")?;
@@ -350,20 +387,105 @@ async fn run_streamed(
     Ok(code)
 }
 
-async fn stream_lines<R>(state: AppState, name: String, stream: &str, reader: R) -> Result<()>
+#[derive(Clone, Copy)]
+enum StreamMode {
+    Lines,
+    CodexJson,
+}
+
+async fn stream_lines<R>(
+    state: AppState,
+    name: String,
+    stream: &str,
+    reader: R,
+    mode: StreamMode,
+) -> Result<()>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
     let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await? {
-        publish(
-            &state,
-            json!({"kind": "line", "name": name, "stream": stream, "text": line}),
-        )
-        .await?;
+        let event = match mode {
+            StreamMode::Lines => {
+                json!({"kind": "line", "name": name, "stream": stream, "text": line})
+            }
+            StreamMode::CodexJson => codex_event(&name, stream, &line),
+        };
+
+        publish(&state, event).await?;
     }
 
     Ok(())
+}
+
+fn codex_event(name: &str, stream: &str, line: &str) -> Value {
+    let Ok(raw) = serde_json::from_str::<Value>(line) else {
+        return json!({"kind": "line", "name": name, "stream": stream, "text": line});
+    };
+    let Ok(event) = serde_json::from_value::<CodexJsonEvent>(raw.clone()) else {
+        return json!({"kind": "line", "name": name, "stream": stream, "text": line});
+    };
+
+    let codex_kind = event.kind.as_deref().unwrap_or("event");
+    let text = event.text().unwrap_or_else(|| raw.to_string());
+
+    json!({
+        "kind": format!("codex-{codex_kind}"),
+        "name": name,
+        "stream": stream,
+        "text": text,
+        "event": raw,
+    })
+}
+
+#[derive(Deserialize)]
+struct CodexJsonEvent {
+    #[serde(alias = "type", alias = "kind")]
+    kind: Option<String>,
+    text: Option<String>,
+    message: Option<String>,
+    content: Option<String>,
+    delta: Option<String>,
+    #[serde(alias = "cmd", alias = "command")]
+    command: Option<CodexCommand>,
+    item: Option<Box<Self>>,
+    payload: Option<Box<Self>>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CodexCommand {
+    Args(Vec<String>),
+    Text(String),
+    Json(Value),
+}
+
+impl CodexJsonEvent {
+    fn text(&self) -> Option<String> {
+        [
+            self.text.as_deref(),
+            self.message.as_deref(),
+            self.content.as_deref(),
+            self.delta.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|value| !value.is_empty())
+        .map(str::to_owned)
+        .or_else(|| self.command.as_ref().map(CodexCommand::text))
+        .or_else(|| self.item.as_ref().and_then(|item| item.text()))
+        .or_else(|| self.payload.as_ref().and_then(|payload| payload.text()))
+    }
+}
+
+impl CodexCommand {
+    fn text(&self) -> String {
+        match self {
+            Self::Args(parts) => parts.join(" "),
+            Self::Text(command) => command.to_owned(),
+            Self::Json(command) => command.to_string(),
+        }
+    }
 }
 
 async fn serve(state: AppState, port: u16, viewer_dir: PathBuf) -> Result<SocketAddr> {
@@ -457,7 +579,11 @@ struct AppError(anyhow::Error);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
-        (axum::http::StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            self.0.to_string(),
+        )
+            .into_response()
     }
 }
 
@@ -488,7 +614,9 @@ async fn resolve_prompt(args: &LoopArgs) -> Result<String> {
         return read_prompt(default).await;
     }
 
-    bail!("no prompt provided. pass --prompt, --prompt-file, set LOOP_PROMPT_FILE, or create loop-prompt.md");
+    bail!(
+        "no prompt provided. pass --prompt, --prompt-file, set LOOP_PROMPT_FILE, or create loop-prompt.md"
+    );
 }
 
 async fn read_prompt(path: &Path) -> Result<String> {
@@ -531,7 +659,12 @@ async fn commit(message: &str, paths: &[String]) -> Result<()> {
     add_args.extend(paths.iter().cloned());
     git_owned(&add_args).await?;
 
-    let mut args = vec!["commit".to_owned(), "-m".to_owned(), message.to_owned(), "--".to_owned()];
+    let mut args = vec![
+        "commit".to_owned(),
+        "-m".to_owned(),
+        message.to_owned(),
+        "--".to_owned(),
+    ];
     args.extend(paths.iter().cloned());
     git_owned(&args).await
 }

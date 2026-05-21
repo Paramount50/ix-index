@@ -135,7 +135,12 @@ let
         makeWrapper ${lib.getExe repoPackages.loop} $out/bin/loop \
           --add-flags --lint-program \
           --add-flags ${lib.escapeShellArg (lib.getExe lint)} \
-          --prefix PATH : ${lib.makeBinPath [ pkgs.git ]}
+          --prefix PATH : ${
+            lib.makeBinPath [
+              pkgs.git
+              pkgs.mgrep
+            ]
+          }
       '';
 
   mcSource = ix.writeNushellApplication pkgs {
