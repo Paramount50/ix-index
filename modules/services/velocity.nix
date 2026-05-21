@@ -119,14 +119,7 @@ let
   // cfg.settings;
 
   configFilePaths = lib.attrNames cfg.configFiles;
-  invalidConfigFilePaths = lib.filter (
-    path:
-    lib.hasPrefix "/" path
-    || path == "."
-    || path == ".."
-    || lib.hasPrefix "../" path
-    || lib.hasInfix "/../" path
-  ) configFilePaths;
+  invalidConfigFilePaths = ix.relativePath.unsafe configFilePaths;
   managedConfigFiles = cfg.configFiles // {
     "velocity.toml" = renderedSettings;
   };
@@ -135,6 +128,7 @@ let
     inherit (plugin) fileName;
     path = plugin.src;
   }) enabledPlugins;
+  invalidPluginFileNames = ix.relativePath.unsafeNames (map (plugin: plugin.fileName) pluginJars);
 
   mkManaged =
     label: files:
@@ -574,6 +568,10 @@ in
       {
         assertion = invalidConfigFilePaths == [ ];
         message = "services.velocity.configFiles contains unsafe relative paths: ${lib.concatStringsSep ", " invalidConfigFilePaths}";
+      }
+      {
+        assertion = invalidPluginFileNames == [ ];
+        message = "services.velocity.plugins contains unsafe plugin file names: ${lib.concatStringsSep ", " invalidPluginFileNames}";
       }
     ];
 

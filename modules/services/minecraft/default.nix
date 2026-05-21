@@ -567,6 +567,12 @@ let
       value = ix.minecraft.dimensionType.withBase dimension value;
     }) datapack.dimensionTypes)
     // datapack.files;
+  datapackGeneratedPaths =
+    datapack:
+    lib.attrNames datapack.files
+    ++ map (dimension: "data/minecraft/dimension_type/${dimension}.json") (
+      lib.attrNames datapack.dimensionTypes
+    );
   datapackFileName = name: datapack: if datapack.fileName == null then name else datapack.fileName;
   datapackRoots = lib.mapAttrsToList (name: datapack: {
     fileName = datapackFileName name datapack;
@@ -576,6 +582,40 @@ let
       else
         datapack.src;
   }) enabledDatapacks;
+  invalidManagedPaths =
+    lib.optional (
+      !(ix.relativePath.isSafeName cfg.dropinDir)
+    ) "services.minecraft.dropinDir=${cfg.dropinDir}"
+    ++ map (path: "services.minecraft.configFiles.${path}") (
+      ix.relativePath.unsafe (lib.attrNames cfg.configFiles)
+    )
+    ++ map (path: "services.minecraft.serverFiles.${path}") (
+      ix.relativePath.unsafe (lib.attrNames cfg.serverFiles)
+    )
+    ++ map (path: "services.minecraft.mods.${path}") (
+      ix.relativePath.unsafeNames (lib.attrNames cfg.mods)
+    )
+    ++ map (path: "services.minecraft.plugins.${path}") (
+      ix.relativePath.unsafeNames (lib.attrNames cfg.plugins)
+    )
+    ++ lib.concatMap (
+      name:
+      let
+        fileName = datapackFileName name cfg.datapacks.${name};
+      in
+      lib.optional (
+        !(ix.relativePath.isSafeName fileName)
+      ) "services.minecraft.datapacks.${name}.fileName=${fileName}"
+    ) (lib.attrNames cfg.datapacks)
+    ++ lib.concatMap (
+      name:
+      map (path: "services.minecraft.datapacks.${name}.files.${path}") (
+        ix.relativePath.unsafe (datapackGeneratedPaths cfg.datapacks.${name})
+      )
+    ) (lib.attrNames cfg.datapacks)
+    ++ map (path: "services.minecraft world directory ${path}") (
+      ix.relativePath.unsafe annotatedWorldNames
+    );
 
   managed =
     let
@@ -1036,6 +1076,10 @@ in
       {
         assertion = duplicatePlayerUUIDs == [ ];
         message = "services.minecraft.players contains duplicate UUIDs: ${lib.concatStringsSep ", " duplicatePlayerUUIDs}";
+      }
+      {
+        assertion = invalidManagedPaths == [ ];
+        message = "services.minecraft managed paths must be relative paths without empty, '.', or '..' segments: ${lib.concatStringsSep ", " invalidManagedPaths}";
       }
       {
         assertion = rawAccessFileNames == [ ];

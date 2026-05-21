@@ -1037,6 +1037,34 @@ let
     }
   ];
 
+  minecraftUnsafeManagedPathFailures = failedAssertionsFor [
+    ../images/games/minecraft
+    defaultMinecraftModule
+    {
+      services.minecraft = {
+        configFiles."client//bad.toml" = { };
+        serverFiles."plugins/../bukkit.yml" = { };
+        datapacks.bad = {
+          fileName = "../bad";
+          files."data/../bad.json" = { };
+        };
+      };
+    }
+  ];
+
+  velocityUnsafeManagedPathFailures = failedAssertionsFor [
+    {
+      services.velocity = {
+        enable = true;
+        configFiles."plugins/../bad.toml" = { };
+        plugins.bad = {
+          src = pkgs.writeText "velocity-test-plugin.jar" "";
+          fileName = "nested/bad.jar";
+        };
+      };
+    }
+  ];
+
   portClaimNamespaceAllowedFailures = failedAssertionsFor [
     {
       ix.networking.portClaims = {
@@ -1576,6 +1604,36 @@ let
       {
         assertion = portClaimAddressFamilyAllowedFailures == [ ];
         message = "ix.networking.portClaims should allow the same UDP port on separate IPv4 and IPv6 bind addresses";
+      }
+    ];
+
+    managed-paths = [
+      {
+        assertion =
+          ix.relativePath.isSafe "plugins/BlueMap/core.conf"
+          && !(ix.relativePath.isSafe "../core.conf")
+          && !(ix.relativePath.isSafe "plugins//core.conf")
+          && ix.relativePath.isSafeName "Geyser-Velocity.jar"
+          && !(ix.relativePath.isSafeName "nested/Geyser-Velocity.jar");
+        message = "ix.relativePath should distinguish safe managed paths from unsafe segments and names";
+      }
+      {
+        assertion = lib.any (
+          failure: lib.hasInfix "services.minecraft managed paths must be relative paths" failure.message
+        ) minecraftUnsafeManagedPathFailures;
+        message = "minecraft managed file options should reject unsafe relative paths at eval time";
+      }
+      {
+        assertion = lib.any (
+          failure: lib.hasInfix "services.velocity.configFiles contains unsafe relative paths" failure.message
+        ) velocityUnsafeManagedPathFailures;
+        message = "velocity managed config files should reject unsafe relative paths at eval time";
+      }
+      {
+        assertion = lib.any (
+          failure: lib.hasInfix "services.velocity.plugins contains unsafe plugin file names" failure.message
+        ) velocityUnsafeManagedPathFailures;
+        message = "velocity plugin file names should reject nested or unsafe paths at eval time";
       }
     ];
 

@@ -351,6 +351,35 @@ let
   */
   errors = import ./errors.nix { inherit lib; };
 
+  /**
+    Utilities for option values that are later joined under a runtime
+    directory.
+
+    `isSafe` accepts relative paths with ordinary segments and rejects empty,
+    absolute, `.`, `..`, and repeated-slash forms. Use `isSafeName` for values
+    that become one directory entry rather than a nested path.
+  */
+  relativePath =
+    let
+      reservedSegments = [
+        ""
+        "."
+        ".."
+      ];
+      segments = path: lib.splitString "/" path;
+      hasReservedSegment =
+        path: lib.any (segment: builtins.elem segment reservedSegments) (segments path);
+      isSafe =
+        path:
+        builtins.isString path && path != "" && !(lib.hasPrefix "/" path) && !(hasReservedSegment path);
+      isSafeName = path: isSafe path && builtins.length (segments path) == 1;
+    in
+    {
+      inherit isSafe isSafeName;
+      unsafe = paths: lib.filter (path: !(isSafe path)) paths;
+      unsafeNames = paths: lib.filter (path: !(isSafeName path)) paths;
+    };
+
   mkMinecraftLoader = import ./minecraft-loader.nix;
 
   /**
@@ -731,6 +760,7 @@ let
       mkMinecraftLoader
       mkMinecraftNbtFormat
       mkMinecraftSyncManaged
+      relativePath
       systemdHardening
       uvLock
       uvLockFor
@@ -1016,6 +1046,7 @@ let
       mkMinecraftNbtFormat
       mkMinecraftSyncManaged
       packageSetFor
+      relativePath
       systemdHardening
       uvLock
       uvLockFor
