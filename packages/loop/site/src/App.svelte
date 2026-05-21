@@ -41,7 +41,7 @@
   {#if view.current}
     <pre class="line running">$ {view.current.text}</pre>
   {/if}
-  {#each past as cmd (cmd.startedAt)}
+  {#each past as cmd}
     <pre class="line" class:failed={cmd.status === 'failed'}>$ {cmd.text}</pre>
   {/each}
 </main>
