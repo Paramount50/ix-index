@@ -5,10 +5,11 @@
   makeWrapper,
 }:
 
-# Hex deps come from `deps.nix`, which is regenerated with
-# `nix shell nixpkgs#mix2nix -c mix2nix mix.lock > deps.nix` whenever
-# `mix.lock` changes. Hashes ride in from the lockfile, so there is no
-# floating FOD and no `lib.fakeHash` placeholder in tracked Nix.
+# Hex deps come from `deps.nix`, which is hand-maintained against `mix.lock`.
+# `nix shell nixpkgs#mix2nix -c mix2nix mix.lock` is a hint for new
+# per-hex `sha256` values; the file itself avoids `rec` and `with self;` so
+# the repo's lint rules pass. Hashes are materialised from the lockfile, so
+# there is no floating FOD and no `lib.fakeHash` placeholder in tracked Nix.
 let
   mixNixDeps = import ./deps.nix {
     inherit lib;

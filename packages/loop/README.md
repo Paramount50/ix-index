@@ -28,9 +28,11 @@ If none of those resolve, loop exits with a clear error.
 ## Layout
 
 - `mix.exs`, `mix.lock` — Hex deps (bandit, plug, websock_adapter).
-- `deps.nix` — generated from `mix.lock` with
-  `nix shell nixpkgs#mix2nix -c mix2nix mix.lock > deps.nix`.
-  Regenerate whenever `mix.lock` changes.
+- `deps.nix` — hand-maintained Hex dependency set, in sync with `mix.lock`.
+  When bumping a dep, run `nix shell nixpkgs#mix2nix -c mix2nix mix.lock`
+  to read the new `sha256` and port it into the matching `mkHex` entry.
+  Hand-rolled (instead of using `mix2nix` output directly) because the
+  generator emits `rec { ... }` per package, which the repo's lint bans.
 - `default.nix` — Nix package, builds an escript via
   `pkgs.beamPackages.mixRelease`.
 - `lib/loop/cli.ex` — escript entrypoint, argv parsing, prompt resolution.
