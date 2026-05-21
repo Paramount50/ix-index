@@ -10,12 +10,16 @@
       online-mode = false;
       # The terrain pass is expensive, so give the server enough simulation
       # radius to actually exercise the generator without churning chunks.
-      view-distance = 16;
+      view-distance = 32;
       simulation-distance = 12;
     };
 
     mods = {
       fabric-api = { };
+      distanthorizons = {
+        serverSideLodGeneration = true;
+        maxRenderDistance = 32;
+      };
       # Diffusion-model world generator. The catalog jar at
       # images/games/minecraft/mods/1.21.11.json is the CPU build; the same
       # upstream release ships a GPU variant. Swap the manifest URL and

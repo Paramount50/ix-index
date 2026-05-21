@@ -7,7 +7,8 @@
 }:
 let
   dataDir = "/var/lib/daily-scraper";
-  scraper = {
+  scraperOverrides = config._module.args.dailyScraper or { };
+  scraperDefaults = {
     package = import ./package.nix { inherit ix lib pkgs; };
     repository = "indexable-inc/index";
     githubApiUrl = "https://api.github.com";
@@ -23,6 +24,10 @@ let
       deleteRemoved = false;
       awsEnvironmentFile = null;
     };
+  };
+  scraper = scraperDefaults // scraperOverrides // {
+    environment = scraperDefaults.environment // (scraperOverrides.environment or { });
+    s3 = scraperDefaults.s3 // (scraperOverrides.s3 or { });
   };
 
   systemctl = lib.getExe' config.systemd.package "systemctl";

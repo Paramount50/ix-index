@@ -903,7 +903,6 @@ let
     in
     {
       inherit fleet config;
-      cfg = config.services.daily-scraper;
       plan = fleet.planValue.nodes.scraper;
       service = config.systemd.services.daily-scraper;
       timer = config.systemd.timers.daily-scraper;
@@ -929,8 +928,7 @@ let
       config = evalConfig [
         ../examples/python-daily-scraper/service.nix
         {
-          services.daily-scraper = {
-            enable = true;
+          _module.args.dailyScraper = {
             s3 = {
               uri = "s3://andrew-scraper-output/github";
               deleteRemoved = true;
@@ -942,7 +940,6 @@ let
     in
     {
       inherit config;
-      cfg = config.services.daily-scraper;
       service = config.systemd.services.daily-scraper;
     };
 
@@ -1360,9 +1357,10 @@ let
       }
       {
         assertion =
-          dailyScraperExample.cfg.enable
-          && dailyScraperExample.cfg.package.meta.mainProgram == "daily-scraper"
-          && dailyScraperExample.cfg.repository == "indexable-inc/index";
+          builtins.any (
+            package: (package.meta.mainProgram or null) == "daily-scraper"
+          ) dailyScraperExample.config.environment.systemPackages
+          && lib.hasInfix "--repo indexable-inc/index" dailyScraperExample.service.serviceConfig.ExecStart;
         message = "python-daily-scraper example should package and enable the scraper";
       }
       {
@@ -1420,8 +1418,7 @@ let
       }
       {
         assertion =
-          dailyScraperS3.cfg.s3.uri == "s3://andrew-scraper-output/github"
-          && lib.hasInfix "s3 sync --only-show-errors /var/lib/daily-scraper/parquet s3://andrew-scraper-output/github --delete" dailyScraperS3.service.serviceConfig.ExecStartPost
+          lib.hasInfix "s3 sync --only-show-errors /var/lib/daily-scraper/parquet s3://andrew-scraper-output/github --delete" dailyScraperS3.service.serviceConfig.ExecStartPost
           &&
             dailyScraperS3.service.serviceConfig.LoadCredential == [
               "aws-env:/run/secrets/daily-scraper/aws.env"
