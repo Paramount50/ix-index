@@ -22,9 +22,8 @@ ix up
 - [`server.nix`](server.nix) configures Samba with the locking knobs
   (`strict locking`, `posix locking`, `kernel oplocks = no`,
   `strict sync = yes`) that keep two clients honest about each other's writes.
-- [`client.nix`](client.nix) declares the CIFS mount with `vers=3.1.1` and an
-  explicit `nobrl=0` so a future option-list tweak can't silently disable
-  byte-range locks.
+- [`client.nix`](client.nix) declares the CIFS mount with `vers=3.1.1` and
+  leaves `nobrl` absent so byte-range locks stay enabled.
 
 ## Verify cross-client locking
 

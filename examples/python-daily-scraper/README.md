@@ -21,22 +21,20 @@ ix up
 - [`pyproject.toml`](pyproject.toml), [`uv.lock`](uv.lock), and [`src/`](src/)
   are the Python project.
 - [`default.nix`](default.nix) defines one ix fleet node.
-- [`service.nix`](service.nix) owns the service options, hardening, timer, and
-  optional S3 sync.
+- [`service.nix`](service.nix) owns the concrete service config, hardening,
+  timer, and optional S3 sync.
 - [`package.nix`](package.nix) packages the uv project as a store executable.
 - [`flake.nix`](flake.nix) exposes the image package and the Python package.
 
 ## S3 Output
 
-Set an S3 URI in the module config:
+The example leaves S3 sync disabled. To enable it, set the `scraper.s3` values
+near the top of [`service.nix`](service.nix):
 
 ```nix
-services.daily-scraper = {
-  enable = true;
-  s3 = {
-    uri = "s3://andrew-scraper-output/github";
-    awsEnvironmentFile = "/run/secrets/daily-scraper/aws.env";
-  };
+s3 = {
+  uri = "s3://andrew-scraper-output/github";
+  awsEnvironmentFile = "/run/secrets/daily-scraper/aws.env";
 };
 ```
 

@@ -480,6 +480,8 @@ Image presets live under `images/presets/`. They are teaching material, not just
 
 Examples and presets should make the backing API look good. If an example needs to repeat obvious safe defaults, conservative service settings, artifact plumbing, or boilerplate just to be production-shaped, fix the module/helper defaults instead and keep the consumer minimal. The example should show intent; the library should carry the policy.
 
+Example code should stay on the consumer side of the module boundary. It composes existing `services.*` options, packages, fleets, and library helpers by name. If a demo needs a reusable service option, add that option in `modules/` or `lib/` first and let the example consume it. Inline `options.services.*` declarations inside `examples/` make the example look like framework internals, which hides the shape a downstream user should copy.
+
 ### Presets never own artifact data
 
 Presets must not inline URLs, hashes, or pinned version strings for fetched artifacts. Mod jars, plugin jars, server jars, datasets, JDKs, and source-fetched packages all live in the repo's library surface (`ix.lib.artifacts.*`, `ix.packages`, module options, generated catalogs under `images/`), and presets consume them by name. If a preset needs an artifact the library does not expose yet, extend the library first: add the slug to the relevant catalog and regenerate it with `nix run .#update-mods`, add a new entry to `ix.lib.artifacts`, or grow the relevant module option. Then point the preset at the named surface. Presets are consumer tests for whether the library is sufficiently specified. A missing entry is a gap in the repo; fix it in the library so every consumer benefits.

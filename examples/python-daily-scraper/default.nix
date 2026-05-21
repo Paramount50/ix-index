@@ -6,9 +6,6 @@ index.lib.mkFleet {
   nodes.scraper = {
     modules = [
       ./service.nix
-      {
-        services.daily-scraper.enable = true;
-      }
     ];
   };
 }
