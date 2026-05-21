@@ -346,12 +346,19 @@ let
   mkMinecraftLoader = import ./minecraft-loader.nix;
 
   /**
-    Nix constructors for typed Minecraft NBT values.
+    Repo-owned Minecraft helpers exposed through `specialArgs.ix` and the
+    flake's `lib` output.
 
-    Plain Nix attrsets, lists, strings, booleans, integers, and floats can be
-    encoded as compound, list, string, byte, int/long, and double tags. These
-    constructors are the explicit escape hatch for Minecraft's narrower tag
-    types: bytes, shorts, floats, typed numeric arrays, and named roots.
+    - `nbt`: typed NBT-tag constructors. Plain Nix scalars (attrset, list,
+      string, bool, int, float) round-trip to compound, list, string, byte,
+      int/long, and double tags. These constructors are the escape hatch for
+      Minecraft's narrower tag types: bytes, shorts, floats, typed numeric
+      arrays, and named roots.
+    - `dimensionType`: vanilla dimension-type JSON snapshots plus a `withBase`
+      merge helper. Lets `services.minecraft.datapacks.<n>.dimensionTypes.<dim>`
+      set `base = "minecraft:overworld"` and override only the height knobs
+      (or any other field) instead of restating the whole schema. See
+      [`lib/minecraft/dimension-type.nix`](lib/minecraft/dimension-type.nix).
   */
   minecraft = {
     nbt =
@@ -380,6 +387,8 @@ let
         list = tagged "list";
         compound = tagged "compound";
       };
+
+    dimensionType = import ./minecraft/dimension-type.nix { inherit lib; };
   };
 
   /**
@@ -920,9 +929,7 @@ let
       ) categoryDirs;
     in
     lib.listToAttrs (
-      map (e: lib.nameValuePair e.name (import e.path { index = indexShim; })) (
-        flatPairs ++ nestedPairs
-      )
+      map (e: lib.nameValuePair e.name (import e.path { index = indexShim; })) (flatPairs ++ nestedPairs)
     );
 
   /**

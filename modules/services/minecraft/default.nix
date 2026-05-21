@@ -80,6 +80,19 @@ let
     freeformType = formatValueType;
   };
 
+  dimensionTypeType = types.submodule {
+    freeformType = formatValueType;
+    options.base = mkOption {
+      type = types.nullOr (types.enum ix.minecraft.dimensionType.bases);
+      default = null;
+      description = ''
+        Vanilla dimension type whose snapshot is deep-merged underneath this entry.
+        Override only the fields you want to change (typically `min_y`, `height`,
+        `logical_height`). Leave unset to write the entry verbatim.
+      '';
+    };
+  };
+
   pluginType = types.submodule {
     freeformType = formatValueType;
 
@@ -147,9 +160,22 @@ let
         };
 
         dimensionTypes = mkOption {
-          type = types.attrsOf formatValueType;
+          type = types.attrsOf dimensionTypeType;
           default = { };
-          description = "Dimension type JSON files generated under `data/minecraft/dimension_type/<name>.json`.";
+          description = ''
+            Dimension type JSON files generated under `data/minecraft/dimension_type/<name>.json`.
+
+            Each entry is a freeform JSON attrset. Set `base` to one of
+            `${lib.concatStringsSep ", " ix.minecraft.dimensionType.bases}` to deep-merge a
+            vanilla snapshot underneath; only the keys you set (typically `min_y`,
+            `height`, `logical_height`) need to appear. When `base` is unset the entry
+            is written verbatim, so the schema-complete form still works.
+
+            `logical_height` defaults to `height` when unset. Height knobs are validated
+            against Minecraft's hard limits: `min_y` and `height` must be multiples of 16,
+            `min_y` in `[-2032, 2031]`, `height` in `[16, 4064]`, `min_y + height <= 2032`,
+            and `logical_height <= height`.
+          '';
         };
       };
     }
@@ -534,7 +560,7 @@ let
     }
     // (lib.mapAttrs' (dimension: value: {
       name = "data/minecraft/dimension_type/${dimension}.json";
-      inherit value;
+      value = ix.minecraft.dimensionType.withBase dimension value;
     }) datapack.dimensionTypes)
     // datapack.files;
   datapackFileName = name: datapack: if datapack.fileName == null then name else datapack.fileName;

@@ -1,0 +1,7 @@
+{
+  "issue": "nom build .#health-checks fails: mod 'distanthorizons' not in modCatalog",
+  "trigger": "examples/minecraft/crazy-terrain references distanthorizons (version 1.21.11) but catalog 1.21.11.json doesn't contain it",
+  "root_cause": "Commit 44fc009 added 'distanthorizons' to images/games/minecraft/mods/manifest.json under version 1.21.11 but did not regenerate images/games/minecraft/mods/1.21.11.json. Manifest and generated catalog drifted.",
+  "hypothesis": "Running `nix run .#update-mods -- --version 1.21.11` will regenerate the 1.21.11.json catalog with distanthorizons entries, fixing the eval error.",
+  "fix": "Run the updater, then verify with `nix build .#health-checks`."
+}
