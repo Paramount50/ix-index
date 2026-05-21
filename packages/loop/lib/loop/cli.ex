@@ -24,8 +24,9 @@ defmodule Loop.CLI do
     {:ok, _} = Application.ensure_all_started(:loop)
     cfg = parse!(argv)
     port = Application.get_env(:loop, :web_port, 7878)
-    IO.puts("loop: web ui at http://localhost:#{port}")
-    Loop.LogBus.publish("loop: web ui at http://localhost:#{port}")
+    url = "http://#{web_host()}:#{port}"
+    IO.puts("loop: web ui at #{url}")
+    Loop.LogBus.publish("loop: web ui at #{url}")
     status = Loop.Runner.run(cfg)
     System.halt(status)
   end
@@ -88,5 +89,14 @@ defmodule Loop.CLI do
   defp die(reason) do
     IO.puts(:stderr, "loop: #{reason}")
     System.halt(2)
+  end
+
+  # Bandit binds 0.0.0.0; print the kernel-reported hostname so the URL is
+  # reachable when the loop runs on a remote machine instead of `localhost`.
+  defp web_host do
+    case :inet.gethostname() do
+      {:ok, name} -> List.to_string(name)
+      _ -> "localhost"
+    end
   end
 end
