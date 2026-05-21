@@ -1,9 +1,8 @@
 :root {
   color-scheme: dark;
-  color: #e4e4e7;
+  color: #a1a1aa;
   background: #09090b;
-  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-  font-feature-settings: 'cv11', 'ss01';
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -14,39 +13,10 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background:
-    radial-gradient(60% 40% at 50% -10%, rgba(45, 45, 55, 0.4), transparent 70%),
-    #09090b;
-}
-
-main {
-  max-width: 880px;
-  margin: 0 auto;
-  padding: 8px 24px 80px;
-}
-
-.empty {
-  margin: 40px 0;
-  color: #52525b;
-  font-size: 13px;
-  text-align: center;
-  font-style: italic;
-}
-
-.orphans {
-  display: grid;
-  gap: 1px;
-  padding: 12px 0;
-  border-bottom: 1px solid #18181b;
+  background: #09090b;
 }
 
 ::selection {
   background: #fbbf24;
   color: #09090b;
-}
-
-@media (max-width: 720px) {
-  main {
-    padding: 4px 14px 60px;
-  }
 }
