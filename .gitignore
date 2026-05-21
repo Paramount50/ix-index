@@ -6,3 +6,5 @@ target
 __pycache__/
 *.py[cod]
 *$py.class
+packages/loop/site/dist/
+packages/loop/site/node_modules/
