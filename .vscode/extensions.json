@@ -14,7 +14,7 @@
     "vadimcn.vscode-lldb",
     "gleam.gleam",
     "pgourlain.erlang",
-    "jakebecker.elixir-ls",
+    "elixir-lsp.elixir-ls",
     "sumneko.lua",
     "fwcd.kotlin",
     "redhat.vscode-xml"
