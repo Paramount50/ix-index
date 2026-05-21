@@ -51,7 +51,7 @@ enum CommandMode {
 
 #[derive(Args, Clone)]
 struct LoopArgs {
-    #[arg(long, default_value = "development")]
+    #[arg(long, default_value = "main")]
     branch: String,
 
     #[arg(long)]
