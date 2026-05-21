@@ -451,7 +451,15 @@ fn merge_identity_hash(
     let dependency_hashes = unit
         .dependencies
         .iter()
-        .map(|dependency| merge_identity_hash(graph, dependency.index, hashes))
+        .map(|dependency| {
+            Ok(format!(
+                "{}:{}:{}:{}",
+                dependency.extern_crate_name,
+                dependency.public,
+                dependency.noprelude,
+                merge_identity_hash(graph, dependency.index, hashes)?
+            ))
+        })
         .collect::<EyreResult<Vec<_>>>()?;
     let hash = unit.identity_hash(&dependency_hashes, None);
     hashes[index] = Some(hash.clone());
@@ -888,5 +896,75 @@ mod tests {
             left.identity_hash(&[], None),
             right.identity_hash(&[], None)
         );
+    }
+
+    fn graph_with_dependency_edge(
+        extern_crate_name: &str,
+        public: bool,
+        noprelude: bool,
+    ) -> UnitGraph {
+        serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "units": [
+                {
+                    "pkg_id": "path+file:///workspace/dep#dep@0.1.0",
+                    "target": {
+                        "kind": ["lib"],
+                        "crate_types": ["lib"],
+                        "name": "dep",
+                        "src_path": "/workspace/dep/src/lib.rs",
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "build",
+                    "dependencies": []
+                },
+                {
+                    "pkg_id": "path+file:///workspace/app#app@0.1.0",
+                    "target": {
+                        "kind": ["lib"],
+                        "crate_types": ["lib"],
+                        "name": "app",
+                        "src_path": "/workspace/app/src/lib.rs",
+                        "edition": "2024"
+                    },
+                    "profile": { "name": "release", "opt_level": "3" },
+                    "mode": "build",
+                    "dependencies": [
+                        {
+                            "index": 0,
+                            "extern_crate_name": extern_crate_name,
+                            "public": public,
+                            "noprelude": noprelude
+                        }
+                    ]
+                }
+            ],
+            "roots": [1]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn merge_keeps_units_with_different_dependency_edges() {
+        let merged = UnitGraph::merge(vec![
+            graph_with_dependency_edge("dep", false, false),
+            graph_with_dependency_edge("renamed_dep", true, true),
+        ])
+        .unwrap();
+
+        assert_eq!(merged.units.len(), 3);
+        assert_eq!(merged.roots.len(), 2);
+        assert_ne!(merged.roots[0], merged.roots[1]);
+        assert_eq!(
+            merged.units[merged.roots[0]].dependencies[0].extern_crate_name,
+            "dep"
+        );
+        assert_eq!(
+            merged.units[merged.roots[1]].dependencies[0].extern_crate_name,
+            "renamed_dep"
+        );
+        assert!(merged.units[merged.roots[1]].dependencies[0].public);
+        assert!(merged.units[merged.roots[1]].dependencies[0].noprelude);
     }
 }
