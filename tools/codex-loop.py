@@ -36,6 +36,11 @@ def current_branch() -> str:
     return output(["git", "branch", "--show-current"])
 
 
+def fast_forward(branch: str) -> None:
+    run(["git", "fetch", "origin", branch])
+    run(["git", "merge", "--ff-only", f"origin/{branch}"])
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run Codex in a commit-and-push loop for repo-quality improvements."
@@ -120,7 +125,7 @@ def run_iteration(args: argparse.Namespace, lint_program: str, index: int) -> bo
     if not is_clean():
         raise SystemExit("loop: working tree is dirty before Codex starts; refusing to mix changes")
 
-    run(["git", "pull", "--ff-only"])
+    fast_forward(args.branch)
     run(build_codex_command(args))
 
     paths = changed_paths()
