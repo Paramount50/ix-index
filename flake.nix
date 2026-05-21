@@ -71,6 +71,7 @@
           dagRunner = ./packages/dag-runner;
           drgn = ./packages/drgn;
           llmClippy = ./packages/llm-clippy;
+          loop = ./packages/loop;
           minestom.servers.hello = ./packages/minestom/servers/hello;
           nixCargoUnit = ./packages/nix-cargo-unit;
           ociImageBuilder = ./packages/oci-image-builder;
@@ -79,7 +80,6 @@
           vineflower = ./packages/vineflower;
         };
         tools = {
-          codexLoop = ./tools/codex-loop.py;
           ixShellSyncIgnored = ./tools/ix-shell-sync-ignored.py;
           mcSource = ./tools/mc-source.nu;
           updateIxCli = ./tools/update-ix-cli.py;

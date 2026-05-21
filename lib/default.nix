@@ -654,6 +654,7 @@ let
           ix = ixForPackages;
         };
         llm-clippy = llmClippyFor pkgs;
+        loop = pkgs.callPackage paths.packages.loop { };
         mc-probe = pkgs.callPackage paths.packages.minecraft.probe {
           ix = ixForPackages;
         };

@@ -118,17 +118,24 @@ let
     meta.description = "Copy git-ignored files into an ix shell workspace";
   };
 
-  loop = ix.writePythonApplication pkgs {
-    name = "loop";
-    src = paths.tools.codexLoop;
-    args = [
-      "--lint-program"
-      (lib.getExe lint)
-    ];
-    check = false;
-    runtimeInputs = [ pkgs.git ];
-    meta.description = "Run Codex exec in a checked commit-and-push loop";
-  };
+  # Bake the repo's lint program into the Elixir loop escript so
+  # `nix run .#loop` matches the historical Python wrapper's UX. The
+  # underlying binary still accepts `--lint-program` as an override.
+  loop = pkgs.runCommand "loop"
+    {
+      nativeBuildInputs = [ pkgs.makeWrapper ];
+      meta = {
+        mainProgram = "loop";
+        description = "Run an agent CLI in a checked commit-and-push loop with a live web UI";
+      };
+    }
+    ''
+      mkdir -p $out/bin
+      makeWrapper ${lib.getExe repoPackages.loop} $out/bin/loop \
+        --add-flags --lint-program \
+        --add-flags ${lib.escapeShellArg (lib.getExe lint)} \
+        --prefix PATH : ${lib.makeBinPath [ pkgs.git ]}
+    '';
 
   mcSource = ix.writeNushellApplication pkgs {
     name = "mc-source";
