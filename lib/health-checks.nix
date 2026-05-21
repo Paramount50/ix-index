@@ -34,7 +34,10 @@
   writeNushellApplication,
   dagRunner,
 }:
-{ exampleFleets }:
+{
+  exampleFleets,
+  exampleNames ? lib.attrNames exampleFleets,
+}:
 let
   jsonFormat = pkgs.formats.json { };
 
@@ -96,6 +99,9 @@ let
     };
 
   lifecycles = lib.mapAttrs mkLifecycle exampleFleets;
+  lifecyclePackages = lib.mapAttrs' (
+    name: lifecycle: lib.nameValuePair "health-check-${name}" lifecycle
+  ) lifecycles;
 
   spec = {
     nodes = lib.mapAttrs (_name: lifecycle: {
@@ -123,10 +129,12 @@ let
   zellijLayout = pkgs.writeText "health-checks-layout.kdl" ''
     layout {
     ${lib.concatStringsSep "\n" (
-      lib.mapAttrsToList (name: lifecycle: ''
+      map (name: ''
         tab name="${name}" {
-          pane name="${name}" command="${lib.getExe lifecycle}"
-        }'') lifecycles
+          pane name="${name}" command="nix" {
+            args "run" ".#health-check-${name}"
+          }
+        }'') exampleNames
     )}
     }
   '';
@@ -143,5 +151,5 @@ let
   };
 in
 {
-  inherit dag zellij;
+  inherit dag lifecyclePackages zellij;
 }

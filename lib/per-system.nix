@@ -213,11 +213,17 @@ let
       )
     ) exampleFleets;
 
-  healthChecks = import ./health-checks.nix {
-    inherit lib pkgs;
-    inherit (ix) writeNushellApplication;
-    dagRunner = repoPackages.dag-runner;
-  } { exampleFleets = healthCheckExampleFleets; };
+  healthChecks =
+    import ./health-checks.nix
+      {
+        inherit lib pkgs;
+        inherit (ix) writeNushellApplication;
+        dagRunner = repoPackages.dag-runner;
+      }
+      {
+        exampleFleets = healthCheckExampleFleets;
+        exampleNames = lib.attrNames exampleFleets;
+      };
 in
 {
   packages =
@@ -271,6 +277,7 @@ in
       minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
     }
     // examplePackages
+    // healthChecks.lifecyclePackages
     // lib.optionalAttrs (repoPackages ? ix) {
       inherit (repoPackages) ix;
     }
