@@ -307,12 +307,20 @@ async fn run(
             };
 
             if any_dep_bad {
-                report_finished(&name_owned, &Outcome::Skipped, started, mode, pb.as_ref());
+                let duration = Duration::ZERO;
+                report_finished(
+                    &name_owned,
+                    &Outcome::Skipped,
+                    duration,
+                    started,
+                    mode,
+                    pb.as_ref(),
+                );
                 records_for_task.lock().await.insert(
                     name_owned.clone(),
                     NodeRecord {
                         outcome: Outcome::Skipped,
-                        duration: Duration::ZERO,
+                        duration,
                         stdout: String::new(),
                         stderr: String::new(),
                     },
@@ -325,7 +333,7 @@ async fn run(
             let (outcome, stdout, stderr) =
                 run_command(&node, pb.as_ref(), cancel_for_task).await;
             let duration = node_started.elapsed();
-            report_finished(&name_owned, &outcome, started, mode, pb.as_ref());
+            report_finished(&name_owned, &outcome, duration, started, mode, pb.as_ref());
 
             records_for_task.lock().await.insert(
                 name_owned.clone(),
@@ -570,6 +578,7 @@ fn report_started(name: &str, started: Instant, mode: OutputMode, pb: Option<&Pr
 fn report_finished(
     name: &str,
     outcome: &Outcome,
+    duration: Duration,
     started: Instant,
     mode: OutputMode,
     pb: Option<&ProgressBar>,
@@ -603,7 +612,7 @@ fn report_finished(
                 node: name,
                 outcome: outcome.label(),
                 exit_code: exit_code_value,
-                duration_ms: started.elapsed().as_millis(),
+                duration_ms: duration.as_millis(),
             });
         }
         OutputMode::Auto => unreachable!("auto resolved earlier"),

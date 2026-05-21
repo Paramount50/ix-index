@@ -70,6 +70,23 @@ fn failed_dep_skips_downstream_with_exit_one() {
 }
 
 #[test]
+fn skipped_node_reports_zero_json_duration_after_slow_failed_dep() {
+    let spec = r#"{"nodes":{
+        "a":{"command":["sh","-c","sleep 0.2; false"]},
+        "b":{"command":["true"],"depends_on":["a"]}
+    }}"#;
+    let (output, _dir) = run_binary(spec);
+    assert_eq!(output.status.code(), Some(1));
+    let events = parse_events(&output.stdout);
+    let b = events
+        .iter()
+        .find(|e| e["event"] == "node_finished" && e["node"] == "b")
+        .unwrap();
+    assert_eq!(b["outcome"], "skipped");
+    assert_eq!(b["duration_ms"], 0);
+}
+
+#[test]
 fn worst_failure_drives_exit_code() {
     let spec = r#"{"nodes":{
         "a":{"command":["sh","-c","exit 3"]},
