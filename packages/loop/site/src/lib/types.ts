@@ -1,36 +1,22 @@
-export type Status = 'running' | 'done' | 'failed';
+export type CommandStatus = 'running' | 'done' | 'failed';
 
-export type LogLine = {
-  ts: number;
-  stream: 'stdout' | 'stderr';
+export type Command = {
   text: string;
-};
-
-export type Run = {
-  id: string;
-  label: string;
-  detail?: string;
   startedAt: number;
   finishedAt?: number;
-  status: Status;
+  status: CommandStatus;
   exitCode?: number;
-  logs: LogLine[];
-  children: Run[];
+  tail?: string;
 };
 
-export type Iteration = {
-  n: number;
-  startedAt: number;
-  finishedAt?: number;
-  status: Status;
-  outcome?: 'pushed' | 'clean';
-  pathCount?: number;
-  runs: Run[];
-};
-
-export type Timeline = {
+export type State = {
+  connected: boolean;
   serverUrl?: string;
-  iterations: Iteration[];
-  /** Runs that arrived outside any iteration. */
-  orphans: Run[];
+  iteration?: number;
+  iterationStartedAt?: number;
+  iterationFinishedAt?: number;
+  outcome?: 'pushed' | 'clean' | 'running';
+  pathCount?: number;
+  current?: Command;
+  history: Command[];
 };
