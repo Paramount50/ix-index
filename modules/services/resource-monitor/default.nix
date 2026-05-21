@@ -19,6 +19,56 @@ let
   runtimeDirectoryIsSafe =
     lib.hasPrefix "/run/" cfg.runtimeDirectory && ix.relativePath.isSafe runtimeDirectory;
 
+  metricOptions = {
+    server = {
+      vcpu = {
+        type = types.ints.positive;
+        default = 64;
+        description = "Advertised total vCPU capacity shown by the monitor.";
+      };
+      memoryGiB = {
+        type = types.ints.positive;
+        default = 256;
+        description = "Advertised total memory capacity in GiB.";
+      };
+      storageTiB = {
+        type = types.ints.positive;
+        default = 1024;
+        description = "Advertised total storage capacity in TiB.";
+      };
+    };
+
+    billing = {
+      cpuUsdPerVcpuMonth = {
+        type = types.number;
+        default = 20;
+        description = "CPU billing rate in USD per vCPU-month.";
+      };
+      memoryUsdPerGibHour = {
+        type = types.number;
+        default = 0.005;
+        description = "Memory billing rate in USD per GiB-hour.";
+      };
+      storageUsdPerTibHour = {
+        type = types.number;
+        default = 0.0031;
+        description = "Storage billing rate in USD per TiB-hour.";
+      };
+      marginMultiplier = {
+        type = types.number;
+        default = 2;
+        description = "Multiplier applied to memory and storage billing rates.";
+      };
+    };
+  };
+
+  metricOptionAttrs = lib.mapAttrs (_: mkOption) (lib.concatMapAttrs (_: group: group) metricOptions);
+
+  metricConfig = lib.mapAttrs (
+    _: group: lib.genAttrs (lib.attrNames group) (name: cfg.${name})
+  ) metricOptions;
+  metricValues = lib.concatMapAttrs (_: group: group) metricConfig;
+
   siteSrc = fs.toSource {
     root = ./site;
     fileset = fs.intersection (fs.gitTracked ./.) (
@@ -34,25 +84,11 @@ let
     );
   };
 
-  vmConfig = {
-    server = {
-      inherit (cfg) vcpu memoryGiB storageTiB;
-    };
-    billing = {
-      inherit (cfg)
-        cpuUsdPerVcpuMonth
-        memoryUsdPerGibHour
-        storageUsdPerTibHour
-        marginMultiplier
-        ;
-    };
-  };
-
   site = ix.buildNpmSite pkgs {
     pname = "resource-monitor-site";
     version = "0.1.0";
     src = siteSrc;
-    preBuild = "cp ${pkgs.writeText "resource-monitor-vm-config.json" (builtins.toJSON vmConfig)} src/lib/vm-config.json";
+    preBuild = "cp ${pkgs.writeText "resource-monitor-vm-config.json" (builtins.toJSON metricConfig)} src/lib/vm-config.json";
   };
 
   statsWriter = ix.buildRustPackage pkgs {
@@ -62,9 +98,31 @@ let
     cargoLock.lockFile = ./stats-writer/Cargo.lock;
     meta.mainProgram = "resource-monitor-stats-writer";
   };
+
+  statsWriterSettings = {
+    output-dir = cfg.runtimeDirectory;
+    interval-seconds = cfg.intervalSeconds;
+    df = lib.getExe' pkgs.coreutils "df";
+  }
+  // {
+    total-cores = metricValues.vcpu;
+    total-memory-gib = metricValues.memoryGiB;
+    total-storage-tib = metricValues.storageTiB;
+    cpu-usd-per-vcpu-month = metricValues.cpuUsdPerVcpuMonth;
+    memory-usd-per-gib-hour = metricValues.memoryUsdPerGibHour;
+    storage-usd-per-tib-hour = metricValues.storageUsdPerTibHour;
+    margin-multiplier = metricValues.marginMultiplier;
+  };
+
+  statsWriterArgs = lib.concatLists (
+    lib.mapAttrsToList (name: value: [
+      "--${name}"
+      (toString value)
+    ]) statsWriterSettings
+  );
 in
 {
-  options.services.resource-monitor = {
+  options.services.resource-monitor = metricOptionAttrs // {
     enable = mkEnableOption "browser-accessible VM resource monitor";
 
     port = mkOption {
@@ -89,48 +147,6 @@ in
       type = types.str;
       default = "/run/resource-monitor";
       description = "Directory where the generated stats JSON is written.";
-    };
-
-    vcpu = mkOption {
-      type = types.ints.positive;
-      default = 64;
-      description = "Advertised total vCPU capacity shown by the monitor.";
-    };
-
-    memoryGiB = mkOption {
-      type = types.ints.positive;
-      default = 256;
-      description = "Advertised total memory capacity in GiB.";
-    };
-
-    storageTiB = mkOption {
-      type = types.ints.positive;
-      default = 1024;
-      description = "Advertised total storage capacity in TiB.";
-    };
-
-    cpuUsdPerVcpuMonth = mkOption {
-      type = types.number;
-      default = 20;
-      description = "CPU billing rate in USD per vCPU-month.";
-    };
-
-    memoryUsdPerGibHour = mkOption {
-      type = types.number;
-      default = 0.005;
-      description = "Memory billing rate in USD per GiB-hour.";
-    };
-
-    storageUsdPerTibHour = mkOption {
-      type = types.number;
-      default = 0.0031;
-      description = "Storage billing rate in USD per TiB-hour.";
-    };
-
-    marginMultiplier = mkOption {
-      type = types.number;
-      default = 2;
-      description = "Multiplier applied to memory and storage billing rates.";
     };
   };
 
@@ -157,29 +173,7 @@ in
         DynamicUser = true;
         RuntimeDirectory = runtimeDirectory;
         RuntimeDirectoryMode = "0755";
-        ExecStart = lib.escapeShellArgs [
-          (lib.getExe statsWriter)
-          "--output-dir"
-          cfg.runtimeDirectory
-          "--interval-seconds"
-          (toString cfg.intervalSeconds)
-          "--total-cores"
-          (toString cfg.vcpu)
-          "--total-memory-gib"
-          (toString cfg.memoryGiB)
-          "--total-storage-tib"
-          (toString cfg.storageTiB)
-          "--cpu-usd-per-vcpu-month"
-          (toString cfg.cpuUsdPerVcpuMonth)
-          "--memory-usd-per-gib-hour"
-          (toString cfg.memoryUsdPerGibHour)
-          "--storage-usd-per-tib-hour"
-          (toString cfg.storageUsdPerTibHour)
-          "--margin-multiplier"
-          (toString cfg.marginMultiplier)
-          "--df"
-          (lib.getExe' pkgs.coreutils "df")
-        ];
+        ExecStart = lib.escapeShellArgs ([ (lib.getExe statsWriter) ] ++ statsWriterArgs);
         Restart = "on-failure";
       };
     };
