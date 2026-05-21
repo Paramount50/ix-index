@@ -298,6 +298,8 @@ async fn codex_argv(args: &LoopArgs, prompt: &str) -> Result<Vec<String>> {
         ".".to_owned(),
         "-c".to_owned(),
         format!("model_reasoning_effort=\"{}\"", args.reasoning_effort),
+        "-c".to_owned(),
+        "model_reasoning_summary=\"auto\"".to_owned(),
     ];
 
     if let Some((name, email)) = git_user().await? {
@@ -427,12 +429,13 @@ fn codex_event(name: &str, stream: &str, line: &str) -> Value {
     };
 
     let codex_kind = event.kind.as_deref().unwrap_or("event");
-    let text = event.text().unwrap_or_else(|| raw.to_string());
+    let (category, text) = event.classify(&raw);
 
     json!({
         "kind": format!("codex-{codex_kind}"),
         "name": name,
         "stream": stream,
+        "category": category,
         "text": text,
         "event": raw,
     })
@@ -446,6 +449,9 @@ struct CodexJsonEvent {
     message: Option<String>,
     content: Option<String>,
     delta: Option<String>,
+    summary: Option<Value>,
+    input: Option<String>,
+    aggregated_output: Option<String>,
     #[serde(alias = "cmd", alias = "command")]
     command: Option<CodexCommand>,
     item: Option<Box<Self>>,
@@ -461,20 +467,80 @@ enum CodexCommand {
 }
 
 impl CodexJsonEvent {
+    fn classify(&self, raw: &Value) -> (&'static str, String) {
+        if let Some(item) = self.item.as_ref() {
+            return item.classify(raw);
+        }
+        let item_type = self.kind.as_deref().unwrap_or("");
+        match item_type {
+            "command_execution" | "exec_command" | "exec" => {
+                ("shell", self.text().unwrap_or_else(|| raw.to_string()))
+            }
+            "agent_message" | "message" => {
+                ("message", self.text().unwrap_or_else(|| raw.to_string()))
+            }
+            "reasoning" | "agent_reasoning" => (
+                "reasoning",
+                self.text()
+                    .or_else(|| self.summary_text())
+                    .unwrap_or_else(|| raw.to_string()),
+            ),
+            "apply_patch" | "patch_apply" | "file_change" => (
+                "patch",
+                self.text()
+                    .or_else(|| self.input.clone())
+                    .unwrap_or_else(|| raw.to_string()),
+            ),
+            "web_search_call" | "web_search" => (
+                "tool",
+                self.text().unwrap_or_else(|| "web_search".to_owned()),
+            ),
+            "custom_tool_call" | "function_call" => {
+                ("tool", self.text().unwrap_or_else(|| raw.to_string()))
+            }
+            _ => ("event", self.text().unwrap_or_else(|| raw.to_string())),
+        }
+    }
+
     fn text(&self) -> Option<String> {
         [
             self.text.as_deref(),
             self.message.as_deref(),
             self.content.as_deref(),
             self.delta.as_deref(),
+            self.aggregated_output.as_deref(),
         ]
         .into_iter()
         .flatten()
         .find(|value| !value.is_empty())
         .map(str::to_owned)
         .or_else(|| self.command.as_ref().map(CodexCommand::text))
+        .or_else(|| self.input.clone())
         .or_else(|| self.item.as_ref().and_then(|item| item.text()))
         .or_else(|| self.payload.as_ref().and_then(|payload| payload.text()))
+    }
+
+    fn summary_text(&self) -> Option<String> {
+        let summary = self.summary.as_ref()?;
+        match summary {
+            Value::String(text) if !text.is_empty() => Some(text.clone()),
+            Value::Array(items) => {
+                let joined: Vec<String> = items
+                    .iter()
+                    .filter_map(|entry| match entry {
+                        Value::String(text) => Some(text.clone()),
+                        Value::Object(map) => map
+                            .get("text")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                        _ => None,
+                    })
+                    .filter(|value| !value.is_empty())
+                    .collect();
+                (!joined.is_empty()).then(|| joined.join("\n\n"))
+            }
+            _ => None,
+        }
     }
 }
 

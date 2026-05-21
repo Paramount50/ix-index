@@ -115,11 +115,14 @@ const codexPayload: z.ZodType<CodexPayload> = z.lazy(() =>
     .passthrough()
 );
 
+const codexCategory = z.enum(['shell', 'message', 'reasoning', 'patch', 'tool', 'event']);
+
 const codexEvent = z.object({
   ts_ms: z.number(),
   kind: z.string(),
   name: z.string().optional(),
   stream: z.string().optional(),
+  category: codexCategory.optional(),
   text: z.string().optional(),
   event: codexPayload.optional()
 });

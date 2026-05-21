@@ -1,5 +1,7 @@
 export type CommandStatus = 'running' | 'done' | 'failed';
 
+export type CommandCategory = 'shell' | 'message' | 'reasoning' | 'patch' | 'tool' | 'event';
+
 export type Command = {
   text: string;
   startedAt: number;
@@ -7,6 +9,7 @@ export type Command = {
   status: CommandStatus;
   exitCode?: number;
   tail?: string;
+  category: CommandCategory;
 };
 
 export type State = {

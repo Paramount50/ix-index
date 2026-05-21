@@ -1,5 +1,5 @@
 import { parseEvent, type CodexEvent, type KnownEvent } from './schema';
-import type { Command, State } from './types';
+import type { Command, CommandCategory, State } from './types';
 
 const looksLikeShell = (text: string): boolean =>
   /^(\/|\.{1,2}\/)|[ "']-lc[ "']|\s-{1,2}\w/.test(text) || text.startsWith('cd ');
@@ -12,6 +12,12 @@ const codexLifecycle = (kind: string): 'started' | 'completed' | 'failed' | null
   if (kind.endsWith('.completed')) return 'completed';
   if (kind.endsWith('.failed')) return 'failed';
   return null;
+};
+
+const inferCategory = (event: CodexEvent): CommandCategory => {
+  if (event.category) return event.category;
+  if (event.text && looksLikeShell(event.text)) return 'shell';
+  return 'event';
 };
 
 const finish = (cmd: Command, ts: number, status: 'done' | 'failed', exitCode?: number): Command => ({
@@ -70,11 +76,13 @@ const applyKnown = (state: State, event: KnownEvent): void => {
 };
 
 const applyCodex = (state: State, event: CodexEvent): void => {
-  if (!event.text || !looksLikeShell(event.text)) return;
+  if (!event.text) return;
   const ts = event.ts_ms;
   const lifecycle = codexLifecycle(event.kind);
   const base = codexBase(event.kind);
   if (base !== 'item' && base !== 'exec') return;
+
+  const category = inferCategory(event);
 
   if (lifecycle === 'started') {
     if (state.current) {
@@ -83,7 +91,8 @@ const applyCodex = (state: State, event: CodexEvent): void => {
     state.current = {
       text: event.text,
       startedAt: ts,
-      status: 'running'
+      status: 'running',
+      category
     };
     return;
   }
@@ -98,7 +107,8 @@ const applyCodex = (state: State, event: CodexEvent): void => {
         text: event.text,
         startedAt: ts,
         finishedAt: ts,
-        status
+        status,
+        category
       });
     }
   }

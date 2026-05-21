@@ -139,15 +139,25 @@
       {#each rows as cmd, i (i)}
         {@const isLast = i === rows.length - 1}
         {@const dur = durationOf(cmd, now)}
-        <article class="row" data-status={cmd.status} class:last={isLast}>
+        <article
+          class="row"
+          data-status={cmd.status}
+          data-category={cmd.category}
+          class:last={isLast}
+        >
           <div class="gutter">
             <span class="indicator" aria-hidden="true"></span>
             <span class="seq">{i + 1}</span>
           </div>
           <div class="body">
-            <div class="cmd">
-              {#each tokenize(cmd.text) as t}<span class={t.kind}>{t.text}</span>{/each}
-            </div>
+            <div class="tag">{cmd.category}</div>
+            {#if cmd.category === 'shell'}
+              <div class="cmd">
+                {#each tokenize(cmd.text) as t}<span class={t.kind}>{t.text}</span>{/each}
+              </div>
+            {:else}
+              <div class="prose" class:reasoning={cmd.category === 'reasoning'} class:patch={cmd.category === 'patch'}>{cmd.text}</div>
+            {/if}
             {#if cmd.status === 'running' && cmd.tail}
               <div class="tail">{cmd.tail}</div>
             {/if}
@@ -376,6 +386,51 @@
     color: #a1a1aa;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+  }
+
+  .tag {
+    display: inline-block;
+    align-self: flex-start;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 9.5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color: #52525b;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #131316;
+    border: 1px solid #1f1f23;
+  }
+
+  .row[data-category='message'] .tag { color: #a5b4fc; border-color: #1e1b4b; background: #0c0a1f; }
+  .row[data-category='reasoning'] .tag { color: #c4b5fd; border-color: #2e1065; background: #110926; }
+  .row[data-category='patch'] .tag { color: #fcd34d; border-color: #3f2e07; background: #1c1407; }
+  .row[data-category='tool'] .tag { color: #67e8f9; border-color: #0c2a36; background: #07151b; }
+
+  .prose {
+    font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: #d4d4d8;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .prose.reasoning {
+    color: #a78bfa;
+    font-style: italic;
+    border-left: 2px solid #2e1065;
+    padding-left: 10px;
+  }
+
+  .prose.patch {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+    color: #fde68a;
+    background: #0e0a05;
+    border-left: 2px solid #3f2e07;
+    padding: 6px 10px;
+    border-radius: 3px;
   }
 
   .tail {
