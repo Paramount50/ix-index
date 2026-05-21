@@ -40,6 +40,8 @@ let
 
   flags = lib.cli.toCommandLineGNU { } cfg.settings;
   effectiveAuth = cfg.settings.auth or cfg.auth;
+  expectedBindTcp = "${cfg.bindAddress}:${toString cfg.port}";
+  effectiveBindTcp = cfg.settings.bind-tcp or expectedBindTcp;
 
   launcher = ix.writeNushellApplication pkgs {
     name = "ix-remote-desktop";
@@ -129,8 +131,10 @@ in
         Each entry becomes `--key=value`; `true` becomes a bare `--key`, `false`
         omits the flag, and list values render as repeated `--key=elem` entries.
         Convenience options (`port`, `bindAddress`, `display`, `resolution`,
-        `desktopCommand`, `auth`) seed this set via `mkDefault`, so a direct
-        assignment here wins.
+        `desktopCommand`, `auth`) seed this set via `mkDefault`.
+
+        Keep `bind-tcp` aligned with `port` and `bindAddress`; the module uses
+        those typed options for the port claim registry and firewall state.
       '';
     };
   };
@@ -140,6 +144,14 @@ in
       {
         assertion = !cfg.openFirewall || effectiveAuth != "none" || cfg.allowUnauthenticated;
         message = ''services.remote-desktop.openFirewall with rendered Xpra auth = "none" requires services.remote-desktop.allowUnauthenticated = true'';
+      }
+      {
+        assertion = effectiveBindTcp == expectedBindTcp;
+        message = ''
+          services.remote-desktop.settings.bind-tcp must match services.remote-desktop.bindAddress and services.remote-desktop.port so Xpra, ix.networking.portClaims, and the firewall use one endpoint.
+
+          Set services.remote-desktop.bindAddress and services.remote-desktop.port; leave bind-tcp to the module.
+        '';
       }
     ];
 

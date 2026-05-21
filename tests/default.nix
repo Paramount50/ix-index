@@ -1051,6 +1051,17 @@ let
     }
   ];
 
+  remoteDesktopBindTcpDriftFailures = failedAssertionsFor [
+    {
+      services.remote-desktop = {
+        enable = true;
+        bindAddress = "0.0.0.0";
+        port = 6080;
+        settings.bind-tcp = "0.0.0.0:6081";
+      };
+    }
+  ];
+
   resourceMonitorRuntimeDirectoryFailures =
     let
       failuresFor =
@@ -2152,6 +2163,13 @@ let
           lib.hasInfix "rendered Xpra auth = \"none\" requires services.remote-desktop.allowUnauthenticated = true" failure.message
         ) remoteDesktopSettingsAuthFirewallFailures;
         message = "remote-desktop should check settings.auth overrides before opening the firewall";
+      }
+      {
+        assertion = lib.any (
+          failure:
+          lib.hasInfix "settings.bind-tcp must match services.remote-desktop.bindAddress" failure.message
+        ) remoteDesktopBindTcpDriftFailures;
+        message = "remote-desktop should reject a bind-tcp override that disagrees with the claimed listener";
       }
       {
         assertion = remoteDesktop.service.unit.description == "Xpra remote desktop";
