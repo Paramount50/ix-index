@@ -16,4 +16,4 @@ Out of scope: the ix host platform itself (report to <security@ix.dev>), third-p
 
 ## Supported versions
 
-Only `development` and `main` receive fixes. The `main` branch is fast-forwarded from `development` by a scheduled workflow with a 6-hour minimum age, so a fix lands on `development` first and reaches `main` on the next promotion cycle.
+Only `main` receives fixes. A fix lands on `main` after CI and artifact publication; release tags then name the exact commit so downstream consumers can pin a tag, OCI digest, or Nix store path instead of the moving `main` ref.
