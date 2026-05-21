@@ -41,6 +41,29 @@
 let
   jsonFormat = pkgs.formats.json { };
 
+  ixTokenCheck = ''
+    let ix_token = ($env.IX_TOKEN? | default "" | str trim)
+    if $ix_token == "" {
+      print -e "IX_TOKEN is not set; export it before running health-checks"
+      exit 1
+    }
+  '';
+
+  ixTokenPrompt = ''
+    mut ix_token = ($env.IX_TOKEN? | default "" | str trim)
+    if $ix_token == "" {
+      $ix_token = (try { input --suppress-output "IX_TOKEN: " } catch { "" } | str trim)
+      print ""
+    }
+
+    if $ix_token == "" {
+      print -e "IX_TOKEN is required to run health-checks"
+      exit 1
+    }
+
+    $env.IX_TOKEN = $ix_token
+  '';
+
   mkLifecycle =
     name: fleet:
     let
@@ -71,6 +94,8 @@ let
             print -e "  install the ix CLI into ~/.local/bin (or another PATH directory) before running health-checks"
             exit 1
           }
+
+          ${ixTokenCheck}
 
           let pinned_images = ${builtins.toJSON pinnedImages}
           let plan_data = (open ${fleet.plan})
@@ -144,6 +169,8 @@ let
     runtimeInputs = [ pkgs.zellij ];
     text = ''
       def main [] {
+        ${ixTokenPrompt}
+
         exec zellij --layout ${zellijLayout}
       }
     '';
