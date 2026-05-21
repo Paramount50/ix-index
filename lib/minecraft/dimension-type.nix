@@ -15,10 +15,7 @@ let
         keys = lib.unique (lib.attrNames lhs ++ lib.attrNames rhs);
         mergeKey =
           key:
-          if lhs ? ${key} && rhs ? ${key} then
-            deepMerge lhs.${key} rhs.${key}
-          else
-            rhs.${key} or lhs.${key};
+          if lhs ? ${key} && rhs ? ${key} then deepMerge lhs.${key} rhs.${key} else rhs.${key} or lhs.${key};
       in
       lib.genAttrs keys mergeKey
     else

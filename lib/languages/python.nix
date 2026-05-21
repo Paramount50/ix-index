@@ -41,8 +41,7 @@ in
     ```
   */
   interpreter =
-    pkgs:
-    args:
+    pkgs: args:
     let
       version = errors.requireArg {
         context = "ix.languages.python.interpreter";

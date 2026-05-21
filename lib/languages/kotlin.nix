@@ -51,8 +51,7 @@ in
     ```
   */
   compiler =
-    pkgs:
-    args:
+    pkgs: args:
     let
       target = errors.requireArg {
         context = "ix.languages.kotlin.compiler";

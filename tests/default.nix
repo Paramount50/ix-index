@@ -28,9 +28,7 @@ let
       config = evalConfig modules;
     in
     builtins.filter (assertion: !assertion.assertion) config.assertions;
-  samePorts =
-    left: right:
-    lib.sort (a: b: a < b) left == lib.sort (a: b: a < b) right;
+  samePorts = left: right: lib.sort (a: b: a < b) left == lib.sort (a: b: a < b) right;
   # ix guest sidecars are opened by the shared platform base config.
   baseFirewallTcpPorts = [ 5001 ];
   baseFirewallUdpPorts = [ 8443 ];
@@ -1029,8 +1027,7 @@ let
     );
     python312 = ix.languages.python.interpreter pkgs { version = "3.12"; };
     pythonUnknown = builtins.tryEval (
-      builtins.deepSeq (ix.languages.python.interpreter pkgs { version = "3.99"; }).pythonVersion
-        true
+      builtins.deepSeq (ix.languages.python.interpreter pkgs { version = "3.99"; }).pythonVersion true
     );
 
     rustMissingVersion = builtins.tryEval (
@@ -1070,16 +1067,20 @@ let
       distribution = "temurin";
     };
     javaBadDistribution = builtins.tryEval (
-      builtins.deepSeq (ix.languages.java.jdk pkgs {
-        version = "21";
-        distribution = "openjdkk";
-      }).name true
+      builtins.deepSeq
+        (ix.languages.java.jdk pkgs {
+          version = "21";
+          distribution = "openjdkk";
+        }).name
+        true
     );
     javaBadVersion = builtins.tryEval (
-      builtins.deepSeq (ix.languages.java.jdk pkgs {
-        version = "22";
-        distribution = "temurin";
-      }).name true
+      builtins.deepSeq
+        (ix.languages.java.jdk pkgs {
+          version = "22";
+          distribution = "temurin";
+        }).name
+        true
     );
   };
 
@@ -1155,8 +1156,7 @@ let
           let
             firewall = base.config.networking.firewall;
           in
-          builtins.elem 5001 firewall.allowedTCPPorts
-          && builtins.elem 8443 firewall.allowedUDPPorts;
+          builtins.elem 5001 firewall.allowedTCPPorts && builtins.elem 8443 firewall.allowedUDPPorts;
         message = "base profile should expose ix guest sidecar ports through the in-guest firewall";
       }
       {
@@ -1696,21 +1696,19 @@ let
         message = "typed minecraft RCON should not put the password in Nix-managed server.properties";
       }
       {
-        assertion =
-          samePorts minecraft.rcon.config.networking.firewall.allowedTCPPorts (
-            baseFirewallTcpPorts ++ [ minecraft.rcon.cfg.port ]
-          );
+        assertion = samePorts minecraft.rcon.config.networking.firewall.allowedTCPPorts (
+          baseFirewallTcpPorts ++ [ minecraft.rcon.cfg.port ]
+        );
         message = "typed minecraft RCON should keep the RCON port private by default";
       }
       {
-        assertion =
-          samePorts minecraft.rcon.openFirewall.config.networking.firewall.allowedTCPPorts (
-            baseFirewallTcpPorts
-            ++ [
-              minecraft.rcon.openFirewall.cfg.port
-              minecraft.rcon.openFirewall.cfg.rcon.port
-            ]
-          );
+        assertion = samePorts minecraft.rcon.openFirewall.config.networking.firewall.allowedTCPPorts (
+          baseFirewallTcpPorts
+          ++ [
+            minecraft.rcon.openFirewall.cfg.port
+            minecraft.rcon.openFirewall.cfg.rcon.port
+          ]
+        );
         message = "typed minecraft RCON should open the firewall only when requested";
       }
       {
@@ -1729,10 +1727,9 @@ let
         message = "typed minecraft world border should enable local RCON by default";
       }
       {
-        assertion =
-          samePorts minecraft.worldBorder.config.networking.firewall.allowedTCPPorts (
-            baseFirewallTcpPorts ++ [ minecraft.worldBorder.cfg.port ]
-          );
+        assertion = samePorts minecraft.worldBorder.config.networking.firewall.allowedTCPPorts (
+          baseFirewallTcpPorts ++ [ minecraft.worldBorder.cfg.port ]
+        );
         message = "typed minecraft world border should keep the RCON port private";
       }
       {
@@ -1810,10 +1807,9 @@ let
         message = "Paper minecraft should not put the RCON password in Nix-managed server.properties";
       }
       {
-        assertion =
-          samePorts minecraft.paper.config.networking.firewall.allowedTCPPorts (
-            baseFirewallTcpPorts ++ [ minecraft.paper.cfg.port ]
-          );
+        assertion = samePorts minecraft.paper.config.networking.firewall.allowedTCPPorts (
+          baseFirewallTcpPorts ++ [ minecraft.paper.cfg.port ]
+        );
         message = "Paper minecraft should not expose the local RCON reload port through the firewall";
       }
     ];
@@ -1903,14 +1899,13 @@ let
         message = "minecraft-bedrock server.properties should follow the configured UDP ports";
       }
       {
-        assertion =
-          samePorts bedrock.config.networking.firewall.allowedUDPPorts (
-            baseFirewallUdpPorts
-            ++ [
-              bedrock.cfg.port
-              bedrock.cfg.portv6
-            ]
-          );
+        assertion = samePorts bedrock.config.networking.firewall.allowedUDPPorts (
+          baseFirewallUdpPorts
+          ++ [
+            bedrock.cfg.port
+            bedrock.cfg.portv6
+          ]
+        );
         message = "minecraft-bedrock firewall should open only the configured UDP ports plus ix sidecar ports";
       }
       {
@@ -1981,10 +1976,9 @@ let
         message = "remote-desktop user should be a system user";
       }
       {
-        assertion =
-          samePorts remoteDesktop.config.networking.firewall.allowedTCPPorts (
-            baseFirewallTcpPorts ++ [ remoteDesktop.cfg.port ]
-          );
+        assertion = samePorts remoteDesktop.config.networking.firewall.allowedTCPPorts (
+          baseFirewallTcpPorts ++ [ remoteDesktop.cfg.port ]
+        );
         message = "remote-desktop firewall should open only the configured browser port plus ix sidecar ports";
       }
       {

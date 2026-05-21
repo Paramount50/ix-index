@@ -16,9 +16,15 @@ let
   jvm = {
     inherit jdk;
     kotlin = L.kotlin.compiler pkgs { target = "jvm"; };
-    scala = L.scala.compiler pkgs { version = "3"; inherit jdk; };
+    scala = L.scala.compiler pkgs {
+      version = "3";
+      inherit jdk;
+    };
     maven = L.java.maven pkgs { inherit jdk; };
-    gradle = L.java.gradle pkgs { version = "9"; inherit jdk; };
+    gradle = L.java.gradle pkgs {
+      version = "9";
+      inherit jdk;
+    };
   };
 
   native = {
@@ -38,7 +44,10 @@ let
         "rustfmt"
       ];
     };
-    cpp = L.cpp.compiler pkgs { vendor = "gcc"; version = "latest"; };
+    cpp = L.cpp.compiler pkgs {
+      vendor = "gcc";
+      version = "latest";
+    };
     cmake = L.cpp.cmake pkgs { };
     ninja = L.cpp.ninja pkgs { };
     zig = L.zig.toolchain pkgs { version = "latest"; };

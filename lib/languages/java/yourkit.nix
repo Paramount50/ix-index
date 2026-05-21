@@ -29,7 +29,12 @@ let
   agentSubdirFor =
     pkgs:
     let
-      inherit (pkgs.stdenv.hostPlatform) isLinux isDarwin isAarch64 isx86_64;
+      inherit (pkgs.stdenv.hostPlatform)
+        isLinux
+        isDarwin
+        isAarch64
+        isx86_64
+        ;
     in
     if isLinux && isx86_64 then
       "bin/linux-x86-64/libyjpagent.so"

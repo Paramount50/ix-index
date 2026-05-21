@@ -37,8 +37,7 @@ in
     ```
   */
   toolchain =
-    pkgs:
-    args:
+    pkgs: args:
     let
       version = errors.requireArg {
         context = "ix.languages.erlang.toolchain";

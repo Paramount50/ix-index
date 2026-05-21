@@ -40,8 +40,7 @@ in
     ```
   */
   node =
-    pkgs:
-    args:
+    pkgs: args:
     let
       version = errors.requireArg {
         context = "ix.languages.javascript.node";

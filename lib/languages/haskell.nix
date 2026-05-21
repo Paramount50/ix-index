@@ -52,8 +52,7 @@ in
     ```
   */
   compiler =
-    pkgs:
-    args:
+    pkgs: args:
     let
       version = errors.requireArg {
         context = "ix.languages.haskell.compiler";

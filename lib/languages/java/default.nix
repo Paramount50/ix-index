@@ -118,8 +118,7 @@ in
     ```
   */
   jdk =
-    pkgs:
-    args:
+    pkgs: args:
     let
       version = errors.requireArg {
         context = "ix.languages.java.jdk";

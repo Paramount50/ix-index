@@ -597,8 +597,7 @@ in
     };
 
     networking.firewall.allowedTCPPorts =
-      lib.optionals cfg.openFirewall [ cfg.port ]
-      ++ yourkit.firewallTcpPortsFor cfg.yourkit;
+      lib.optionals cfg.openFirewall [ cfg.port ] ++ yourkit.firewallTcpPortsFor cfg.yourkit;
     networking.firewall.allowedUDPPorts = lib.optionals (cfg.query.enable && cfg.query.openFirewall) [
       cfg.query.port
     ];

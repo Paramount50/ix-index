@@ -244,8 +244,7 @@ in
     # eval until the platform decides to allow it explicitly.
     #
     # Refs: https://www.yourkit.com/docs/java/help/agent.jsp
-    nixpkgs.config.allowUnfreePredicate =
-      pkg: builtins.elem (lib.getName pkg) [ "yourkit-java" ];
+    nixpkgs.config.allowUnfreePredicate = pkg: builtins.elem (lib.getName pkg) [ "yourkit-java" ];
 
     boot = {
       isContainer = true;

@@ -72,8 +72,7 @@ in
     ```
   */
   compiler =
-    pkgs:
-    args:
+    pkgs: args:
     let
       vendor = errors.requireArg {
         context = "ix.languages.cpp.compiler";

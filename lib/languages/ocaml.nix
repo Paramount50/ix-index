@@ -61,9 +61,7 @@ in
     ```
   */
   compiler =
-    pkgs:
-    args:
-    (packageSetFor pkgs (requireVersion "ix.languages.ocaml.compiler" args)).ocaml;
+    pkgs: args: (packageSetFor pkgs (requireVersion "ix.languages.ocaml.compiler" args)).ocaml;
 
   /**
     Return Dune, the default OCaml build tool, from the matching
@@ -73,10 +71,7 @@ in
     `ocamlopt` underneath, and replaces hand-written Makefiles in
     nearly every modern OCaml project.
   */
-  dune =
-    pkgs:
-    args:
-    (packageSetFor pkgs (requireVersion "ix.languages.ocaml.dune" args)).dune_3;
+  dune = pkgs: args: (packageSetFor pkgs (requireVersion "ix.languages.ocaml.dune" args)).dune_3;
 
   /**
     Return opam, the OCaml package manager. Resolves dependencies
@@ -100,10 +95,7 @@ in
     Built against the matching OCaml package set so loaded libraries
     are ABI-compatible.
   */
-  utop =
-    pkgs:
-    args:
-    (packageSetFor pkgs (requireVersion "ix.languages.ocaml.utop" args)).utop;
+  utop = pkgs: args: (packageSetFor pkgs (requireVersion "ix.languages.ocaml.utop" args)).utop;
 
   /**
     Return `ocaml-lsp`, the OCaml language server, built against the
@@ -112,7 +104,6 @@ in
     with), so pin both together.
   */
   languageServer =
-    pkgs:
-    args:
+    pkgs: args:
     (packageSetFor pkgs (requireVersion "ix.languages.ocaml.languageServer" args)).ocaml-lsp;
 }
