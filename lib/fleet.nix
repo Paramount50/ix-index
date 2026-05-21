@@ -54,23 +54,39 @@ let
       l7ProxyPorts = lib.unique (lib.concatMap (part: part.l7ProxyPorts or [ ]) parts);
     };
 
-  isWrappedNode = value: builtins.isAttrs value && (value ? module || value ? modules);
+  wrappedNodeKeys = [
+    "module"
+    "modules"
+    "deployment"
+    "tags"
+    "groups"
+    "dependsOn"
+    "replicas"
+  ];
 
-  prefixName = name: nodePrefix + name;
-  prefixDeps =
+  isWrappedNode =
+    value: builtins.isAttrs value && lib.any (key: builtins.hasAttr key value) wrappedNodeKeys;
+
+  prefixExternalName = name: nodePrefix + name;
+  prefixWrappedNode =
     spec:
-    if !(isWrappedNode spec) || !(spec ? dependsOn) then
+    if !(isWrappedNode spec) then
       spec
     else
       spec
-      // {
-        dependsOn = map prefixName (asList spec.dependsOn);
+      // lib.optionalAttrs (spec ? dependsOn) {
+        dependsOn = map prefixExternalName (asList spec.dependsOn);
+      }
+      // lib.optionalAttrs (spec ? groups) {
+        groups = map prefixExternalName (asList spec.groups);
       };
   prefixedNodes =
     if nodePrefix == "" then
       nodes
     else
-      lib.mapAttrs' (name: spec: lib.nameValuePair (prefixName name) (prefixDeps spec)) nodes;
+      lib.mapAttrs' (
+        name: spec: lib.nameValuePair (prefixExternalName name) (prefixWrappedNode spec)
+      ) nodes;
 
   normalizeNode =
     name: value:
@@ -83,11 +99,13 @@ let
       ++ [
         (spec.deployment or { })
       ];
+      groups = asList (spec.groups or [ ]);
     in
     {
       inherit name;
       modules = asList defaults ++ moduleList spec;
       tags = lib.unique (asList (spec.tags or [ ]));
+      groups = lib.unique groups;
       deployment = mergeDeployments deploymentParts;
       dependsOn = asList (spec.dependsOn or [ ]);
       replicas = spec.replicas or 1;
@@ -273,6 +291,7 @@ let
       inherit (deploy) snapshot;
       recreateOnUp = deploy.recreateOnUp or false;
       inherit (spec) tags;
+      inherit (spec) groups;
       inherit (deploy) env;
       inherit (deploy) l7ProxyPorts;
       dependsOn = expandedDependencies.${name};

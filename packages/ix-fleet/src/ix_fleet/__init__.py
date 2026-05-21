@@ -78,6 +78,7 @@ class FleetNode(BaseModel):
     snapshot: bool
     recreateOnUp: bool = False
     tags: list[str] = Field(default_factory=empty_str_list)
+    groups: list[str] = Field(default_factory=empty_str_list)
     env: dict[str, str] = Field(default_factory=empty_str_dict)
     l7ProxyPorts: list[int] = Field(default_factory=empty_int_list)
     dependsOn: list[str] = Field(default_factory=empty_str_list)
@@ -386,6 +387,41 @@ async def switch_node(node: FleetNode, *, dry_run: bool) -> None:
     )
 
 
+def is_existing_group_error(error: CliError) -> bool:
+    return "already exists" in error.output.lower()
+
+
+def is_existing_member_error(error: CliError) -> bool:
+    output = error.output.lower()
+    return "already" in output and ("member" in output or "group" in output)
+
+
+async def ensure_group(group: str, *, dry_run: bool) -> None:
+    if dry_run:
+        step(f"ensure east-west group {group} exists")
+        return
+
+    try:
+        run_cli(["ix", "group", "create", group], dry_run=dry_run)
+    except CliError as error:
+        if is_existing_group_error(error):
+            step(f"east-west group {group} already exists")
+            return
+        raise
+
+
+async def ensure_node_groups(node: FleetNode, *, dry_run: bool) -> None:
+    for group in sorted(node.groups):
+        await ensure_group(group, dry_run=dry_run)
+        try:
+            run_cli(["ix", "group", "add", group, node.name], dry_run=dry_run)
+        except CliError as error:
+            if is_existing_member_error(error):
+                step(f"{node.name} is already in east-west group {group}")
+                continue
+            raise
+
+
 def _stringify_env_value(value: typing.Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
@@ -592,6 +628,7 @@ async def cmd_switch(plan: FleetPlan, args: argparse.Namespace) -> None:
     source_workdir = args.source_workdir or default_source_workdir(Path.cwd(), source_root)
     for node in selected_nodes(plan, args.on):
         created = await ensure_node(node, dry_run=args.dry_run)
+        await ensure_node_groups(node, dry_run=args.dry_run)
         if not created and node.snapshot and not args.no_snapshot:
             await snapshot_node(node, dry_run=args.dry_run)
         if node.switch.buildOn == "remote":
@@ -613,6 +650,7 @@ async def cmd_replace(plan: FleetPlan, args: argparse.Namespace) -> None:
         if not args.skip_push:
             image = await push_replacement_image(node, dry_run=args.dry_run)
         await replace_node(node, image, dry_run=args.dry_run)
+        await ensure_node_groups(node, dry_run=args.dry_run)
         if not args.skip_health:
             await run_node_health_checks(node, dry_run=args.dry_run)
 
@@ -623,6 +661,7 @@ async def cmd_up(plan: FleetPlan, args: argparse.Namespace) -> None:
         if not args.skip_push:
             image = await push_replacement_image(node, dry_run=args.dry_run)
         await up_node(node, image, dry_run=args.dry_run)
+        await ensure_node_groups(node, dry_run=args.dry_run)
         if not args.skip_health:
             await run_node_health_checks(node, dry_run=args.dry_run)
 

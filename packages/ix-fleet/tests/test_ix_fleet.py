@@ -118,5 +118,59 @@ class PushReplacementImageTests(unittest.TestCase):
             self.assertEqual(image, "registry.ix.dev/example/health-check-nginx:nginx-lifecycle")
 
 
+class EastWestGroupTests(unittest.TestCase):
+    def test_ensures_group_before_adding_node(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
+            del timeout
+            self.assertFalse(dry_run)
+            calls.append(command)
+            return ""
+
+        node_data = fleet_node("api")
+        node_data["groups"] = ["private-apps"]
+        node = ix_fleet.FleetNode.model_validate(node_data)
+
+        with patch.object(ix_fleet, "run_cli", fake_run_cli):
+            asyncio.run(ix_fleet.ensure_node_groups(node, dry_run=False))
+
+        self.assertEqual(
+            calls,
+            [
+                ["ix", "group", "create", "private-apps"],
+                ["ix", "group", "add", "private-apps", "api"],
+            ],
+        )
+
+    def test_existing_group_membership_is_idempotent(self) -> None:
+        calls: list[list[str]] = []
+
+        def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
+            del timeout
+            self.assertFalse(dry_run)
+            calls.append(command)
+            if command[:3] == ["ix", "group", "create"]:
+                raise ix_fleet.CliError(command, 1, "", "group already exists")
+            if command[:3] == ["ix", "group", "add"]:
+                raise ix_fleet.CliError(command, 1, "", "vm is already a member of group")
+            return ""
+
+        node_data = fleet_node("api")
+        node_data["groups"] = ["private-apps"]
+        node = ix_fleet.FleetNode.model_validate(node_data)
+
+        with patch.object(ix_fleet, "run_cli", fake_run_cli):
+            asyncio.run(ix_fleet.ensure_node_groups(node, dry_run=False))
+
+        self.assertEqual(
+            calls,
+            [
+                ["ix", "group", "create", "private-apps"],
+                ["ix", "group", "add", "private-apps", "api"],
+            ],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

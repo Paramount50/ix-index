@@ -836,6 +836,7 @@ let
 
       web = {
         tags = [ "public" ];
+        groups = [ "public-apps" ];
         deployment = {
           destination = "fleet-web:latest";
           ipv4 = true;
@@ -873,6 +874,7 @@ let
       };
       worker = {
         dependsOn = [ "api" ];
+        groups = [ "private-apps" ];
         modules = [
           (
             { nodes, ... }:
@@ -2634,6 +2636,10 @@ let
         message = "fleet wrapped-node tags should flow into the generated plan";
       }
       {
+        assertion = fleetPlan.web.groups == [ "public-apps" ];
+        message = "fleet wrapped-node east-west groups should flow into the generated plan";
+      }
+      {
         assertion = fleetPlan.web.ipv4;
         message = "fleet wrapped-node deployment overrides should flow into the generated plan";
       }
@@ -2695,6 +2701,10 @@ let
       {
         assertion = prefixedFleet.planValue.nodes."tprefix-worker".dependsOn == [ "tprefix-api" ];
         message = "nodePrefix should rewrite dependsOn references so the prefixed graph stays connected";
+      }
+      {
+        assertion = prefixedFleet.planValue.nodes."tprefix-worker".groups == [ "tprefix-private-apps" ];
+        message = "nodePrefix should rewrite east-west group names so scratch fleets do not collide";
       }
       {
         assertion = prefixedFleet.nodes."tprefix-api".networking.hostName == "tprefix-api";
