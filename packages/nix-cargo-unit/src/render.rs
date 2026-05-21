@@ -38,6 +38,16 @@ struct CargoLockPackageEntry {
     source: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CargoManifest {
+    package: Option<CargoManifestPackage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CargoManifestPackage {
+    links: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct CargoLockPackage {
     name: String,
@@ -1027,10 +1037,10 @@ fn render_build_script_run_phase(
     )?;
     script.push_str(concat!("export NUM_JOBS=''", "${NIX_BUILD_CORES:-1}\n"));
     script.push_str(&cargo_package_exports(run_unit));
-    script.push_str(&cargo_manifest_links_export(run_unit));
+    script.push_str(&cargo_manifest_links_export(run_unit)?);
     append_cargo_feature_exports(&mut script, run_unit);
     append_cargo_cfg_exports(&mut script);
-    append_dependency_metadata_exports(&mut script, graph, prepared, build_script_run);
+    append_dependency_metadata_exports(&mut script, graph, prepared, build_script_run)?;
     script.push_str("cd \"$CARGO_MANIFEST_DIR\"\n");
     script.push_str("build_script_stdout=$(mktemp)\n");
     script.push_str("build_script_stderr=$(mktemp)\n");
@@ -1209,12 +1219,12 @@ fn cargo_package_exports(unit: &Unit) -> String {
     script
 }
 
-fn cargo_manifest_links_export(unit: &Unit) -> String {
+fn cargo_manifest_links_export(unit: &Unit) -> Result<String> {
     // Cargo injects package.links for build.rs. nix-cargo-unit runs build scripts
     // outside Cargo, and crates like ring panic when CARGO_MANIFEST_LINKS is absent.
-    cargo_manifest_links(unit)
+    Ok(cargo_manifest_links(unit)?
         .map(|links| format!("export CARGO_MANIFEST_LINKS={}\n", shell_env_value(&links)))
-        .unwrap_or_default()
+        .unwrap_or_default())
 }
 
 fn shell_env_value(value: &str) -> String {
@@ -1227,47 +1237,18 @@ fn shell_env_value(value: &str) -> String {
     }
 }
 
-fn cargo_manifest_links(unit: &Unit) -> Option<String> {
+fn cargo_manifest_links(unit: &Unit) -> Result<Option<String>> {
     let manifest_path = crate_root_for_unit(unit).join("Cargo.toml");
-    let manifest = fs::read_to_string(manifest_path).ok()?;
+    let manifest = fs::read_to_string(&manifest_path)
+        .wrap_err_with(|| format!("reading package manifest {}", manifest_path.display()))?;
 
-    package_manifest_string(&manifest, "links")
+    cargo_manifest_package_links(&manifest)
+        .wrap_err_with(|| format!("parsing package manifest {}", manifest_path.display()))
 }
 
-fn package_manifest_string(manifest: &str, key: &str) -> Option<String> {
-    let mut in_package_section = false;
-    for line in manifest.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') {
-            in_package_section = trimmed == "[package]";
-            continue;
-        }
-        if !in_package_section || trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        let Some((raw_key, raw_value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        if raw_key.trim() != key {
-            continue;
-        }
-
-        return parse_manifest_string(raw_value.trim());
-    }
-
-    None
-}
-
-fn parse_manifest_string(value: &str) -> Option<String> {
-    if value.starts_with('"') {
-        serde_json::from_str(value).ok()
-    } else {
-        value
-            .strip_prefix('\'')
-            .and_then(|inner| inner.strip_suffix('\''))
-            .map(std::string::ToString::to_string)
-    }
+fn cargo_manifest_package_links(manifest: &str) -> Result<Option<String>> {
+    let manifest: CargoManifest = toml::from_str(manifest)?;
+    Ok(manifest.package.and_then(|package| package.links))
 }
 
 fn append_cargo_feature_exports(script: &mut String, unit: &Unit) {
@@ -1324,10 +1305,10 @@ fn append_dependency_metadata_exports(
     graph: &UnitGraph,
     prepared: &PreparedGraph,
     build_script_run: &BuildScriptRun,
-) {
+) -> Result<()> {
     for dep_run_index in &build_script_run.dependency_runs {
         let dep_run_unit = &graph.units[*dep_run_index];
-        let Some(links) = cargo_manifest_links(dep_run_unit) else {
+        let Some(links) = cargo_manifest_links(dep_run_unit)? else {
             continue;
         };
         let dep_run_ref = format!("${{units.{}}}", nix_attr(&prepared.names[*dep_run_index]));
@@ -1350,6 +1331,7 @@ if [ -f "{dep_run_ref}/cargo-metadata" ]; then
 fi"#
         );
     }
+    Ok(())
 }
 
 fn cargo_links_env_prefix(links: &str) -> String {
@@ -3049,6 +3031,39 @@ const CRLF: &str = include_str!("../../testdata/crlf.toml");
     #[test]
     fn empty_shell_env_values_do_not_close_generated_nix_strings() {
         assert_eq!(shell_env_value(""), "\"\"");
+    }
+
+    #[test]
+    fn cargo_manifest_links_reads_dotted_package_keys() {
+        let links = cargo_manifest_package_links(
+            r#"
+package.name = "native"
+package.version = "0.1.0"
+package.links = "native_ffi"
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(links.as_deref(), Some("native_ffi"));
+    }
+
+    #[test]
+    fn cargo_manifest_links_rejects_non_string_values() {
+        let err = cargo_manifest_package_links(
+            r#"
+[package]
+name = "native"
+version = "0.1.0"
+links = 5
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(
+            err.contains("invalid type"),
+            "expected TOML type error, got: {err}"
+        );
     }
 
     #[test]
