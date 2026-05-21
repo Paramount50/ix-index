@@ -48,12 +48,18 @@ in
     # on Linux; spell `cpu` out so a future GPU build does not silently flip
     # behaviour after a server image rebuild.
     configFiles."terrain-diffusion-mc.properties" = {
-      "inference.device" = "cpu";
-      "inference.offload_models" = true;
-      "validate_model" = true;
-      "explorer.port" = 19801;
-      "spawn_search.initial_size" = 16;
-      "spawn_search.max_size" = 128;
+      inference = {
+        device = "cpu";
+        offload_models = true;
+      };
+      validate_model = true;
+      explorer = {
+        port = 19801;
+      };
+      spawn_search = {
+        initial_size = 16;
+        max_size = 128;
+      };
     };
 
     datapacks."max-height" = {

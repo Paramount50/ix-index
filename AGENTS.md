@@ -382,11 +382,16 @@ Whitelist and operator files are derived from `services.minecraft.players`. Put 
 
 ### Config file format inference
 
-`services.minecraft.properties` writes `server.properties`, and `services.minecraft.worlds.<name>.generator` renders Bukkit world generator bindings into `bukkit.yml`. Use those first-class options in images, presets, and examples; keep `services.minecraft.bukkit` and `serverFiles` as escape hatches for less common root files. `configFiles` keys are relative paths under `config/`. The serialization format is inferred from the file extension: `.toml`, `.json`, `.yaml`/`.yml`, `.properties`. Values are plain Nix attrsets. Mod modules never import `pkgs.formats` directly.
+`services.minecraft.properties` writes `server.properties`, and `services.minecraft.worlds.<name>.generator` renders Bukkit world generator bindings into `bukkit.yml`. Use those first-class options in images, presets, and examples; keep `services.minecraft.bukkit` and `serverFiles` as escape hatches for less common root files. `configFiles` keys are relative paths under `config/`. The serialization format is inferred from the file extension: `.toml`, `.json`, `.yaml`/`.yml`, `.properties`. Values are plain Nix attrsets. For `.properties` files, nested attrsets flatten to dotted keys, so prefer `inference = { device = "cpu"; }` over `"inference.device" = "cpu";`. Mod modules never import `pkgs.formats` directly.
 
 ```nix
 services.minecraft.properties.motd = "ix-powered Minecraft";
 services.minecraft.worlds.factions.generator = "TerraformGenerator";
+services.minecraft.configFiles."SomeMod.properties" = {
+  inference = {
+    device = "cpu";
+  };
+};
 services.minecraft.configFiles."SomeMod.toml" = { section.key = "value"; };
 services.minecraft.configFiles."other.yml" = { setting = true; };
 ```
