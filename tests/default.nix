@@ -776,9 +776,32 @@ let
     pname = "bun-site-fixture";
     version = "0.1.0";
     src = bunSiteFixture;
+    buildFlags = [
+      "--class"
+      "ix bun"
+    ];
   };
 
   bunLockPackage = builtins.head bunSite.bunNodeModules.bunCache.lock.packages;
+
+  npmSiteFixture = fs.toSource {
+    root = ./fixtures/npm-site;
+    fileset = fs.unions [
+      ./fixtures/npm-site/bin
+      ./fixtures/npm-site/package-lock.json
+      ./fixtures/npm-site/package.json
+    ];
+  };
+
+  npmSite = ix.buildNpmSite pkgs {
+    pname = "npm-site-fixture";
+    version = "0.1.0";
+    src = npmSiteFixture;
+    buildFlags = [
+      "--class"
+      "ix npm"
+    ];
+  };
 
   uvAppFixture = fs.toSource {
     root = ./fixtures/uv-app;
@@ -2720,6 +2743,7 @@ let
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
     test -d ${bunSite.bunNodeModules}/node_modules/clsx
     test -x ${bunSite.bunNodeModules.nodeCompat}/bin/node
+    grep -q 'class="ix npm"' ${npmSite}/share/npm-site-fixture/index.html
 
     ${uvApplication}/bin/uv-app-fixture > uv-app-fixture.out
     grep -q 'hello from uv app fixture' uv-app-fixture.out

@@ -14,6 +14,7 @@
   - `pname`, `version`: derivation identity.
   - `src`: project root containing `package.json` and `bun.lock`.
   - `buildScript`: Bun script to run for the production build.
+  - `buildFlags`: arguments passed to the build script after `--`.
   - `distDir`: relative path of the build output inside `src`.
   - `installDir`: path under `$out` where the built assets are installed.
   - `installFlags`: extra flags for `bun install` while building dependencies.
@@ -26,6 +27,7 @@ pkgs:
   version ? "0.0.0",
   src,
   buildScript ? "build",
+  buildFlags ? [ ],
   distDir ? "dist",
   installDir ? "share/${pname}",
   installFlags ? [ ],
@@ -33,6 +35,8 @@ pkgs:
   meta ? { },
 }:
 let
+  inherit (pkgs) lib;
+
   bunLock = bunLockFor pkgs;
   bunNodeModules = bunLock.buildNodeModules {
     bunRoot = src;
@@ -41,6 +45,13 @@ let
       strictDeps = true;
     };
   };
+  buildCommand = [
+    "bun"
+    "run"
+    buildScript
+  ]
+  ++ lib.optional (buildFlags != [ ]) "--"
+  ++ buildFlags;
 in
 pkgs.stdenvNoCC.mkDerivation (_: {
   inherit
@@ -71,14 +82,14 @@ pkgs.stdenvNoCC.mkDerivation (_: {
 
   buildPhase = ''
     runHook preBuild
-    bun run ${buildScript}
+    ${lib.escapeShellArgs buildCommand}
     runHook postBuild
   '';
 
   installPhase = ''
     runHook preInstall
-    mkdir -p "$out/${installDir}"
-    cp -R "${distDir}/." "$out/${installDir}/"
+    mkdir -p "$out"/${lib.escapeShellArg installDir}
+    cp -R ${lib.escapeShellArg (distDir + "/.")} "$out"/${lib.escapeShellArg installDir}/
     runHook postInstall
   '';
 
