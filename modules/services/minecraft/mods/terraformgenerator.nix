@@ -9,7 +9,8 @@ let
   pluginCfg = cfg.plugins.terraformgenerator or null;
   pluginEnabled = pluginCfg != null && pluginCfg.enable;
   defaultWorldName = cfg.properties."level-name" or "world";
-  worldNames = if pluginCfg == null then [ defaultWorldName ] else pluginCfg.worlds or [ defaultWorldName ];
+  worldNames =
+    if pluginCfg == null then [ defaultWorldName ] else pluginCfg.worlds or [ defaultWorldName ];
 in
 {
   config = lib.mkIf pluginEnabled {

@@ -13,11 +13,7 @@ let
   defaults = {
     port = 24454;
   };
-  modSettings =
-    if modCfg == null then
-      { }
-    else
-      builtins.removeAttrs modCfg [ "enable" ];
+  modSettings = if modCfg == null then { } else builtins.removeAttrs modCfg [ "enable" ];
   pluginSettings =
     if pluginCfg == null then
       { }

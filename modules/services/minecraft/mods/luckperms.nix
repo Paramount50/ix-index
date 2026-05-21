@@ -14,11 +14,7 @@ let
   defaults = {
     mysql = false;
   };
-  modSettings =
-    if modCfg == null then
-      { }
-    else
-      builtins.removeAttrs modCfg [ "enable" ];
+  modSettings = if modCfg == null then { } else builtins.removeAttrs modCfg [ "enable" ];
   merged = defaults // modSettings;
 in
 {
