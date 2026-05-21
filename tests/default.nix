@@ -1024,19 +1024,29 @@ let
   # --- Language helpers -----------------------------------------------------
 
   languages = {
-    pythonDefault = ix.languages.python.interpreter pkgs { };
+    pythonMissingVersion = builtins.tryEval (
+      builtins.deepSeq (ix.languages.python.interpreter pkgs { }).pythonVersion true
+    );
     python312 = ix.languages.python.interpreter pkgs { version = "3.12"; };
     pythonUnknown = builtins.tryEval (
       builtins.deepSeq (ix.languages.python.interpreter pkgs { version = "3.99"; }).pythonVersion
         true
     );
 
-    rustDefault = ix.languages.rust.toolchain pkgs { };
+    rustMissingVersion = builtins.tryEval (
+      builtins.deepSeq (ix.languages.rust.toolchain pkgs { channel = "nightly"; }).name true
+    );
+    rustPinnedNightly = ix.languages.rust.toolchain pkgs {
+      channel = "nightly";
+      version = ix.languages.rust.defaultNightlyDate;
+    };
     rustStable = ix.languages.rust.toolchain pkgs {
       channel = "stable";
       version = "latest";
     };
     rustExtraComponents = ix.languages.rust.toolchain pkgs {
+      channel = "nightly";
+      version = ix.languages.rust.defaultNightlyDate;
       components = [
         "cargo"
         "rust-std"
@@ -1052,16 +1062,24 @@ let
       builtins.deepSeq (ix.languages.rust.toolchain pkgs { profile = "extreme"; }).name true
     );
 
-    javaDefault = ix.languages.java.jdk pkgs { };
+    javaMissingDistribution = builtins.tryEval (
+      builtins.deepSeq (ix.languages.java.jdk pkgs { version = "21"; }).name true
+    );
     javaTemurin = ix.languages.java.jdk pkgs {
       version = "21";
       distribution = "temurin";
     };
     javaBadDistribution = builtins.tryEval (
-      builtins.deepSeq (ix.languages.java.jdk pkgs { distribution = "openjdkk"; }).name true
+      builtins.deepSeq (ix.languages.java.jdk pkgs {
+        version = "21";
+        distribution = "openjdkk";
+      }).name true
     );
     javaBadVersion = builtins.tryEval (
-      builtins.deepSeq (ix.languages.java.jdk pkgs { version = "22"; }).name true
+      builtins.deepSeq (ix.languages.java.jdk pkgs {
+        version = "22";
+        distribution = "temurin";
+      }).name true
     );
   };
 
@@ -2149,8 +2167,8 @@ let
 
     languages = [
       {
-        assertion = languages.pythonDefault.pythonVersion == "3.14";
-        message = "ix.languages.python should default to 3.14 to match writePythonApplication and buildUvApplication";
+        assertion = !languages.pythonMissingVersion.success;
+        message = "ix.languages.python should require an explicit interpreter version";
       }
       {
         assertion = languages.python312.pythonVersion == "3.12";
@@ -2161,12 +2179,14 @@ let
         message = "ix.languages.python should throw on an unknown version instead of returning a missing-attr error";
       }
       {
-        assertion = lib.hasPrefix "rust-minimal-" languages.rustDefault.name;
-        message = "ix.languages.rust should default to the minimal rust-overlay profile";
+        assertion = !languages.rustMissingVersion.success;
+        message = "ix.languages.rust should require an explicit toolchain version";
       }
       {
-        assertion = lib.hasInfix "nightly-2026-05-17" languages.rustDefault.name;
-        message = "ix.languages.rust should default to the repo-wide pinned nightly date";
+        assertion =
+          lib.hasPrefix "rust-minimal-" languages.rustPinnedNightly.name
+          && lib.hasInfix "nightly-2026-05-17" languages.rustPinnedNightly.name;
+        message = "ix.languages.rust should resolve the repo-wide pinned nightly date";
       }
       {
         assertion =
@@ -2175,7 +2195,7 @@ let
         message = "ix.languages.rust should resolve stable to the rust-overlay stable channel";
       }
       {
-        assertion = languages.rustExtraComponents.drvPath != languages.rustDefault.drvPath;
+        assertion = languages.rustExtraComponents.drvPath != languages.rustPinnedNightly.drvPath;
         message = "ix.languages.rust should let callers extend the component set";
       }
       {
@@ -2187,8 +2207,8 @@ let
         message = "ix.languages.rust should reject unknown profiles with errors.assertEnum";
       }
       {
-        assertion = languages.javaDefault == pkgs.jdk21_headless;
-        message = "ix.languages.java should default to OpenJDK 21 headless";
+        assertion = !languages.javaMissingDistribution.success;
+        message = "ix.languages.java should require an explicit JDK distribution";
       }
       {
         assertion = languages.javaTemurin == pkgs.temurin-bin-21;
