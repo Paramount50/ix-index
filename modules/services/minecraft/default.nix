@@ -550,8 +550,13 @@ let
           path: value:
           let
             file = (formatFor path).generate (baseNameOf path) (normalizeFor path value);
+            target = ix.relativePath.shellPath "$out" path;
+            targetDir = ix.relativePath.shellParent "$out" path;
           in
-          "mkdir -p $out/${dirOf path}\nln -sf ${file} $out/${path}"
+          ''
+            mkdir -p ${targetDir}
+            ln -sf ${lib.escapeShellArg file} ${target}
+          ''
         ) source
       )}
     '';
@@ -624,8 +629,8 @@ let
           mkdir -p "$out"
         ''
         + lib.concatMapStringsSep "\n" (jar: ''
-          ln -s ${jar.path} "$out/${jar.name}"
-          printf '%s\n' ${lib.escapeShellArg jar.pluginName} > "$out/${jar.name}.plugin-name"
+          ln -s ${lib.escapeShellArg jar.path} ${ix.relativePath.shellPath "$out" jar.name}
+          printf '%s\n' ${lib.escapeShellArg jar.pluginName} > ${ix.relativePath.shellPath "$out" "${jar.name}.plugin-name"}
         '') managedJars
       );
       datapacks = pkgs.runCommand "minecraft-managed-datapacks" { } (
@@ -633,7 +638,7 @@ let
           mkdir -p "$out"
         ''
         + lib.concatMapStringsSep "\n" (datapack: ''
-          ln -s ${datapack.root} "$out/${datapack.fileName}"
+          ln -s ${lib.escapeShellArg datapack.root} ${ix.relativePath.shellPath "$out" datapack.fileName}
         '') datapackRoots
       );
       configFiles = mkManaged "config" cfg.configFiles;

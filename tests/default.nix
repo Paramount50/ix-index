@@ -1051,14 +1051,25 @@ let
     }
   ];
 
-  resourceMonitorRuntimeDirectoryFailures = failedAssertionsFor [
-    {
-      services.resource-monitor = {
-        enable = true;
-        runtimeDirectory = "/var/lib/resource-monitor";
-      };
-    }
-  ];
+  resourceMonitorRuntimeDirectoryFailures =
+    let
+      failuresFor =
+        runtimeDirectory:
+        failedAssertionsFor [
+          {
+            services.resource-monitor = {
+              enable = true;
+              inherit runtimeDirectory;
+            };
+          }
+        ];
+    in
+    map failuresFor [
+      "/var/lib/resource-monitor"
+      "/run//resource-monitor"
+      "/run/resource-monitor/."
+      "/run/resource-monitor/../stats"
+    ];
 
   minecraftUnsafeManagedPathFailures = failedAssertionsFor [
     ../images/games/minecraft
@@ -1087,6 +1098,10 @@ let
       };
     }
   ];
+
+  relativePathUnsafeShellEval = builtins.tryEval (
+    builtins.deepSeq (ix.relativePath.shellPath "$out" "../bad") true
+  );
 
   portClaimNamespaceAllowedFailures = failedAssertionsFor [
     {
@@ -1639,6 +1654,15 @@ let
           && ix.relativePath.isSafeName "Geyser-Velocity.jar"
           && !(ix.relativePath.isSafeName "nested/Geyser-Velocity.jar");
         message = "ix.relativePath should distinguish safe managed paths from unsafe segments and names";
+      }
+      {
+        assertion =
+          ix.relativePath.shellPath "$out" "plugins/Blue Map/core.conf"
+          == "\"$out\"/'plugins/Blue Map/core.conf'"
+          && ix.relativePath.shellParent "$out" "plugins/Blue Map/core.conf" == "\"$out\"/'plugins/Blue Map'"
+          && ix.relativePath.shellParent "$out" "server.properties" == "\"$out\""
+          && !relativePathUnsafeShellEval.success;
+        message = "ix.relativePath shell helpers should quote safe relative paths and reject unsafe paths";
       }
       {
         assertion = lib.any (
@@ -2197,11 +2221,14 @@ let
         message = "resource-monitor nginx should serve stats from the configured runtime directory";
       }
       {
-        assertion = lib.any (
-          failure:
-          lib.hasInfix "services.resource-monitor.runtimeDirectory must be a managed /run subdirectory" failure.message
+        assertion = lib.all (
+          failures:
+          lib.any (
+            failure:
+            lib.hasInfix "services.resource-monitor.runtimeDirectory must be a managed /run subdirectory" failure.message
+          ) failures
         ) resourceMonitorRuntimeDirectoryFailures;
-        message = "resource-monitor should reject runtime directories outside /run";
+        message = "resource-monitor should reject runtime directories outside /run and unsafe /run segments";
       }
     ];
 

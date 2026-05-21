@@ -16,6 +16,8 @@ let
   cfg = config.services.resource-monitor;
   fs = lib.fileset;
   runtimeDirectory = lib.removePrefix "/run/" cfg.runtimeDirectory;
+  runtimeDirectoryIsSafe =
+    lib.hasPrefix "/run/" cfg.runtimeDirectory && ix.relativePath.isSafe runtimeDirectory;
 
   siteSrc = fs.toSource {
     root = ./site;
@@ -135,13 +137,8 @@ in
   config = mkIf cfg.enable {
     assertions = [
       {
-        assertion =
-          lib.hasPrefix "/run/" cfg.runtimeDirectory
-          && cfg.runtimeDirectory != "/run/"
-          && !lib.hasSuffix "/" cfg.runtimeDirectory
-          && !lib.hasInfix "/../" cfg.runtimeDirectory
-          && !lib.hasSuffix "/.." cfg.runtimeDirectory;
-        message = "services.resource-monitor.runtimeDirectory must be a managed /run subdirectory without a trailing slash or '..' segment";
+        assertion = runtimeDirectoryIsSafe;
+        message = "services.resource-monitor.runtimeDirectory must be a managed /run subdirectory with safe relative segments";
       }
     ];
 

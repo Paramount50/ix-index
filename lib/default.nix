@@ -357,7 +357,9 @@ let
 
     `isSafe` accepts relative paths with ordinary segments and rejects empty,
     absolute, `.`, `..`, and repeated-slash forms. Use `isSafeName` for values
-    that become one directory entry rather than a nested path.
+    that become one directory entry rather than a nested path. `shellPath` and
+    `shellParent` return shell snippets for joining a root expression such as
+    `$out` with a validated relative path.
   */
   relativePath =
     let
@@ -373,9 +375,27 @@ let
         path:
         builtins.isString path && path != "" && !(lib.hasPrefix "/" path) && !(hasReservedSegment path);
       isSafeName = path: isSafe path && builtins.length (segments path) == 1;
+      renderPath = path: if builtins.isString path then path else "<${builtins.typeOf path}>";
+      assertSafe =
+        path:
+        assert lib.assertMsg (isSafe path)
+          "ix.relativePath.shellPath expected a safe relative path, got ${renderPath path}";
+        path;
+      shellPath = root: path: ''"${root}"/${lib.escapeShellArg (assertSafe path)}'';
+      shellParent =
+        root: path:
+        let
+          parent = dirOf (assertSafe path);
+        in
+        if parent == "." then ''"${root}"'' else shellPath root parent;
     in
     {
-      inherit isSafe isSafeName;
+      inherit
+        isSafe
+        isSafeName
+        shellParent
+        shellPath
+        ;
       unsafe = paths: lib.filter (path: !(isSafe path)) paths;
       unsafeNames = paths: lib.filter (path: !(isSafeName path)) paths;
     };

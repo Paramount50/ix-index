@@ -139,10 +139,12 @@ let
           path: value:
           let
             file = (formatFor path).generate (baseNameOf path) value;
+            target = ix.relativePath.shellPath "$out" path;
+            targetDir = ix.relativePath.shellParent "$out" path;
           in
           ''
-            mkdir -p "$out/${dirOf path}"
-            ln -sf ${lib.escapeShellArg file} "$out/${path}"
+            mkdir -p ${targetDir}
+            ln -sf ${lib.escapeShellArg file} ${target}
           ''
         ) files
       )}
@@ -155,7 +157,7 @@ let
         mkdir -p "$out"
       ''
       + lib.concatMapStringsSep "\n" (plugin: ''
-        ln -s ${lib.escapeShellArg plugin.path} "$out/${plugin.fileName}"
+        ln -s ${lib.escapeShellArg plugin.path} ${ix.relativePath.shellPath "$out" plugin.fileName}
       '') pluginJars
     );
   };
