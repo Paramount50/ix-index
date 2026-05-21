@@ -9,6 +9,8 @@ from pathlib import Path
 
 DEFAULT_TASK = """Find one part of this repository that is not living up to AGENTS.md: subpar prose, awkward naming, brittle implementation, non-idiomatic structure, or a real quality problem. Make a substantive improvement that materially improves the repo. Prefer behavior, maintainability, correctness, or operator ergonomics over performative churn.
 
+If you discover that AGENTS.md itself is wrong, stale, or biasing you toward a bad change, fix that durable instruction instead of working around it. Remove or narrow rules that encode an incorrect model of the repo; add a short invariant only when the same mistake would plausibly recur.
+
 Work directly in the checkout. Do not commit or push; leave the working tree changes for the outer loop to check, commit, and push."""
 
 
