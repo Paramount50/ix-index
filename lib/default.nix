@@ -170,6 +170,20 @@ let
         doCheck = false;
       });
 
+      # kyua's installCheck runs its own 1443-test suite, and
+      # `engine/requirements_test:check_reqs__required_disk_space__fail`
+      # hard-codes a 1000.00T threshold that no longer fails on hosts whose
+      # build sandbox sees more than that much free space (APFS containers,
+      # the >1 PiB autoscaling disks ix VMs sit on, large ZFS pools on the
+      # remote linux builder). When statvfs reports the requirement is
+      # satisfied, kyua prints nothing and the regex assertion in the test
+      # body sees the empty string. kyua is only used here transitively as a
+      # check-time tool for atf and libiconv; skip its self-test rather than
+      # patching out a single upstream assertion that will drift.
+      kyua = prev.kyua.overrideAttrs (_: {
+        doInstallCheck = false;
+      });
+
       # libtpms 0.10.2 + GCC 15.2 (the znver5-tuned compiler the platform
       # produces) fails the build with `-Werror=stringop-overflow` on a
       # CryptCmac.c buffer access GCC can't statically prove safe. Upstream
