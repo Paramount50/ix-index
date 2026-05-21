@@ -1,6 +1,6 @@
 # Daily Python Scraper
 
-Standalone consumer example for a daily Python job on ix.
+A daily Python job on ix.
 
 It defines a uv project packaged with
 [`ix.buildUvApplication`](../../lib/build-uv-application.nix), runs it as a
@@ -24,7 +24,6 @@ ix up
 - [`service.nix`](service.nix) owns the concrete service config, hardening,
   timer, and optional S3 sync.
 - [`package.nix`](package.nix) packages the uv project as a store executable.
-- [`flake.nix`](flake.nix) exposes the image package and the Python package.
 
 ## S3 Output
 

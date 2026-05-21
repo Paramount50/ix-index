@@ -488,27 +488,24 @@ Example code should stay on the consumer side of the module boundary. It compose
 
 Presets must not inline URLs, hashes, or pinned version strings for fetched artifacts. Mod jars, plugin jars, server jars, datasets, JDKs, and source-fetched packages all live in the repo's library surface (`ix.lib.artifacts.*`, `ix.packages`, module options, generated catalogs under `images/`), and presets consume them by name. If a preset needs an artifact the library does not expose yet, extend the library first: add the slug to the relevant catalog and regenerate it with `nix run .#update-mods`, add a new entry to `ix.lib.artifacts`, or grow the relevant module option. Then point the preset at the named surface. Presets are consumer tests for whether the library is sufficiently specified. A missing entry is a gap in the repo; fix it in the library so every consumer benefits.
 
-In-repo presets that exercise this repo's library, modules, fleets, or pinned artifacts should be exposed from the root `flake.nix` as `packages` (with `meta.mainProgram` for the runnable wrappers) and share the root `flake.lock`. Keep the actual fleet or image value in the preset's `default.nix` so tests and root outputs can import it. Do not add a nested preset `flake.lock` that pins this same repo; it will drift from the API under test.
+Examples and presets are pure Nix imported by the root flake, never their own sub-flakes. An example is one or more `.nix` files under `examples/<name>/` (or `examples/<category>/<name>/`) with a `default.nix` entry point that the root's `ix.exampleFleetsFor` discovery picks up automatically. Adding an example is `mkdir examples/<name> + edit default.nix`; the root flake exposes the resulting fleet wrappers under `packages.<system>.<name>-{up,health,replace,switch,diff}` on the next eval. Do not add `flake.nix` or `flake.lock` next to a `default.nix` in `examples/`: those files are not consumed by discovery, they would diverge from the root lock the instant anyone ran `nix` inside the example, and the "this is what a downstream user's flake looks like" demonstration is better served by a real `templates.<name>` output (which ships its own starter lock for exactly that reason). If the repo grows a need to show the downstream-consumer shape, add the `templates` output once; do not scatter near-empty per-example flakes to fake it.
 
-Use a standalone template or `examples/<name>` flake only when it is intentionally a downstream consumer. In that case its inputs should look like a real external user's inputs (`github:indexable-inc/index`, registry refs, etc.), not `path:../..` or `git+file:../..` backedges into the parent checkout. Do not add template-local artifact inputs when the root flake already exposes the locked artifact through `ix.lib.artifacts`.
+Examples receive `{ index = { lib = ix; }; }` as their sole import argument. They consume the library through that `index.lib` handle, never by importing repo-internal paths with `../..` or `path:../..`. This is the same shim a downstream consumer would receive after writing `inputs.index.url = "github:indexable-inc/index"`, so the example shape stays portable even though the discovery path is direct file import.
 
 In fleet presets, `ix.image.name` usually defaults to the node name. Set it only when the replacement image should be named differently. Set `ix.image.tag` when the default `latest` would make plans or registry destinations ambiguous.
 
 Comments should explain why a line exists, not restate Nix syntax. Prefer comments that answer "why is this needed in an ix fleet?" over comments that paraphrase the option name.
 
-Example docs and example flakes assume the reader already has the `ix` CLI.
-They should not include generic `Use` sections or wrapper outputs for
-`nix run .#plan`, `nix run .#up`, `nix run .#switch`, or routine
-`ix shell ... journalctl` inspection. Every standalone example README should
-include a short `Run` section that shows `ix up` as the whole lifecycle command.
-Do not explain what happens behind that command. Do not spell out lower level
-image plumbing such as `nix build`, image pushes, or `ix new` unless that
-plumbing is the point of the example. Example `flake.nix` files expose the
-values ix needs plus any local package the example owns. Leave
-`plan`/`diff`/`up`/`switch`/`replace` wrapper packages out of
-standalone consumer examples. Keep examples focused on the shape being taught:
-files, modules, service settings, data paths, and the specific operational
-caveats that are unusual for that example.
+Example READMEs assume the reader already has the `ix` CLI. They should not
+include generic `Use` sections or repeat what `nix run .#plan`,
+`nix run .#up`, `nix run .#switch`, or routine `ix shell ... journalctl`
+inspection do. Every example README should include a short `Run` section that
+shows `ix up` as the whole lifecycle command. Do not explain what happens
+behind that command. Do not spell out lower-level image plumbing such as
+`nix build`, image pushes, or `ix new` unless that plumbing is the point of
+the example. Keep example READMEs focused on the shape being taught: files,
+modules, service settings, data paths, and the specific operational caveats
+that are unusual for that example.
 
 Default to Rust for repo-owned tools that parse structured data, reconcile mutable state, stream archives, move large byte ranges, implement nontrivial CLIs, or sit in build/runtime hot paths. In practice, the vast majority of new first-party tooling with real logic should be Rust with normal source files, Cargo metadata, tests where useful, and Nix packaging. Shell is fine for small orchestration around existing programs, and Python is fine for low-volume generators or ecosystem-heavy tasks such as catalog updates, but do not leave stateful reconcilers, performance-sensitive builders, or runtime helpers in Python merely because it is quick to prototype.
 
