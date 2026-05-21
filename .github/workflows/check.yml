@@ -3,11 +3,12 @@ name: Check
 on:
   push:
     branches:
-      - development
       - main
+    tags:
+      - "*"
   pull_request:
     branches:
-      - development
+      - main
 
 permissions:
   contents: read
@@ -34,9 +35,9 @@ jobs:
       # Configures the indexable-inc Cachix substituter for the daemon and
       # uploads every store path realised during this job. PRs from forks
       # cannot read `secrets.CACHIX_AUTH_TOKEN` so the action degrades to
-      # read-only automatically. Push-event jobs (development, main) supply
-      # the token and become writers; this gates publish credentials on the
-      # reviewed ref per the supply-chain rule in AGENTS.md.
+      # read-only automatically. Push-event jobs from main and release tags
+      # supply the token and become writers; this gates publish credentials on
+      # reviewed refs per the supply-chain rule in AGENTS.md.
       - name: Set up Cachix
         uses: cachix/cachix-action@5f2d7c5294214f71b873db4b969586b980625e71 # v17
         with:

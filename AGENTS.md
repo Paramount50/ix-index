@@ -10,17 +10,17 @@ One logical change per commit: a refactor, a behavior change, a doc note, and an
 
 Contributor setup and local checks are in @CONTRIBUTING.md.
 
-Work directly in the shared checkout on `development` unless the user asks for a branch or separate worktree. Pull before starting, then commit and push to `development` after checks pass.
+Work directly in the shared checkout on `main` unless the user asks for a branch or separate worktree. Pull before starting, then commit and push to `main` after checks pass.
 
-When the shared checkout already has unrelated in-progress edits, name them (paths and a one-line summary) and move the new work into a worktree (`git worktree add ../<short-name>-<branch> -b <branch> development`). Do not `git stash` the WIP out of the way: stashing is silently destructive from the working operator's perspective and ties the new work's success to a clean unstash later. Land worktree commits with `git push origin <branch>:development` (the pre-commit lint runs over the worktree, so it stays green even when the main checkout is dirty), then `git worktree remove ../<short-name>-<branch>` and `git branch -d <branch>`.
+When the shared checkout already has unrelated in-progress edits, name them (paths and a one-line summary) and move the new work into a worktree (`git worktree add ../<short-name>-<branch> -b <branch> main`). Do not `git stash` the WIP out of the way: stashing is silently destructive from the working operator's perspective and ties the new work's success to a clean unstash later. Land worktree commits with `git push origin <branch>:main` (the pre-commit lint runs over the worktree, so it stays green even when the main checkout is dirty), then `git worktree remove ../<short-name>-<branch>` and `git branch -d <branch>`.
 
 ### Branch model
 
-`development` is the GitHub default branch. PRs target `development`; routine work lands there after local checks and review.
+`main` is the GitHub default branch and the only long-lived human branch. PRs target `main`; routine work lands there after local checks and review.
 
-`main` is the promoted consumer branch. Pin examples, downstream flakes, and image consumers to `main` when they need a commit that has passed the cache gate. Human changes should flow through `development`.
+Deployment refs are tags created on commits that are already reachable from `main`. Deployments should pin the tag's resolved commit, OCI digest, or Nix store path. A tag is the release decision: it gives rollback and audit by naming exact code after CI and artifact publication.
 
-A scheduled workflow fast-forwards `main` from `development`. It selects the newest successful `Check` workflow run on `development` that completed at least 6 hours earlier, re-runs `nix flake check`, then pushes `main` to that commit. The 6-hour pause is a supply-chain speed bump: a lockfile can pin a compromised artifact before GitHub, Modrinth, crates.io, npm, or an upstream maintainer has reacted. The pause gives takedowns, advisories, and cache churn time to show up before consumers follow the branch. Keep using the 24-hour dependency-intake default for routine third-party bumps; the branch delay is the final gate for already-merged development commits.
+This repo does not need nixpkgs-style moving channels. One reviewed trunk keeps the source of truth obvious, while immutable release refs carry deployment state. Keep using the 24-hour dependency-intake default for routine third-party bumps.
 
 When a commit actually fixes a tracked GitHub issue, include an auto-closing keyword in the commit body, for example `Fixes #123`, `Closes #123`, or `Resolves #123`. Use `Refs #123` only for related work, policy docs, investigation, or partial cleanup that should not close the issue.
 

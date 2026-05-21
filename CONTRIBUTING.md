@@ -1,6 +1,6 @@
 # Contributing
 
-Bug reports and enhancement requests go to [GitHub Issues](https://github.com/indexable-inc/index/issues). Security reports follow [SECURITY.md](SECURITY.md) instead. Code changes land through pull requests against the `development` branch.
+Bug reports and enhancement requests go to [GitHub Issues](https://github.com/indexable-inc/index/issues). Security reports follow [SECURITY.md](SECURITY.md) instead. Code changes land through pull requests against the `main` branch.
 
 ## Local setup
 
@@ -47,4 +47,4 @@ One logical change per commit; see the [Workflow](AGENTS.md#workflow) section fo
 
 ## Pull requests
 
-PRs target `development` and need one approving review plus passing status checks (`flake-check` and the `Analyze (*)` CodeQL jobs). The PR description should answer the same "why" question the commit body answers, plus anything reviewer-only (rollout plan, known follow-ups).
+PRs target `main` and need one approving review plus passing status checks (`flake-check` and the `Analyze (*)` CodeQL jobs). The PR description should answer the same "why" question the commit body answers, plus anything reviewer-only (rollout plan, known follow-ups).
