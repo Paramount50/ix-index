@@ -238,3 +238,21 @@ fn missing_dependency_is_rejected_before_running() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("ghost"), "expected missing-dep error to name 'ghost', got: {stderr}");
 }
+
+#[test]
+fn empty_command_is_rejected_before_running() {
+    let spec = r#"{"nodes":{
+        "a":{"command":[]}
+    }}"#;
+    let (output, _dir) = run_binary(spec);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("empty command"),
+        "expected empty-command error, got: {stderr}"
+    );
+    assert!(
+        !stderr.contains("panicked"),
+        "empty command should be a validation error: {stderr}"
+    );
+}

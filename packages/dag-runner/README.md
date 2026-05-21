@@ -25,6 +25,7 @@ The spec is a single JSON object with a `nodes` map. Each entry is a node keyed 
 
 Validation runs before any node is spawned and rejects:
 
+- An empty `command` array.
 - A `depends_on` entry that names an unknown node (error names both nodes).
 - A cycle, direct (`a → a`) or indirect (`a → b → c → a`). The error shows the cycle path.
 

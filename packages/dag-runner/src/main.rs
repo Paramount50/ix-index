@@ -195,6 +195,9 @@ fn resolve_mode(requested: OutputMode) -> OutputMode {
 
 fn validate(spec: &Spec) -> Result<()> {
     for (name, node) in &spec.nodes {
+        if node.command.is_empty() {
+            bail!("node {name} has empty command");
+        }
         for dep in &node.depends_on {
             if !spec.nodes.contains_key(dep) {
                 bail!("node {name} depends on unknown node {dep}");
@@ -746,6 +749,18 @@ mod tests {
         let spec = spec_of(&[("a", &["ghost"])]);
         let err = validate(&spec).unwrap_err().to_string();
         assert!(err.contains("ghost"), "error should name the missing dep, got: {err}");
+        assert!(err.contains('a'), "error should name the offending node, got: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_empty_command() {
+        let spec: Spec =
+            serde_json::from_str(r#"{"nodes":{"a":{"command":[]}}}"#).unwrap();
+        let err = validate(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("empty command"),
+            "error should name the empty command, got: {err}"
+        );
         assert!(err.contains('a'), "error should name the offending node, got: {err}");
     }
 
