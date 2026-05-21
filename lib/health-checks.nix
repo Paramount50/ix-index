@@ -73,20 +73,18 @@ let
           }
 
           print $"[${name}] booting and running health checks"
-          let result = (^${lib.getExe fleet.up} | complete)
-          if ($result.stdout | str length) > 0 {
-            print $result.stdout
-          }
-          if ($result.stderr | str length) > 0 {
-            print -e $result.stderr
-          }
+          # Stream ix-fleet so dag-runner can show the live per-node step.
+          try {
+            ^${lib.getExe fleet.up}
+          } catch { }
+          let exit_code = ($env.LAST_EXIT_CODE? | default 1)
 
           print $"[${name}] tearing down"
           for node_name in $nodes {
             do --ignore-errors { ^ix rm --force $node_name } | ignore
           }
 
-          exit $result.exit_code
+          exit $exit_code
         }
       '';
     };
