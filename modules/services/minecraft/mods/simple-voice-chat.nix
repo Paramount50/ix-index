@@ -8,18 +8,26 @@ let
   cfg = config.services.minecraft;
   modCfg = cfg.mods.simple-voice-chat or null;
   pluginCfg = cfg.plugins.simple-voice-chat or null;
+  modEnabled = modCfg != null && modCfg.enable;
+  pluginEnabled = pluginCfg != null && pluginCfg.enable;
   defaults = {
     port = 24454;
   };
+  modSettings =
+    if modCfg == null then
+      { }
+    else
+      builtins.removeAttrs modCfg [ "enable" ];
   pluginSettings =
     if pluginCfg == null then
       { }
     else
       builtins.removeAttrs pluginCfg [
+        "enable"
         "pluginName"
         "src"
       ];
-  settings = defaults // pluginSettings // (if modCfg == null then { } else modCfg);
+  settings = defaults // pluginSettings // modSettings;
   voiceChatFiles = {
     "voicechat-server.properties" = {
       inherit (settings) port;
@@ -33,7 +41,7 @@ let
     }) voiceChatFiles;
 in
 {
-  config = lib.mkIf (modCfg != null || pluginCfg != null) {
+  config = lib.mkIf (modEnabled || pluginEnabled) {
     ix.networking.portClaims.simple-voice-chat = {
       protocol = "udp";
       inherit (settings) port;
@@ -44,8 +52,8 @@ in
     networking.firewall.allowedUDPPorts = [ settings.port ];
 
     services.minecraft = {
-      configFiles = lib.mkIf (modCfg != null) (prefixedFiles "voicechat");
-      serverFiles = lib.mkIf (pluginCfg != null) (prefixedFiles "plugins/voicechat");
+      configFiles = lib.mkIf modEnabled (prefixedFiles "voicechat");
+      serverFiles = lib.mkIf pluginEnabled (prefixedFiles "plugins/voicechat");
     };
   };
 }

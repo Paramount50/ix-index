@@ -7,11 +7,12 @@
 let
   cfg = config.services.minecraft;
   pluginCfg = cfg.plugins.terraformgenerator or null;
+  pluginEnabled = pluginCfg != null && pluginCfg.enable;
   defaultWorldName = cfg.properties."level-name" or "world";
-  worldNames = pluginCfg.worlds or [ defaultWorldName ];
+  worldNames = if pluginCfg == null then [ defaultWorldName ] else pluginCfg.worlds or [ defaultWorldName ];
 in
 {
-  config = lib.mkIf (pluginCfg != null) {
+  config = lib.mkIf pluginEnabled {
     services.minecraft.worlds = lib.genAttrs worldNames (_: {
       generator = lib.mkDefault "TerraformGenerator";
     });

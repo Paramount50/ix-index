@@ -5,14 +5,20 @@
 { config, lib, ... }:
 let
   modCfg = config.services.minecraft.mods.distanthorizons or null;
+  modEnabled = modCfg != null && modCfg.enable;
   defaults = {
     serverSideLodGeneration = true;
     maxRenderDistance = 256;
   };
-  merged = defaults // (if modCfg == null then { } else modCfg);
+  modSettings =
+    if modCfg == null then
+      { }
+    else
+      builtins.removeAttrs modCfg [ "enable" ];
+  merged = defaults // modSettings;
 in
 {
-  config = lib.mkIf (modCfg != null) {
+  config = lib.mkIf modEnabled {
     services.minecraft.configFiles."DistantHorizons.toml" = {
       server = {
         inherit (merged) serverSideLodGeneration maxRenderDistance;

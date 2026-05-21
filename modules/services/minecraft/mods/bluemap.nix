@@ -14,19 +14,27 @@ let
   cfg = config.services.minecraft;
   modCfg = cfg.mods.bluemap or null;
   pluginCfg = cfg.plugins.bluemap or null;
+  modEnabled = modCfg != null && modCfg.enable;
+  pluginEnabled = pluginCfg != null && pluginCfg.enable;
   defaults = {
     port = 8100;
     mysql = false;
   };
+  modSettings =
+    if modCfg == null then
+      { }
+    else
+      builtins.removeAttrs modCfg [ "enable" ];
   pluginSettings =
     if pluginCfg == null then
       { }
     else
       builtins.removeAttrs pluginCfg [
+        "enable"
         "pluginName"
         "src"
       ];
-  merged = defaults // pluginSettings // (if modCfg == null then { } else modCfg);
+  merged = defaults // pluginSettings // modSettings;
   bluemapFiles = {
     "core.conf" = {
       accept-download = true;
@@ -53,7 +61,7 @@ let
     }) bluemapFiles;
 in
 {
-  config = lib.mkIf (modCfg != null || pluginCfg != null) {
+  config = lib.mkIf (modEnabled || pluginEnabled) {
     ix.networking.portClaims.bluemap = {
       protocol = "tcp";
       inherit (merged) port;
@@ -65,8 +73,8 @@ in
 
     services = {
       minecraft = {
-        configFiles = lib.mkIf (modCfg != null) (prefixedFiles "bluemap");
-        serverFiles = lib.mkIf (pluginCfg != null) (prefixedFiles "plugins/BlueMap");
+        configFiles = lib.mkIf modEnabled (prefixedFiles "bluemap");
+        serverFiles = lib.mkIf pluginEnabled (prefixedFiles "plugins/BlueMap");
       };
 
       mysql = lib.mkIf merged.mysql {

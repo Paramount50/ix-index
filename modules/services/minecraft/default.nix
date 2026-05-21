@@ -78,6 +78,12 @@ let
 
   modConfigType = types.submodule {
     freeformType = formatValueType;
+
+    options.enable = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Whether to install this mod entry.";
+    };
   };
 
   dimensionTypeType = types.submodule {
@@ -97,6 +103,12 @@ let
     freeformType = formatValueType;
 
     options = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = "Whether to install this plugin entry.";
+      };
+
       src = mkOption {
         type = types.nullOr types.path;
         default = null;
@@ -299,6 +311,8 @@ let
     "whitelist.json"
   ] (lib.attrNames cfg.serverFiles);
   enabledDatapacks = lib.filterAttrs (_: datapack: datapack.enable) cfg.datapacks;
+  enabledMods = lib.filterAttrs (_: mod: mod.enable) cfg.mods;
+  enabledPlugins = lib.filterAttrs (_: plugin: plugin.enable) cfg.plugins;
   sourcedGeneratedDatapacks = lib.filterAttrs (
     _: datapack: datapack.src != null && (datapack.files != { } || datapack.dimensionTypes != { })
   ) enabledDatapacks;
@@ -344,7 +358,7 @@ let
       path = entry.src;
       inherit pluginName;
     }
-  ) cfg.mods;
+  ) enabledMods;
 
   pluginJars = lib.mapAttrsToList (
     slug: plugin:
@@ -363,7 +377,7 @@ let
       path = entry.src;
       inherit pluginName;
     }
-  ) cfg.plugins;
+  ) enabledPlugins;
 
   loaderEnabled = lib.genAttrs [
     "fabric"
