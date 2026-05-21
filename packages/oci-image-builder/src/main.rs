@@ -875,8 +875,8 @@ mod tests {
         let efficiency =
             analyze_layer_efficiency(&[test_layer(first, 1)?, test_layer(second, 2)?])?;
 
-        assert_eq!(efficiency.discovered_bytes, 22);
-        assert_eq!(efficiency.required_bytes, 11);
+        assert_eq!(efficiency.discovered_bytes, 11);
+        assert_eq!(efficiency.required_bytes, 0);
         assert_eq!(efficiency.wasted_bytes, 11);
         assert_eq!(efficiency.inefficient_paths[0].path, "srv/world.dat");
 
@@ -898,7 +898,7 @@ mod tests {
                 path: "/nix/store/example".to_owned(),
                 occurrences: 2,
                 cumulative_size: 200,
-                minimum_size: 100,
+                required_size: 100,
             }],
         };
 
