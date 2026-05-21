@@ -1,4 +1,8 @@
 {
+  "distanthorizons": {
+    "hash": "sha512-CyOsAkwjz/3GkS6FLFeYV9nBwgCkt2kGTymIL97Pg0QqQ90bnNZXL1NY+iCMFhoII9z249MuU15X7upCw4/Cpw==",
+    "url": "https://cdn.modrinth.com/data/uCdwusMi/versions/B1HnfKO7/DistantHorizons-3.0.3-b-1.21.11-fabric-neoforge.jar"
+  },
   "fabric-api": {
     "hash": "sha512-wJLUjGRTvsMmT4D2o1uzNKujEStc1sDgsmds5NgecCyx5SIzfzpzI0jnV8wiJto8YBoxSuh2YzTxavcaE7zJjQ==",
     "url": "https://cdn.modrinth.com/data/P7dR8mSH/versions/5zJNhXV2/fabric-api-0.141.4%2B1.21.11.jar"
