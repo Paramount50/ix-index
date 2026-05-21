@@ -11,6 +11,9 @@
     "vscjava.vscode-java-pack",
     "usernamehw.errorlens",
     "rust-lang.rust-analyzer",
-    "vadimcn.vscode-lldb"
+    "vadimcn.vscode-lldb",
+    "gleam.gleam",
+    "pgourlain.erlang",
+    "jakebecker.elixir-ls"
   ]
 }
