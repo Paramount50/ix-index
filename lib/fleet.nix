@@ -123,7 +123,7 @@ let
     lib.mapAttrs (_name: spec: lib.filter (dep: !(knownDependency dep)) spec.dependsOn) rawNodeSpecs
   );
   renderUnknownDependencies = name: deps: "${name}: ${lib.concatStringsSep ", " deps}";
-  checkedNodeSpecs =
+  checkedKnownNodeSpecs =
     assert lib.assertMsg (unknownDependencies == { }) ''
       fleet nodes reference unknown dependencies:
         ${lib.concatStringsSep "\n  " (lib.mapAttrsToList renderUnknownDependencies unknownDependencies)}
@@ -138,6 +138,48 @@ let
         lib.genList (index: "${dep}-${toString index}") rawNodeSpecs.${dep}.replicas
     else
       [ dep ];
+  expandedDependencies = lib.mapAttrs (
+    _name: spec: lib.unique (lib.concatMap expandDependency spec.dependsOn)
+  ) checkedKnownNodeSpecs;
+  cycleFromPath =
+    target: path:
+    let
+      go =
+        remaining:
+        if remaining == [ ] then
+          [ target ]
+        else if builtins.head remaining == target then
+          remaining ++ [ target ]
+        else
+          go (builtins.tail remaining);
+    in
+    go path;
+  detectDependencyCycle =
+    dependencies:
+    let
+      visit =
+        path: name:
+        if builtins.elem name path then
+          cycleFromPath name path
+        else
+          let
+            cycles = lib.filter (cycle: cycle != [ ]) (
+              map (dep: visit (path ++ [ name ]) dep) dependencies.${name}
+            );
+          in
+          if cycles == [ ] then [ ] else builtins.head cycles;
+      cycles = lib.filter (cycle: cycle != [ ]) (
+        map (name: visit [ ] name) (builtins.attrNames dependencies)
+      );
+    in
+    if cycles == [ ] then [ ] else builtins.head cycles;
+  dependencyCycle = detectDependencyCycle expandedDependencies;
+  checkedNodeSpecs =
+    assert lib.assertMsg (dependencyCycle == [ ]) ''
+      fleet nodes contain a dependency cycle:
+        ${lib.concatStringsSep " -> " dependencyCycle}
+    '';
+    checkedKnownNodeSpecs;
 
   nodeConfigs = lib.mapAttrs (
     name: spec:
@@ -233,13 +275,13 @@ let
       inherit (spec) tags;
       inherit (deploy) env;
       inherit (deploy) l7ProxyPorts;
-      dependsOn = lib.concatMap expandDependency spec.dependsOn;
+      dependsOn = expandedDependencies.${name};
       healthChecks = planHealthChecks config;
     }
   ) checkedNodeSpecs;
 
   planValue = {
-    order = builtins.attrNames nodeSpecs;
+    order = builtins.attrNames checkedNodeSpecs;
     nodes = nodePlan;
     inherit secrets;
   };
@@ -288,7 +330,7 @@ in
 
   inherit plan planValue;
   nodes = nodeConfigs;
-  meta = nodeSpecs;
+  meta = checkedNodeSpecs;
   packages = lib.mapAttrs (_: config: config.ix.build.ociImage) nodeConfigs;
   systemPackages = lib.mapAttrs' (
     name: config: lib.nameValuePair "${name}-system" config.system.build.toplevel

@@ -916,6 +916,24 @@ let
       true
   );
 
+  fleetDependencyCycleEval = builtins.tryEval (
+    builtins.deepSeq
+      (ix.mkFleet {
+        nodes = {
+          api = {
+            dependsOn = [ "worker" ];
+            modules = [ { } ];
+          };
+
+          worker = {
+            dependsOn = [ "api" ];
+            modules = [ { } ];
+          };
+        };
+      }).planValue.nodes
+      true
+  );
+
   factionsExample =
     let
       fleet = import ../examples/minecraft/factions {
@@ -2649,6 +2667,10 @@ let
       {
         assertion = !fleetUnknownDependencyEval.success;
         message = "fleet plans should reject unknown dependsOn entries during eval";
+      }
+      {
+        assertion = !fleetDependencyCycleEval.success;
+        message = "fleet plans should reject cyclic dependsOn entries during eval";
       }
       {
         assertion = fleet.planValue.secrets.sessionKey.generate;
