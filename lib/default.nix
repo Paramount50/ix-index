@@ -170,6 +170,13 @@ let
         doCheck = false;
       });
 
+      # TODO: re-enable. openssl's checkPhase runs the full upstream
+      # test suite and is very slow on a from-source znver5 build; skip
+      # it for now to keep image rebuild times reasonable.
+      openssl = prev.openssl.overrideAttrs (_: {
+        doCheck = false;
+      });
+
       # kyua's installCheck runs its own 1443-test suite, and
       # `engine/requirements_test:check_reqs__required_disk_space__fail`
       # hard-codes a 1000.00T threshold that no longer fails on hosts whose
