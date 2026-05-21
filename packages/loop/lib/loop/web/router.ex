@@ -7,8 +7,9 @@ defmodule Loop.Web.Router do
   plug :dispatch
 
   get "/" do
-    send_resp(conn, 200, Loop.Web.Page.render())
+    conn
     |> Plug.Conn.put_resp_header("content-type", "text/html; charset=utf-8")
+    |> send_resp(200, Loop.Web.Page.render())
   end
 
   get "/ws" do
