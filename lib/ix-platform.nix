@@ -3,7 +3,10 @@
 # All images run on EPYC Gen 5 (Turin, Zen 5). The build platform stays
 # generic x86_64-linux so CI can execute build-time tools, while
 # hostPlatform.gcc.arch propagates -march=znver5 -mtune=znver5 to the image
-# closure. No binary cache hits: the target closure builds from source.
+# closure. The upstream nixpkgs cache (generic x86_64) never hits; the
+# repo's own indexable-inc.cachix.org substituter, wired in flake.nix,
+# serves the znver5 closures CI has already built, with from-source as the
+# fallback.
 {
   config,
   lib,

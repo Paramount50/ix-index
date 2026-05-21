@@ -151,7 +151,7 @@ For service failures, check the rendered unit and the live journal inside the VM
 
 ## Overview
 
-Pre-built OCI images for ix VMs, plus composable NixOS modules. All images target AMD EPYC Gen 5 (Turin, Zen 5). The base layer sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` so every package in the closure is compiled with `-march=znver5 -mtune=znver5`. No binary cache hits: everything builds from source.
+Pre-built OCI images for ix VMs, plus composable NixOS modules. All images target AMD EPYC Gen 5 (Turin, Zen 5). The base layer sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` so every package in the closure is compiled with `-march=znver5 -mtune=znver5`. The upstream nixpkgs cache never hits (it ships generic x86_64); the repo's own [`indexable-inc.cachix.org`](https://indexable-inc.cachix.org) substituter, wired in `flake.nix`, holds the znver5-tuned closures CI builds, so contributors usually substitute from there instead of rebuilding from source.
 
 ## How it works
 
@@ -571,7 +571,7 @@ Tracked Nix files must not contain `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSh
 
 All images run on AMD EPYC Gen 5 (Turin, Zen 5). `lib/ix-platform.nix` sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` and `tune = "znver5"`, which propagates `-march=znver5 -mtune=znver5` to every package in the closure. This enables AVX-512, VNNI, and other Zen 5 instructions across the board.
 
-Because the arch differs from the nixpkgs binary cache (generic x86_64), every package builds from source. This is intentional: these images run on known hardware and the build cost is paid once.
+Because the arch differs from the upstream nixpkgs cache (generic x86_64), nothing substitutes from there. Closures come from the repo's own `indexable-inc.cachix.org` substituter (declared in `flake.nix`) when CI has built them, and fall back to from-source builds otherwise. The arch choice is intentional: these images run on known hardware, and CI pays the build cost once on behalf of every contributor.
 
 When adding new modules or packages, do not override compiler flags per-package. The base layer handles it globally. If a package needs arch-specific tuning beyond compiler flags (e.g. PostgreSQL `huge_pages`, JVM `-XX:+UseAVX`), set those in the module.
 
