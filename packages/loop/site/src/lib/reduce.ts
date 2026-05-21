@@ -2,7 +2,7 @@ import {
   parseEvent,
   type CodexEvent,
   type CodexPayload,
-  type LoopEvent
+  type KnownEvent
 } from './schema';
 import type { Iteration, LogLine, Run, Timeline } from './types';
 
@@ -84,11 +84,9 @@ const containerFor = (frame: Frame): Run[] => {
   return frame.orphans;
 };
 
-const applyEvent = (timeline: Timeline, frame: Frame, event: LoopEvent): void => {
+const applyKnown = (timeline: Timeline, frame: Frame, event: KnownEvent): void => {
   const ts = event.ts_ms;
-  const kind = event.kind;
-
-  switch (kind) {
+  switch (event.kind) {
     case 'server':
       if (event.url) timeline.serverUrl = event.url;
       return;
@@ -109,16 +107,15 @@ const applyEvent = (timeline: Timeline, frame: Frame, event: LoopEvent): void =>
     }
 
     case 'iteration-clean':
-    case 'pushed': {
+    case 'pushed':
       if (!frame.iteration) return;
       frame.iteration.status = 'done';
       frame.iteration.finishedAt = ts;
-      frame.iteration.outcome = kind === 'pushed' ? 'pushed' : 'clean';
-      if (kind === 'pushed' && event.path_count !== undefined) {
+      frame.iteration.outcome = event.kind === 'pushed' ? 'pushed' : 'clean';
+      if (event.kind === 'pushed' && event.path_count !== undefined) {
         frame.iteration.pathCount = event.path_count;
       }
       return;
-    }
 
     case 'process-start': {
       const name = event.name ?? 'process';
@@ -172,62 +169,57 @@ const applyEvent = (timeline: Timeline, frame: Frame, event: LoopEvent): void =>
       const owner =
         frame.codexStack.at(-1) ?? frame.byProcess.get(event.name ?? 'process');
       if (!owner) return;
-      const log: LogLine = {
-        ts,
-        stream: event.stream,
-        text: event.text ?? ''
-      };
+      const log: LogLine = { ts, stream: event.stream, text: event.text ?? '' };
       owner.logs.push(log);
       return;
     }
 
-    case 'health-checks-complete':
-      // Not part of an iteration; appended as a one-off below if needed.
-      break;
+    case 'health-checks-complete': {
+      const status = (event.exit_code ?? 0) === 0 ? 'done' : 'failed';
+      const run = newRun(`health:${ts}`, 'health checks', ts);
+      closeRun(run, ts, status, event.exit_code);
+      containerFor(frame).push(run);
+      return;
+    }
+  }
+};
+
+const applyCodex = (frame: Frame, event: CodexEvent): void => {
+  const ts = event.ts_ms;
+  const lifecycle = codexLifecycle(event.kind);
+  const id = codexId(event.event) ?? `${codexBase(event.kind)}:${event.text ?? ''}`;
+  const key = `${codexBase(event.kind)}#${id}`;
+
+  if (lifecycle === 'started') {
+    const { label, detail } = codexLabel(event);
+    const run = newRun(`codex:${key}:${ts}`, label, ts, detail);
+    frame.byCodex.set(key, run);
+    containerFor(frame).push(run);
+    frame.codexStack.push(run);
+    return;
   }
 
-  if (kind.startsWith('codex-')) {
-    const codexEvent = event as CodexEvent;
-    const lifecycle = codexLifecycle(kind);
-    const id = codexId(codexEvent.event) ?? `${codexBase(kind)}:${codexEvent.text ?? ''}`;
-    const key = `${codexBase(kind)}#${id}`;
-
-    if (lifecycle === 'started') {
-      const { label, detail } = codexLabel(codexEvent);
-      const run = newRun(`codex:${key}:${ts}`, label, ts, detail);
-      frame.byCodex.set(key, run);
-      containerFor(frame).push(run);
-      frame.codexStack.push(run);
-      return;
-    }
-
-    if (lifecycle === 'completed' || lifecycle === 'failed') {
-      const run = frame.byCodex.get(key);
-      const finalStatus = lifecycle === 'failed' ? 'failed' : 'done';
-      if (run) {
-        closeRun(run, ts, finalStatus);
-        frame.byCodex.delete(key);
-        const idx = frame.codexStack.lastIndexOf(run);
-        if (idx >= 0) frame.codexStack.splice(idx, 1);
-      } else {
-        const { label, detail } = codexLabel(codexEvent);
-        const oneShot = newRun(`codex:${key}:${ts}`, label, ts, detail);
-        closeRun(oneShot, ts, finalStatus);
-        containerFor(frame).push(oneShot);
-      }
-      return;
-    }
-
-    const owner = frame.codexStack.at(-1);
-    if (owner && codexEvent.text) {
-      owner.logs.push({ ts, stream: 'stdout', text: codexEvent.text });
+  if (lifecycle === 'completed' || lifecycle === 'failed') {
+    const run = frame.byCodex.get(key);
+    const finalStatus = lifecycle === 'failed' ? 'failed' : 'done';
+    if (run) {
+      closeRun(run, ts, finalStatus);
+      frame.byCodex.delete(key);
+      const idx = frame.codexStack.lastIndexOf(run);
+      if (idx >= 0) frame.codexStack.splice(idx, 1);
+    } else {
+      const { label, detail } = codexLabel(event);
+      const oneShot = newRun(`codex:${key}:${ts}`, label, ts, detail);
+      closeRun(oneShot, ts, finalStatus);
+      containerFor(frame).push(oneShot);
     }
     return;
   }
 
-  const fallback = newRun(`event:${kind}:${ts}`, kind, ts);
-  closeRun(fallback, ts, 'done');
-  containerFor(frame).push(fallback);
+  const owner = frame.codexStack.at(-1);
+  if (owner && event.text) {
+    owner.logs.push({ ts, stream: 'stdout', text: event.text });
+  }
 };
 
 export const reduceEvents = (raws: unknown[]): Timeline => {
@@ -240,8 +232,19 @@ export const reduceEvents = (raws: unknown[]): Timeline => {
   };
 
   for (const raw of raws) {
-    const event = parseEvent(raw);
-    if (event) applyEvent(timeline, frame, event);
+    const parsed = parseEvent(raw);
+    if (!parsed) continue;
+    if (parsed.tag === 'known') {
+      applyKnown(timeline, frame, parsed.event);
+    } else if (parsed.tag === 'codex') {
+      applyCodex(frame, parsed.event);
+    } else {
+      const ts = parsed.event.ts_ms;
+      const kind = parsed.event.kind;
+      const run = newRun(`event:${kind}:${ts}`, kind, ts);
+      closeRun(run, ts, 'done');
+      containerFor(frame).push(run);
+    }
   }
 
   return timeline;

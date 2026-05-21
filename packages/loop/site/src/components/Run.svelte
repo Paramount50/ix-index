@@ -22,21 +22,34 @@
 </script>
 
 <div class="run depth-{Math.min(depth, 3)}" data-status={run.status}>
-  <div class="row" role={expandable ? 'button' : undefined} tabindex={expandable ? 0 : -1} onclick={toggle} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && toggle()}>
-    <StatusDot status={run.status} />
-    <span class="label">{run.label}</span>
-    {#if run.detail}
-      <span class="detail">{run.detail}</span>
-    {/if}
-    <span class="spacer"></span>
-    {#if run.exitCode !== undefined && run.exitCode !== 0}
-      <span class="exit">exit {run.exitCode}</span>
-    {/if}
-    <Duration startedAt={run.startedAt} finishedAt={run.finishedAt} />
-    {#if expandable}
+  {#if expandable}
+    <button type="button" class="row" onclick={toggle}>
+      <StatusDot status={run.status} />
+      <span class="label">{run.label}</span>
+      {#if run.detail}
+        <span class="detail">{run.detail}</span>
+      {/if}
+      <span class="spacer"></span>
+      {#if run.exitCode !== undefined && run.exitCode !== 0}
+        <span class="exit">exit {run.exitCode}</span>
+      {/if}
+      <Duration startedAt={run.startedAt} finishedAt={run.finishedAt} />
       <span class="chev" class:open={expanded}>›</span>
-    {/if}
-  </div>
+    </button>
+  {:else}
+    <div class="row">
+      <StatusDot status={run.status} />
+      <span class="label">{run.label}</span>
+      {#if run.detail}
+        <span class="detail">{run.detail}</span>
+      {/if}
+      <span class="spacer"></span>
+      {#if run.exitCode !== undefined && run.exitCode !== 0}
+        <span class="exit">exit {run.exitCode}</span>
+      {/if}
+      <Duration startedAt={run.startedAt} finishedAt={run.finishedAt} />
+    </div>
+  {/if}
 
   {#if expanded}
     {#if hasChildren}
@@ -63,15 +76,25 @@
     align-items: center;
     gap: 10px;
     padding: 6px 0;
-    cursor: default;
+    width: 100%;
     min-width: 0;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font: inherit;
+    text-align: left;
   }
 
-  .row[role='button'] {
+  button.row {
     cursor: pointer;
   }
 
-  .row:focus-visible {
+  button.row:hover .label,
+  button.row:focus-visible .label {
+    color: #fafafa;
+  }
+
+  button.row:focus-visible {
     outline: 1px solid #3f3f46;
     outline-offset: 2px;
     border-radius: 4px;
