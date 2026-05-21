@@ -248,7 +248,8 @@ in
           };
         };
 
-      health-checks = healthChecks;
+      health-checks = healthChecks.dag;
+      health-checks-zellij = healthChecks.zellij;
       inherit lint site;
       bench-filesystem = benchFilesystem;
       update-mods = updateMods;

@@ -1,7 +1,7 @@
 /**
-  Build a `health-checks` app that brings every example fleet up in
-  parallel, verifies the declared `ix.healthChecks` via the existing
-  `ix-fleet up` polling loop, and tears the VMs down on completion.
+  Build the `health-checks` apps that bring every example fleet up in
+  parallel, verify the declared `ix.healthChecks` via the existing
+  `ix-fleet up` polling loop, and tear the VMs down on completion.
 
   Each example contributes a Nushell lifecycle script that sanity-checks
   for the `ix` binary, force-deletes any leftover VM with the same node
@@ -14,13 +14,19 @@
   cannot collide with a production VM that happens to share the example's
   natural name (`nginx`, `factions`, `file-server`, ...).
 
-  The lifecycle scripts are run in parallel by `dag-runner`, the
-  repo-owned task runner. dag-runner reads a JSON spec describing the
-  graph, fans out per-node tokio tasks, surfaces an inline indicatif
-  spinner per task on a TTY (line output otherwise), captures stdout
-  and stderr so failed nodes' logs are dumped at the end, and exits
-  with the worst node exit code. Pass `--output json` to get an
-  NDJSON event stream instead.
+  Returns an attrset with two front-ends over the same lifecycle scripts:
+
+  - `dag`: the default `nix run .#health-checks` entry point. Runs the
+    lifecycles in parallel via `dag-runner`, surfaces an inline indicatif
+    spinner per task on a TTY (line output otherwise), captures stdout
+    and stderr so failed nodes' logs are dumped at the end, and exits
+    with the worst node exit code. Pass `--output json` to get an NDJSON
+    event stream instead. This is the headless/CI path.
+  - `zellij`: the `nix run .#health-checks-zellij` entry point. Launches
+    a zellij session with one tab per example fleet so each lifecycle's
+    output stays in its own scrollback while it runs. No aggregated exit
+    code (zellij exits 0 when the operator quits the session), so reserve
+    this for interactive triage rather than pass/fail gating.
 */
 {
   lib,
@@ -98,14 +104,44 @@ let
   };
 
   specFile = jsonFormat.generate "health-checks-dag.json" spec;
-in
-writeNushellApplication pkgs {
-  name = "health-checks";
-  meta.description = "Boot every example fleet in parallel, run its health checks, and tear the VMs down";
-  runtimeInputs = [ dagRunner ];
-  text = ''
-    def --wrapped main [...args] {
-      exec ${lib.getExe dagRunner} ...$args ${specFile}
+
+  dag = writeNushellApplication pkgs {
+    name = "health-checks";
+    meta.description = "Boot every example fleet in parallel, run its health checks, and tear the VMs down";
+    runtimeInputs = [ dagRunner ];
+    text = ''
+      def --wrapped main [...args] {
+        exec ${lib.getExe dagRunner} ...$args ${specFile}
+      }
+    '';
+  };
+
+  # One zellij tab per lifecycle. Operator switches with Alt+h/l (or the
+  # tab bar) and reads each fleet's scrollback independently. Panes stay
+  # open after their command exits so the post-mortem output is reachable;
+  # quit the session with Ctrl+q.
+  zellijLayout = pkgs.writeText "health-checks-layout.kdl" ''
+    layout {
+    ${lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (name: lifecycle: ''
+        tab name="${name}" {
+          pane name="${name}" command="${lib.getExe lifecycle}"
+        }'') lifecycles
+    )}
     }
   '';
+
+  zellij = writeNushellApplication pkgs {
+    name = "health-checks-zellij";
+    meta.description = "Boot every example fleet, run its health checks, and view each in a zellij tab";
+    runtimeInputs = [ pkgs.zellij ];
+    text = ''
+      def main [] {
+        exec zellij --layout ${zellijLayout}
+      }
+    '';
+  };
+in
+{
+  inherit dag zellij;
 }
