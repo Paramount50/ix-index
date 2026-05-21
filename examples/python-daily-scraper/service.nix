@@ -6,22 +6,24 @@
   ...
 }:
 let
-  dataDir = "/var/lib/daily-scraper";
+  dailyScraper = config._module.args.dailyScraper or { };
+  dataDir = dailyScraper.dataDir or "/var/lib/daily-scraper";
+  s3Settings = dailyScraper.s3 or { };
   scraper = {
-    package = import ./package.nix { inherit ix lib pkgs; };
-    repository = "indexable-inc/index";
-    githubApiUrl = "https://api.github.com";
-    userAgent = "ix-daily-scraper-example/0.1";
-    schedule = "*-*-* 03:17:00 UTC";
-    randomizedDelaySec = "20m";
-    extraArgs = [ ];
-    environment = { };
+    package = dailyScraper.package or (import ./package.nix { inherit ix lib pkgs; });
+    repository = dailyScraper.repository or "indexable-inc/index";
+    githubApiUrl = dailyScraper.githubApiUrl or "https://api.github.com";
+    userAgent = dailyScraper.userAgent or "ix-daily-scraper-example/0.1";
+    schedule = dailyScraper.schedule or "*-*-* 03:17:00 UTC";
+    randomizedDelaySec = dailyScraper.randomizedDelaySec or "20m";
+    extraArgs = dailyScraper.extraArgs or [ ];
+    environment = dailyScraper.environment or { };
     inherit dataDir;
-    outputDir = "${dataDir}/parquet";
+    outputDir = dailyScraper.outputDir or "${dataDir}/parquet";
     s3 = {
-      uri = null;
-      deleteRemoved = false;
-      awsEnvironmentFile = null;
+      uri = s3Settings.uri or null;
+      deleteRemoved = s3Settings.deleteRemoved or false;
+      awsEnvironmentFile = s3Settings.awsEnvironmentFile or null;
     };
   };
 

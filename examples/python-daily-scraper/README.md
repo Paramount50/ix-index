@@ -27,13 +27,17 @@ ix up
 
 ## S3 Output
 
-The example leaves S3 sync disabled. To enable it, set the `scraper.s3` values
-near the top of [`service.nix`](service.nix):
+The example leaves S3 sync disabled. [`service.nix`](service.nix) reads a
+`dailyScraper` module argument, so a fleet can enable S3 without forking the
+service module:
 
 ```nix
-s3 = {
-  uri = "s3://andrew-scraper-output/github";
-  awsEnvironmentFile = "/run/secrets/daily-scraper/aws.env";
+{
+  _module.args.dailyScraper.s3 = {
+    uri = "s3://andrew-scraper-output/github";
+    deleteRemoved = true;
+    awsEnvironmentFile = "/run/secrets/daily-scraper/aws.env";
+  };
 };
 ```
 

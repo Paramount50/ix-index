@@ -72,7 +72,7 @@ in
 
     Then in the service's `config` block, splice
     `ix.languages.java.yourkit.flagsFor pkgs cfg.yourkit` into the
-    JVM args list and `ix.languages.java.yourkit.portClaimFor cfg.yourkit`
+    JVM args list and `ix.languages.java.yourkit.portClaimFor { owner = "foo"; cfg = cfg.yourkit; }`
     into `ix.networking.portClaims`. The submodule already validates
     `listen` and clamps `port` to a `types.port`, so a typo fails at eval.
   */
@@ -90,12 +90,14 @@ in
       };
 
       package = mkOption {
-        type = types.package;
+        type = types.nullOr types.package;
+        default = null;
         defaultText = lib.literalExpression "pkgs.yourkit-java";
         description = ''
-          YourKit installation tree containing `libyjpagent`. Defaults
-          to `pkgs.yourkit-java` from nixpkgs; override to pin a
-          specific build or point at a locally-licensed install.
+          YourKit installation tree containing `libyjpagent`. When
+          unset, `flagsFor` resolves `pkgs.yourkit-java` for the
+          target JVM's package set; override to pin a specific build or
+          point at a locally-licensed install.
         '';
       };
 
@@ -171,7 +173,8 @@ in
   flagsFor =
     pkgs: cfg:
     let
-      libyjpagent = "${cfg.package}/${agentSubdirFor pkgs}";
+      yourkitPackage = if cfg.package == null then pkgs.yourkit-java else cfg.package;
+      libyjpagent = "${yourkitPackage}/${agentSubdirFor pkgs}";
       base = [
         "port=${toString cfg.port}"
       ]
