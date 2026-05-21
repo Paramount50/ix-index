@@ -1,0 +1,70 @@
+{
+  "auto_install_extensions": {
+    "nix": true,
+    "nu": true
+  },
+  "file_types": {
+    "Nu": ["nu"],
+    "JSONC": ["common.json", "*-mods.json"]
+  },
+  "languages": {
+    "Nix": {
+      "language_servers": ["nixd", "!nil"],
+      "formatter": {
+        "external": {
+          "command": "nixfmt",
+          "arguments": []
+        }
+      },
+      "format_on_save": "on"
+    },
+    "Rust": {
+      "formatter": "language_server",
+      "format_on_save": "on"
+    },
+    "Python": {
+      "language_servers": ["basedpyright", "ruff", "..."],
+      "code_actions_on_format": {
+        "source.organizeImports.ruff": true
+      },
+      "formatter": {
+        "language_server": {
+          "name": "ruff"
+        }
+      },
+      "format_on_save": "on"
+    },
+    "Nu": {
+      "language_servers": ["nu", "..."]
+    }
+  },
+  "lsp": {
+    "nixd": {
+      "initialization_options": {
+        "formatting": {
+          "command": ["nixfmt"]
+        }
+      }
+    },
+    "basedpyright": {
+      "settings": {
+        "basedpyright.analysis": {
+          "typeCheckingMode": "standard"
+        }
+      }
+    },
+    "rust-analyzer": {
+      "initialization_options": {
+        "check": {
+          "command": "clippy"
+        },
+        "linkedProjects": [
+          "packages/oci-image-builder/Cargo.toml",
+          "packages/nix-cargo-unit/Cargo.toml",
+          "modules/services/resource-monitor/stats-writer/Cargo.toml",
+          "tests/fixtures/cargo-unit-hello/Cargo.toml"
+        ]
+      }
+    }
+  }
+}
