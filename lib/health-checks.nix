@@ -154,10 +154,15 @@ let
     layout {
       tab name="health-checks" {
     ${lib.concatStringsSep "\n" (
-      map (name: ''
-        pane name="${name}" command="nix" {
-          args "run" ".#health-check-${name}"
-        }'') exampleNames
+      map (
+        name:
+        let
+          lifecycle = lifecycles.${name};
+        in
+        ''
+          pane name="${name}" command="${lib.getExe lifecycle}"
+        ''
+      ) exampleNames
     )}
       }
     }
