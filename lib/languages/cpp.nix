@@ -54,9 +54,9 @@ in
     Arguments:
     - `pkgs`: nixpkgs instance the compiler comes from.
     - `vendor`: required, `"gcc" | "clang"`. Pick `"gcc"` to match the
-      repo's znver5-tuned base layer (saves a second C++ stdlib in the
-      closure); pick `"clang"` when an upstream needs libc++ or
-      AddressSanitizer features clang ships ahead of.
+      platform default (saves a second C++ stdlib in the closure); pick
+      `"clang"` when an upstream needs libc++ or AddressSanitizer features
+      clang ships ahead of.
     - `version`: required, `"latest"` or a vendor-specific major. gcc
       covers 9-15, clang covers 16-22.
 

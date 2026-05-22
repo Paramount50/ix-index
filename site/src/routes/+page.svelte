@@ -2,7 +2,7 @@
   <title>ix images</title>
   <meta
     name="description"
-    content="Pre-built znver5 OCI images and composable NixOS modules for ix VMs."
+    content="Pre-built OCI images and composable NixOS modules for ix VMs."
   />
 </svelte:head>
 
@@ -10,9 +10,8 @@
 
 <p>
   Pre-built OCI images and composable NixOS modules for
-  <a href="https://ix.dev">ix VMs</a>. Every image targets AMD EPYC Gen 5 (Zen 5)
-  and ships with system tools, language toolchains, and service modules ready to
-  enable.
+  <a href="https://ix.dev">ix VMs</a>. Every image targets x86_64 Linux and ships
+  with system tools, language toolchains, and service modules ready to enable.
 </p>
 
 <h2>Repository</h2>

@@ -151,7 +151,7 @@ let
     instead so they don't leak into the nixpkgs namespace inside images.
   */
   overlay =
-    final: prev:
+    final: _prev:
     let
       ixForOverlay = {
         buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
@@ -160,13 +160,6 @@ let
         pkgs = final;
         ix = ixForOverlay;
       };
-      # The znver5 host platform forces every package in the closure to
-      # build from source, which is where the four overrides below earn
-      # their keep. Applied unconditionally they also invalidate the host
-      # pkgs on a developer's darwin or generic-linux machine, so
-      # `nix run .#lint` ends up rebuilding GHC for nixfmt instead of
-      # substituting from cache.nixos.org. Gate on the actual reason.
-      znver5 = prev.stdenv.hostPlatform.gcc.arch or null == "znver5";
     in
     {
       drgn = final.callPackage paths.packages.drgn { };
@@ -176,53 +169,6 @@ let
         writePythonApplication = writePythonApplication final;
       };
       oci-image-builder = checkedOciImageBuilder.passthru.unchecked or checkedOciImageBuilder;
-    }
-    // lib.optionalAttrs znver5 {
-      # GitHub's x86_64 runners cannot execute znver5-tuned zlib test
-      # binaries, but CI has to build the same znver5 closures images use.
-      zlib = prev.zlib.overrideAttrs (_: {
-        doCheck = false;
-      });
-
-      # TODO: re-enable. openssl's checkPhase runs the full upstream
-      # test suite and is very slow on a from-source znver5 build; skip
-      # it for now to keep image rebuild times reasonable.
-      openssl = prev.openssl.overrideAttrs (_: {
-        doCheck = false;
-      });
-
-      # kyua's installCheck runs its own 1443-test suite, and
-      # `engine/requirements_test:check_reqs__required_disk_space__fail`
-      # hard-codes a 1000.00T threshold that no longer fails on hosts whose
-      # build sandbox sees more than that much free space (APFS containers,
-      # the >1 PiB autoscaling disks ix VMs sit on, large ZFS pools on the
-      # remote linux builder). When statvfs reports the requirement is
-      # satisfied, kyua prints nothing and the regex assertion in the test
-      # body sees the empty string. kyua is only used here transitively as a
-      # check-time tool for atf and libiconv; skip its self-test rather than
-      # patching out a single upstream assertion that will drift.
-      kyua = prev.kyua.overrideAttrs (_: {
-        doInstallCheck = false;
-      });
-
-      # libtpms 0.10.2 + GCC 15.2 (the znver5-tuned compiler the platform
-      # produces) fails the build with `-Werror=stringop-overflow` on a
-      # CryptCmac.c buffer access GCC can't statically prove safe. Upstream
-      # PR stefanberger/libtpms#478 silenced an earlier related warning by
-      # adding asserts, but GCC 15 finds a new false-positive site that the
-      # current 0.10.2 release does not cover. No public bug exists for the
-      # exact GCC 15.2 + libtpms 0.10.2 failure (checked upstream issues and
-      # nixpkgs issues). Demote the warning back to a warning so the build
-      # completes; remove this override when libtpms bumps past 0.10.2 with
-      # the upstream fix or when nixpkgs' libtpms drops `-Werror`.
-      libtpms = prev.libtpms.overrideAttrs (oldAttrs: {
-        env = (oldAttrs.env or { }) // {
-          NIX_CFLAGS_COMPILE = toString [
-            ((oldAttrs.env or { }).NIX_CFLAGS_COMPILE or "")
-            "-Wno-error=stringop-overflow"
-          ];
-        };
-      });
     };
   overlays = [ overlay ];
 

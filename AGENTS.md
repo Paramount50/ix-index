@@ -151,7 +151,7 @@ For service failures, check the rendered unit and the live journal inside the VM
 
 ## Overview
 
-Pre-built OCI images for ix VMs, plus composable NixOS modules. All images target AMD EPYC Gen 5 (Turin, Zen 5). The base layer sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` so every package in the closure is compiled with `-march=znver5 -mtune=znver5`. The upstream nixpkgs cache never hits (it ships generic x86_64); the repo's own [`indexable-inc.cachix.org`](https://indexable-inc.cachix.org) substituter, wired in `flake.nix`, holds the znver5-tuned closures CI builds, so contributors usually substitute from there instead of rebuilding from source.
+Pre-built OCI images for ix VMs, plus composable NixOS modules. All images target x86_64 Linux. Generic nixpkgs paths substitute from the upstream cache, while the repo's own [`indexable-inc.cachix.org`](https://indexable-inc.cachix.org) substituter, wired in `flake.nix`, holds image closures and repo-owned tools CI has already built.
 
 ## How it works
 
@@ -219,7 +219,7 @@ flake.nix                                  # manifest: inputs + delegated output
 lib/
   default.nix                              # mkImage, discoverImages, ix.artifacts, helpers
   per-system.nix                           # per-system packages / checks / formatter
-  ix-platform.nix                          # target platform: EPYC Gen 5 (znver5), container mode
+  ix-platform.nix                          # target platform: x86_64 Linux, container mode
   ix-oci-layer.nix                         # OCI packaging, base profile
   minecraft-loader.nix                     # helper used by loader modules
   build-oci-image.sh                       # direct OCI archive builder
@@ -303,7 +303,7 @@ Drop the file at `modules/services/<name>.nix` (or `modules/profiles/<name>.nix`
 
 ## Adding a platform-wide default
 
-Settings that should apply to every image without per-image opt-in have two homes. System-level posture (nftables, firewall, journald caps, `nix.settings`, `programs.nix-ld`, `systemd.coredump`, gc policy, znver5 host platform) lives in [`lib/ix-platform.nix`](lib/ix-platform.nix). The auto-enabled CLI baseline (debugging tools, source-switch utilities such as `gnutar`/`zstd`/`gzip`, the workspace shell wrapper, system-wide Nushell config) lives in [`modules/profiles/base/`](modules/profiles/base/), which [`lib/ix-oci-layer.nix`](lib/ix-oci-layer.nix) turns on for every image. Touch the platform module for system posture and the base profile for CLI ergonomics. Use `lib.mkDefault` on anything an unusual image might legitimately need to override, so that opt-out stays a one-liner.
+Settings that should apply to every image without per-image opt-in have two homes. System-level posture (nftables, firewall, journald caps, `nix.settings`, `programs.nix-ld`, `systemd.coredump`, gc policy, host platform) lives in [`lib/ix-platform.nix`](lib/ix-platform.nix). The auto-enabled CLI baseline (debugging tools, source-switch utilities such as `gnutar`/`zstd`/`gzip`, the workspace shell wrapper, system-wide Nushell config) lives in [`modules/profiles/base/`](modules/profiles/base/), which [`lib/ix-oci-layer.nix`](lib/ix-oci-layer.nix) turns on for every image. Touch the platform module for system posture and the base profile for CLI ergonomics. Use `lib.mkDefault` on anything an unusual image might legitimately need to override, so that opt-out stays a one-liner.
 
 Home Manager is used in this repo, but only in its NixOS-module form (`home-manager.nixosModules.home-manager`), not as a standalone workflow with `home-manager switch`. Operators connect as root, so there is no per-user dotfile divergence to manage; the reason HM is here is shell-tool integration. Tools like Nushell, atuin, zoxide, and starship expect XDG-shaped per-user config (`~/.config/<tool>/`), and their NixOS modules (where they exist) auto-wire init for bash/zsh/fish but rarely for Nushell. Hand-rolling `environment.etc` + `systemd.tmpfiles` symlinks for each tool compounds quickly; HM speaks XDG natively and exposes `programs.<tool>.enableNushellIntegration = true` across the ecosystem, which keeps the per-tool wiring a one-liner. Configure root's tooling through `home-manager.users.root.programs.<tool>`; reach for plain NixOS `programs.<tool>` when the tool is system-wide (sshd, sudo, nix-ld) or when its NixOS wrapper bakes the config into the binary so `~/.config/<tool>/` is just an XDG fallback the operator may use for overrides (`programs.neovim` is the current case: the wrapped `nvim` binary already loads its plugins, `customLuaRC`, and runtime files without anything in the home directory).
 
@@ -569,11 +569,9 @@ Tracked Nix files must not contain `lib.fakeHash`, `lib.fakeSha256`, `lib.fakeSh
 
 ## Target platform
 
-All images run on AMD EPYC Gen 5 (Turin, Zen 5). `lib/ix-platform.nix` sets `nixpkgs.hostPlatform.gcc.arch = "znver5"` and `tune = "znver5"`, which propagates `-march=znver5 -mtune=znver5` to every package in the closure. This enables AVX-512, VNNI, and other Zen 5 instructions across the board.
+All images target x86_64 Linux. `lib/ix-platform.nix` sets `nixpkgs.hostPlatform.system = "x86_64-linux"` and leaves compiler microarchitecture flags to nixpkgs defaults, so generic packages can substitute from cache.nixos.org.
 
-Because the arch differs from the upstream nixpkgs cache (generic x86_64), nothing substitutes from there. Closures come from the repo's own `indexable-inc.cachix.org` substituter (declared in `flake.nix`) when CI has built them, and fall back to from-source builds otherwise. The arch choice is intentional: these images run on known hardware, and CI pays the build cost once on behalf of every contributor.
-
-When adding new modules or packages, do not override compiler flags per-package. The base layer handles it globally. If a package needs arch-specific tuning beyond compiler flags (e.g. PostgreSQL `huge_pages`, JVM `-XX:+UseAVX`), set those in the module.
+Closures also use the repo's own `indexable-inc.cachix.org` substituter (declared in `flake.nix`) when CI has built image paths or repo-owned tools. If a package needs service-specific hardware tuning (for example PostgreSQL `huge_pages` or JVM `-XX:+UseAVX`), set that in the module where the operator can see the tradeoff.
 
 ## Nix philosophy
 

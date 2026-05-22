@@ -1,10 +1,4 @@
-# Target platform applied to every image.
-#
-# All images run on EPYC Gen 5 (Turin, Zen 5). Setting hostPlatform.gcc.arch
-# propagates -march=znver5 -mtune=znver5 to the image closure. The upstream
-# nixpkgs cache is generic x86_64 and never has a hit; the repo's own
-# indexable-inc.cachix.org substituter, wired in flake.nix, serves the znver5
-# closures CI has already built, with from-source as the fallback.
+# Baseline platform applied to every image.
 {
   config,
   lib,
@@ -231,13 +225,7 @@ in
       }
     ];
 
-    nixpkgs.hostPlatform = {
-      system = "x86_64-linux";
-      gcc = {
-        arch = "znver5";
-        tune = "znver5";
-      };
-    };
+    nixpkgs.hostPlatform.system = "x86_64-linux";
 
     # YourKit is the only unfree we currently allow into images, and only
     # because `ix.languages.java.yourkit` is an opt-in profiler agent that

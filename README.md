@@ -12,7 +12,7 @@
 # Index
 
 `index` builds ready-to-run VM images from NixOS modules. Every image targets
-AMD EPYC Gen 5 (`znver5`) and ships as an OCI archive.
+x86_64 Linux and ships as an OCI archive.
 
 Use it for runnable images and reusable service modules.
 
@@ -23,8 +23,9 @@ nix build .#minecraft
 nix run .#lint
 ```
 
-The first image build is slow because the full closure compiles from source for
-`znver5`. Later rebuilds reuse the local Nix store.
+The first image build may be slow while Nix realizes the image closure. Later
+rebuilds reuse cached store paths from the local Nix store and configured
+substituters.
 
 ## What Is Here
 
@@ -38,9 +39,8 @@ The first image build is slow because the full closure compiles from source for
 
 ## Bad Fit If
 
-You need generic x86_64 binaries, aarch64 images, or FreeBSD. This repo chooses
-`-march=znver5` for the whole closure, so generic [nixpkgs](https://github.com/NixOS/nixpkgs)
-cache hits are intentionally out of scope.
+You need aarch64 images, FreeBSD, or a sealed appliance with almost no operator
+tooling. This repo is tuned for ix VM workflows on x86_64 Linux.
 
 ## Feedback
 
