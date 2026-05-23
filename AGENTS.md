@@ -24,6 +24,12 @@ This repo does not need nixpkgs-style moving channels. One reviewed trunk keeps 
 
 When a commit actually fixes a tracked GitHub issue, include an auto-closing keyword in the commit body, for example `Fixes #123`, `Closes #123`, or `Resolves #123`. Use `Refs #123` only for related work, policy docs, investigation, or partial cleanup that should not close the issue.
 
+## Site updates
+
+Public site news lives in [`site/src/lib/updates.ts`](site/src/lib/updates.ts) and renders on the GitHub Pages Svelte app in [`site/`](site/). When a change has operator-facing behavior worth announcing, add one compact entry in the same commit. Keep the first sentence useful as audio. Put exact links near the detail.
+
+The site is static, so audio uses the browser [Web Speech API](https://developer.mozilla.org/docs/Web/API/SpeechSynthesis) at runtime. Add build-time MP3 or RSS generation only when there is a named consumer that needs downloadable podcast files.
+
 ## Writing style
 
 These rules apply to prose in docs, READMEs, comments, issues, and PR descriptions.
