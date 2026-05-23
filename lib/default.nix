@@ -6,6 +6,7 @@
   rust-overlay,
   determinate,
   home-manager,
+  hermes-agent,
   cliArtifacts ? { },
 }:
 let
@@ -1019,6 +1020,15 @@ let
       writeNushellApplication
       writePythonApplication
       ;
+
+    /**
+      Nous Research's Hermes agent flake. Examples consume
+      `index.lib.hermesAgent.nixosModules.default` to add the
+      `services.hermes-agent.*` option surface to an image, plus
+      `index.lib.hermesAgent.overlays.default` if they want the
+      `hermes-agent` package available at module-eval time.
+    */
+    hermesAgent = hermes-agent;
   };
 in
 ixReturn

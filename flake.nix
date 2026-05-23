@@ -30,6 +30,17 @@
       url = "github:nix-community/home-manager";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Nous Research's Hermes agent ships its own NixOS module
+    # (`nixosModules.default`) and uv2nix-built Python closure. Pinned to
+    # a release tag so routine bumps are review events; `nix flake update
+    # hermes-agent` after bumping the tag is the supported intake path.
+    # Surfaced through `ix.hermesAgent` and consumed by
+    # `examples/hermes-agent/`.
+    hermes-agent = {
+      url = "github:NousResearch/hermes-agent/v2026.5.16";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
@@ -38,6 +49,7 @@
       rust-overlay,
       determinate,
       home-manager,
+      hermes-agent,
       ...
     }:
     let
@@ -92,6 +104,7 @@
           rust-overlay
           determinate
           home-manager
+          hermes-agent
           ;
       };
       devSystems = [
