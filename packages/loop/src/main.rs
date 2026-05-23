@@ -294,6 +294,8 @@ async fn codex_argv(args: &LoopArgs, prompt: &str) -> Result<Vec<String>> {
     let mut command_args = vec![
         "exec".to_owned(),
         "--json".to_owned(),
+        "--enable".to_owned(),
+        "goals".to_owned(),
         "--cd".to_owned(),
         ".".to_owned(),
         "-c".to_owned(),
@@ -320,8 +322,27 @@ async fn codex_argv(args: &LoopArgs, prompt: &str) -> Result<Vec<String>> {
         command_args.push("--dangerously-bypass-approvals-and-sandbox".to_owned());
     }
 
-    command_args.push(prompt.to_owned());
+    command_args.push(codex_goal_prompt(prompt));
     Ok(command_args)
+}
+
+fn codex_goal_prompt(prompt: &str) -> String {
+    format!(
+        "\
+Run this task as a Codex goal-backed non-interactive task.
+
+Before doing substantive work:
+1. Call create_goal with a concise objective derived from the task below.
+2. Call get_goal.
+3. If get_goal returns no active goal, print GOAL_NOT_CREATED and stop.
+4. If get_goal shows an active goal, continue working toward that goal.
+
+Use the goal tools directly. Do not write a /goal command as prose.
+Before the final answer, call update_goal(status=\"complete\") only when the objective is achieved and no required work remains.
+
+Task:
+{prompt}"
+    )
 }
 
 async fn run_health_node(state: AppState, name: String, command: Vec<String>) -> Result<i32> {
@@ -529,10 +550,9 @@ impl CodexJsonEvent {
                     .iter()
                     .filter_map(|entry| match entry {
                         Value::String(text) => Some(text.clone()),
-                        Value::Object(map) => map
-                            .get("text")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned),
+                        Value::Object(map) => {
+                            map.get("text").and_then(Value::as_str).map(str::to_owned)
+                        }
                         _ => None,
                     })
                     .filter(|value| !value.is_empty())
@@ -798,4 +818,20 @@ fn hostname_from_env() -> Option<String> {
 
 fn now_ms() -> Result<u128> {
     Ok(SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn codex_goal_prompt_requests_goal_tools_without_replacing_task() {
+        let wrapped = codex_goal_prompt("fix the loop package");
+
+        assert!(wrapped.contains("Call create_goal"));
+        assert!(wrapped.contains("Call get_goal"));
+        assert!(wrapped.contains("GOAL_NOT_CREATED"));
+        assert!(wrapped.contains("update_goal(status=\"complete\")"));
+        assert!(wrapped.contains("fix the loop package"));
+    }
 }

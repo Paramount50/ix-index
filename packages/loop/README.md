@@ -7,7 +7,10 @@ a browser to watch progress.
 The runner is Rust. It stores run events in a Loro CRDT document and serves
 a Svelte viewer at <http://localhost:7878>. `codex exec` subprocesses get
 stdin from `/dev/null`, which avoids the upstream prompt-plus-stdin hang when
-the parent process has an open pipe.
+the parent process has an open pipe. Codex runs also pass `--enable goals`.
+Since `codex exec` does not have a first-class `--goal` flag, loop wraps the
+task prompt with explicit `create_goal`, `get_goal`, and `update_goal`
+instructions so each subprocess verifies an active goal before it starts work.
 
 ## Run
 
