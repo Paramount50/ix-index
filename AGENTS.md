@@ -28,7 +28,11 @@ When a commit actually fixes a tracked GitHub issue, include an auto-closing key
 
 Public site news lives in [`site/src/lib/updates.ts`](site/src/lib/updates.ts) and renders on the GitHub Pages Svelte app in [`site/`](site/). When a change has operator-facing behavior worth announcing, add one compact entry in the same commit. Keep the first sentence useful as audio. Put exact links near the detail.
 
-The site is static, so audio uses the browser [Web Speech API](https://developer.mozilla.org/docs/Web/API/SpeechSynthesis) at runtime. Add build-time MP3 or RSS generation only when there is a named consumer that needs downloadable podcast files.
+Publish text updates as a normal RSS or Atom feed before adding paid audio infrastructure. [ElevenReader](https://help.elevenlabs.io/hc/en-us/articles/26197672002833-What-is-ElevenReader) can narrate imported articles and documents with ElevenLabs voices, but treat it as a reader-side consumption path because the public repo has no official ElevenReader build target to push into. A text feed gives RSS users, read-later apps, browser extensions, and ElevenReader imports one stable surface.
+
+Podcast RSS is a separate artifact. [RSS 2.0](https://www.rssboard.org/rss-specification) podcast clients consume media through `<enclosure>` URLs such as `audio/mpeg`, and [Apple Podcasts](https://podcasters.apple.com/support/825-how-to-create-an-episode) expects an episode to point at an audio or video file. If the site grows a podcast feed, generate real MP3 or M4A files first, then emit enclosures that reference those files.
+
+Keep `nix build .#site` pure: it reads checked-in text and static assets without API keys or paid TTS side effects. Network calls belong in an explicit command or GitHub Actions step with a secret such as `ELEVENLABS_API_KEY`; that step writes static audio assets for the site build to package.
 
 ## Writing style
 
