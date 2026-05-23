@@ -37,6 +37,8 @@ export const siteUpdates: SiteUpdate[] = [
   }
 ];
 
+export const siteUrl = 'https://indexable-inc.github.io/index/';
+export const siteFeedUrl = `${siteUrl}feed.xml`;
 export const siteIntro =
   'ix images publishes pre-built OCI images and composable NixOS modules for ix VMs.';
 

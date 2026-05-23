@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { resolve } from '$app/paths';
   import { onMount } from 'svelte';
-  import { feedScript, siteIntro, siteUpdates, updateScript } from '$lib/updates';
+  import { feedScript, siteFeedUrl, siteIntro, siteUpdates, updateScript } from '$lib/updates';
 
   type SpeechState = 'loading' | 'idle' | 'speaking' | 'paused' | 'unsupported' | 'error';
 
@@ -11,6 +12,7 @@
     timeZone: 'UTC'
   });
 
+  const feedHref = resolve('/feed.xml');
   const latestUpdate = siteUpdates[0];
 
   let selectedId = $state(latestUpdate.id);
@@ -169,6 +171,7 @@
     name="description"
     content="Pre-built OCI images and composable NixOS modules for ix VMs, with browser-read project updates."
   />
+  <link rel="alternate" type="application/rss+xml" title="ix images updates" href={siteFeedUrl} />
 </svelte:head>
 
 <main>
@@ -182,6 +185,7 @@
     <div class="hero-links" aria-label="Primary links">
       <a href="https://github.com/indexable-inc/index">Repository</a>
       <a href="https://ix.dev">ix VMs</a>
+      <a href={feedHref}>RSS feed</a>
     </div>
   </section>
 
@@ -228,7 +232,7 @@
     </p>
   </section>
 
-  <section class="updates" aria-labelledby="updates-title">
+  <section id={selectedUpdate.id} class="updates" aria-labelledby="updates-title">
     <div class="section-heading">
       <p class="eyebrow">News</p>
       <h2 id="updates-title">Small update entries</h2>
