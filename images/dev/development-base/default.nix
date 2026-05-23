@@ -23,6 +23,14 @@
       claude-code
       codex
 
+      # Browser automation for agents. `agent-browser` (vercel-labs) is the
+      # CLI surface; `chromium` is the actual browser it drives. agent-browser
+      # auto-detects a Chromium binary on PATH so no extra wiring is needed.
+      # Kept local-only (no Browserbase / cloud provider) so sandboxes work
+      # offline and don't need outbound API keys.
+      agent-browser
+      chromium
+
       # Build toolchain. Most ecosystems lean on cmake / make / ninja and
       # pkg-config; rustup keeps the toolchain pinnable per-project rather
       # than locking the image to one rustc.
