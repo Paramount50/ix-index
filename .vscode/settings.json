@@ -44,21 +44,7 @@
   "rust-analyzer.diagnostics.experimental.enable": true,
   "nix.serverSettings": {
     "nixd": {
-      "formatting": { "command": ["nixfmt"] },
-      "options": {
-        "nix-darwin": {
-          "expr": "(builtins.getFlake \"/Users/andrewgazelka/.config/nix\").darwinConfigurations.hydra.options"
-        },
-        "home-manager": {
-          "expr": "(builtins.getFlake \"/Users/andrewgazelka/.config/nix\").darwinConfigurations.hydra.options.home-manager.users.type.getSubOptions []"
-        },
-        "nixpkgs": {
-          "expr": "import (builtins.getFlake \"/Users/andrewgazelka/Projects/indexable-inc/index\").inputs.nixpkgs { system = \"x86_64-linux\"; }"
-        },
-        "ix-image": {
-          "expr": "let f = builtins.getFlake \"/Users/andrewgazelka/Projects/indexable-inc/index\"; pkgs = f.inputs.nixpkgs.legacyPackages.x86_64-linux; in (pkgs.lib.evalModules { specialArgs.ix = f.lib; modules = (builtins.attrValues f.nixosModules) ++ [ { _module.check = false; nixpkgs.hostPlatform = \"x86_64-linux\"; } ]; }).options"
-        }
-      }
+      "formatting": { "command": ["nixfmt"] }
     }
   },
   "search.exclude": {
