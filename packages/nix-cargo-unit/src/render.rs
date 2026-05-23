@@ -2041,17 +2041,34 @@ fn render_test_target_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> St
     let keys = compute_test_keys(graph, prepared);
     let mut by_key: BTreeMap<String, String> = BTreeMap::new();
     for (&index, key) in &keys {
-        by_key
-            .entry(key.clone())
-            .or_insert_with(|| test_binary_expr(&graph.units[index], prepared, index));
+        let unit = &graph.units[index];
+        if by_key.contains_key(key) {
+            continue;
+        }
+        let source = prepared
+            .source_entry(index)
+            .expect("prepared graph has source entries for every test target");
+        let package_root = if source.relative.is_empty() {
+            "."
+        } else {
+            source.relative.as_str()
+        };
+        by_key.insert(
+            key.clone(),
+            format!(
+                "{{ name = {}; binary = {}; packageName = {}; packageVersion = {}; packageRoot = {}; sourceStoreName = {}; }}",
+                nix_attr(key),
+                nix_attr(&test_binary_expr(unit, prepared, index)),
+                nix_attr(&unit.package_name()),
+                nix_attr(unit.package_version()),
+                nix_attr(package_root),
+                nix_attr(&source.name),
+            ),
+        );
     }
     let mut entries = String::new();
-    for (key, binary) in by_key {
-        let _ = writeln!(
-            entries,
-            "    {{ name = {}; binary = \"{binary}\"; }}",
-            nix_attr(&key),
-        );
+    for (_key, target) in by_key {
+        let _ = writeln!(entries, "    {target}");
     }
     entries
 }
@@ -2231,6 +2248,11 @@ mod tests {
         assert!(rendered.contains("mkTestCases ="));
         assert!(rendered.contains("testTargets = ["));
         assert!(rendered.contains("{ name = \"hello\"; binary ="));
+        assert!(rendered.contains("packageName = \"hello\";"));
+        assert!(rendered.contains("packageRoot = \".\";"));
+        assert!(rendered.contains("sourceStoreName = \"cargo-unit-source-hello-0.1.0-"));
+        assert!(rendered.contains("testPlan = mkTestPlan \"cargo-unit-test-plan\";"));
+        assert!(rendered.contains("source-roots.tsv"));
         assert!(rendered.contains("testManifestDrv ="));
         assert!(rendered.contains("cargo-unit-test-manifest"));
     }

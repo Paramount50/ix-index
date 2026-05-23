@@ -108,6 +108,41 @@ let
   testTargets = [
 {{ test_target_entries }}  ];
 
+  mkTestPlan = name:
+    pkgs.runCommand name
+      {
+        __structuredAttrs = true;
+        strictDeps = true;
+        nativeBuildInputs = [ pkgs.coreutils ];
+      }
+      (
+        ''
+          set -euo pipefail
+
+          mkdir -p "$out/packages"
+          : > "$out/source-roots.tsv"
+        ''
+        + pkgs.lib.concatMapStrings (target: ''
+          package_dir="$out/packages"/${pkgs.lib.escapeShellArg target.packageName}
+          mkdir -p "$package_dir"
+          printf '%s\n' ${pkgs.lib.escapeShellArg target.packageRoot} > "$package_dir/package-root"
+          printf '%s\t%s\n' \
+            ${pkgs.lib.escapeShellArg target.sourceStoreName} \
+            ${pkgs.lib.escapeShellArg target.packageRoot} \
+            >> "$out/source-roots.tsv"
+          test_binary="$(readlink -f ${pkgs.lib.escapeShellArg target.binary})"
+          if [ ! -x "$test_binary" ]; then
+            echo >&2 "error: cargo-unit test binary is missing or not executable: $test_binary"
+            exit 1
+          fi
+          printf '%s\n' "$test_binary" >> "$package_dir/test-binaries"
+        '') testTargets
+        + ''
+          find "$out/packages" -name test-binaries -type f -exec sort -u -o '{}' '{}' ';'
+          sort -u -o "$out/source-roots.tsv" "$out/source-roots.tsv"
+        ''
+      );
+
   # `<bin> --list --format terse` writes one `name: test` or `name: bench`
   # line per item plus a trailing summary line. Keep the `: test` lines and
   # strip the suffix.
@@ -197,6 +232,7 @@ let
 in
 {
   inherit policyChecks sourceAudit units;
+  testPlan = mkTestPlan "cargo-unit-test-plan";
   roots = [ {{ roots }} ];
   checkedRoots = [ {{ checked_roots }} ];
   packages = {

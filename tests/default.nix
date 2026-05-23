@@ -2396,6 +2396,10 @@ let
         message = "cargo-unit workspaces should expose test targets as separate checks";
       }
       {
+        assertion = cargoUnitWorkspace ? testPlan;
+        message = "cargo-unit workspaces should expose a reusable test plan";
+      }
+      {
         assertion =
           cargoUnitWorkspace.targetSets.build.binaries.cargo-unit-hello.drvPath
           == cargoUnitWorkspace.binaries.cargo-unit-hello.drvPath;
@@ -2903,6 +2907,10 @@ let
     grep -q 'goodbye from cargo-unit' cargo-unit-goodbye.out
     test -d ${cargoUnitWorkspace.targetSets.test.tests.cargo_unit_hello.all}
     test -d ${cargoUnitWorkspace.targetSets.test.tests.cargo_unit_hello.cases."tests::returns_greeting"}
+    test -s ${cargoUnitWorkspace.testPlan}/packages/cargo-unit-hello/test-binaries
+    grep -q '/bin/cargo_unit_hello$' ${cargoUnitWorkspace.testPlan}/packages/cargo-unit-hello/test-binaries
+    grep -qx '.' ${cargoUnitWorkspace.testPlan}/packages/cargo-unit-hello/package-root
+    grep -q '^cargo-unit-source-cargo-unit-hello-0.1.0-.*	[.]$' ${cargoUnitWorkspace.testPlan}/source-roots.tsv
 
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
     test -d ${bunSite.bunNodeModules}/node_modules/clsx
