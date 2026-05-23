@@ -21,6 +21,43 @@ nix develop .#minestom-hello-server-jar   # gives gradle + JDK 25
 nix develop nixpkgs#nixfmt                # nixfmt + its deps
 ```
 
+## Cargo Unit Benchmarks
+
+[`ix.cargoUnit.buildWorkspace`](lib/cargo-unit.nix) exposes Cargo `[[bench]]`
+roots under `benchmarks` when a target set includes `--benches` or a specific
+`--bench <name>`. Tango benches work as Nix artifacts, including the usual
+Linux/macOS `cargo:rustc-link-arg-benches=-rdynamic` build-script line.
+
+```nix
+let
+  previous = ix.cargoUnit.buildWorkspace {
+    src = previousSrc;
+    workspaceRoot = previousSrc;
+    cargoArgs = [ "--workspace" "--benches" ];
+  };
+  next = ix.cargoUnit.buildWorkspace {
+    src = nextSrc;
+    workspaceRoot = nextSrc;
+    cargoArgs = [ "--workspace" "--benches" ];
+  };
+in
+next.compareTangoBenchmarks {
+  baseline = previous;
+  args = [
+    "--time"
+    "1"
+    "--fail-threshold"
+    "5"
+    "--fail-fast"
+  ];
+}
+```
+
+The comparison runs each matching candidate benchmark binary with `compare`
+against the previous workspace's `benchmarkPlan`. It fails on Tango's significant
+regression signal and writes one log per benchmark under `$out/logs`; tune the
+threshold with Tango's `--fail-threshold` flag.
+
 ## Coding standards
 
 The full style guide lives in [AGENTS.md](AGENTS.md). Skim the section that matches what you're touching:

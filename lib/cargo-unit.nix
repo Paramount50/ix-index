@@ -232,9 +232,13 @@ let
     Rendering fails when a unit path cannot be tied back to `src` or `vendorDir`.
     Pass `cargoTargets = [ [ "--workspace" ] [ "--workspace" "--tests" ] ]`
     to expose roots from several Cargo executions through one generated graph.
+    Include `--benches` or `--bench <name>` to expose `[[bench]]` roots under
+    `benchmarks` and `benchmarkPlan`. Tango benches can compare previous and
+    next artifacts with `next.compareTangoBenchmarks { baseline = previous; }`,
+    where `previous` is another generated workspace or a `benchmarkPlan` path.
 
     Returns the generated attrset with `sourceAudit`, `units`, `roots`, `checkedRoots`,
-    `packages`, `binaries`, `libraries`, `default`, `policyChecks`, plus the
+    `packages`, `binaries`, `libraries`, `benchmarks`, `default`, `policyChecks`, plus the
     intermediate `unitGraphJson`, `unitsNix`, and `vendorDir` derivations for
     inspection.
   */

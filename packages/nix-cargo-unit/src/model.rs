@@ -578,7 +578,15 @@ impl Unit {
     }
 
     pub fn is_test(&self) -> bool {
-        self.mode == UnitMode::Test || self.target.has_kind("test")
+        !self.is_benchmark() && (self.mode == UnitMode::Test || self.target.has_kind("test"))
+    }
+
+    pub fn is_benchmark(&self) -> bool {
+        self.target.has_kind("bench")
+    }
+
+    pub fn uses_test_harness(&self) -> bool {
+        self.target.test && (self.mode == UnitMode::Test || self.target.has_kind("test"))
     }
 
     pub fn is_external(&self) -> bool {

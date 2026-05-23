@@ -8,7 +8,7 @@ use color_eyre::eyre::{Result, WrapErr as _, eyre};
 use serde::Deserialize;
 use sha2::Digest as _;
 
-use crate::model::{Unit, UnitGraph};
+use crate::model::{Unit, UnitGraph, UnitMode};
 use crate::shell;
 
 pub struct RenderOptions {
@@ -46,6 +46,20 @@ struct CargoManifest {
 #[derive(Debug, Deserialize)]
 struct CargoManifestPackage {
     links: Option<String>,
+    #[serde(default)]
+    authors: Option<toml::Value>,
+    #[serde(default)]
+    description: Option<toml::Value>,
+    #[serde(default)]
+    homepage: Option<toml::Value>,
+    #[serde(default)]
+    repository: Option<toml::Value>,
+    #[serde(default)]
+    license: Option<toml::Value>,
+    #[serde(default, rename = "license-file")]
+    license_file: Option<toml::Value>,
+    #[serde(default, rename = "rust-version")]
+    rust_version: Option<toml::Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -247,8 +261,10 @@ struct UnitsNixTemplate {
     package_entries: String,
     binary_entries: String,
     library_entries: String,
+    benchmark_entries: String,
     test_entries: String,
     test_target_entries: String,
+    benchmark_target_entries: String,
     target_set_entries: String,
     default_entry: String,
 }
@@ -266,8 +282,10 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         package_entries: render_root_entries(graph, &prepared, |_| true),
         binary_entries: render_root_entries(graph, &prepared, Unit::is_bin),
         library_entries: render_root_entries(graph, &prepared, Unit::is_library),
+        benchmark_entries: render_benchmark_entries(graph, &prepared),
         test_entries: render_test_entries(graph, &prepared),
         test_target_entries: render_test_target_entries(graph, &prepared),
+        benchmark_target_entries: render_benchmark_target_entries(graph, &prepared),
         target_set_entries: render_target_sets(graph, &prepared),
         default_entry: render_default_entry(graph, &prepared),
     };
@@ -624,7 +642,7 @@ fn render_rustc_build_phase(
     script.push_str("mkdir -p build\n");
     script.push_str("build_script_flags=()\n");
     script.push_str("rustc_args=()\n\n");
-    script.push_str(&cargo_package_exports(unit));
+    script.push_str(&cargo_package_exports(unit)?);
     writeln!(
         script,
         "export CARGO_MANIFEST_DIR={}",
@@ -633,7 +651,7 @@ fn render_rustc_build_phase(
 
     if let Some(run_index) = unit_build_script_run(graph, index) {
         let run_ref = format!("${{units.{}}}", nix_attr(&prepared.names[run_index]));
-        append_build_script_flag_reader(&mut script, &run_ref);
+        append_build_script_flag_reader(&mut script, &run_ref, unit);
     }
 
     push_rustc_args(&mut script, unit, &prepared.hashes[index]);
@@ -793,8 +811,11 @@ fn push_rustc_args(script: &mut String, unit: &Unit, hash: &str) {
         push_arg(script, "--cfg");
         push_arg(script, &format!("feature=\"{feature}\""));
     }
-    if unit.is_test() {
+    if unit.uses_test_harness() {
         push_arg(script, "--test");
+    } else if unit.mode == UnitMode::Test {
+        push_arg(script, "--cfg");
+        push_arg(script, "test");
     }
     if let Some(platform) = &unit.platform {
         push_arg(script, "--target");
@@ -855,7 +876,7 @@ fn append_extra_rustc_args(script: &mut String, unit: &Unit) {
     let _ = writeln!(script, "${{renderExtraRustcArgs {platform}}}");
 }
 
-fn append_build_script_flag_reader(script: &mut String, run_ref: &str) {
+fn append_build_script_flag_reader(script: &mut String, run_ref: &str, unit: &Unit) {
     let quoted_run_ref = format!("\"{run_ref}\"");
     let snippets = [
         ("rustc-cfg", "--cfg"),
@@ -875,11 +896,26 @@ fn append_build_script_flag_reader(script: &mut String, run_ref: &str) {
         script,
         "if [ -f {quoted_run_ref}/rustc-cdylib-link-arg ]; then\n  while IFS= read -r line; do\n    [ -n \"$line\" ] && build_script_flags+=( -C \"link-arg=$line\" )\n  done < {quoted_run_ref}/rustc-cdylib-link-arg\nfi",
     );
+    append_link_arg_reader(script, &quoted_run_ref, "rustc-link-arg");
+    if unit.is_benchmark() {
+        append_link_arg_reader(script, &quoted_run_ref, "rustc-link-arg-benches");
+    } else if unit.is_test() {
+        append_link_arg_reader(script, &quoted_run_ref, "rustc-link-arg-tests");
+    } else if unit.is_bin() {
+        append_link_arg_reader(script, &quoted_run_ref, "rustc-link-arg-bins");
+    }
     let _ = writeln!(
         script,
         "if [ -f {quoted_run_ref}/rustc-env ]; then\n  while IFS= read -r line; do\n    [ -n \"$line\" ] && export \"$line\"\n  done < {quoted_run_ref}/rustc-env\nfi",
     );
     let _ = writeln!(script, "export OUT_DIR={quoted_run_ref}/out-dir\n");
+}
+
+fn append_link_arg_reader(script: &mut String, quoted_run_ref: &str, file: &str) {
+    let _ = writeln!(
+        script,
+        "if [ -f {quoted_run_ref}/{file} ]; then\n  while IFS= read -r line; do\n    [ -n \"$line\" ] && build_script_flags+=( -C \"link-arg=$line\" )\n  done < {quoted_run_ref}/{file}\nfi",
+    );
 }
 
 fn render_install_phase(unit: &Unit, options: &RenderOptions, hash: &str) -> String {
@@ -1036,7 +1072,7 @@ fn render_build_script_run_phase(
         })
     )?;
     script.push_str(concat!("export NUM_JOBS=''", "${NIX_BUILD_CORES:-1}\n"));
-    script.push_str(&cargo_package_exports(run_unit));
+    script.push_str(&cargo_package_exports(run_unit)?);
     script.push_str(&cargo_manifest_links_export(run_unit)?);
     append_cargo_feature_exports(&mut script, run_unit);
     append_cargo_cfg_exports(&mut script);
@@ -1085,6 +1121,18 @@ while IFS= read -r line; do
       ;;
     cargo:rustc-cdylib-link-arg=*)
       printf '%s\n' "''${normalized#cargo:rustc-cdylib-link-arg=}" >> $out/rustc-cdylib-link-arg
+      ;;
+    cargo:rustc-link-arg=*)
+      printf '%s\n' "''${normalized#cargo:rustc-link-arg=}" >> $out/rustc-link-arg
+      ;;
+    cargo:rustc-link-arg-benches=*)
+      printf '%s\n' "''${normalized#cargo:rustc-link-arg-benches=}" >> $out/rustc-link-arg-benches
+      ;;
+    cargo:rustc-link-arg-bins=*)
+      printf '%s\n' "''${normalized#cargo:rustc-link-arg-bins=}" >> $out/rustc-link-arg-bins
+      ;;
+    cargo:rustc-link-arg-tests=*)
+      printf '%s\n' "''${normalized#cargo:rustc-link-arg-tests=}" >> $out/rustc-link-arg-tests
       ;;
     cargo:warning=*)
       printf '%s\n' "build script warning: ''${normalized#cargo:warning=}" >&2
@@ -1190,10 +1238,11 @@ fn render_unused_crate_dependencies_check(
     script
 }
 
-fn cargo_package_exports(unit: &Unit) -> String {
+fn cargo_package_exports(unit: &Unit) -> Result<String> {
     let mut script = String::new();
     let package_name = unit.package_name();
     let version = unit.package_version();
+    let manifest = optional_cargo_manifest_package(unit)?;
     // Build scripts observe Cargo's split version fields, including the empty
     // prerelease string. ring uses CARGO_PKG_VERSION_PRE in its links invariant.
     let version_without_build_metadata = version.split_once('+').map_or(version, |(base, _)| base);
@@ -1205,6 +1254,11 @@ fn cargo_package_exports(unit: &Unit) -> String {
     let minor = version_parts.next().unwrap_or("0");
     let patch = version_parts.next().unwrap_or("0");
 
+    let metadata = manifest
+        .as_ref()
+        .map(cargo_manifest_package_metadata)
+        .unwrap_or_default();
+
     for (name, value) in [
         ("CARGO_PKG_NAME", package_name.as_ref()),
         ("CARGO_PKG_VERSION", version),
@@ -1212,43 +1266,128 @@ fn cargo_package_exports(unit: &Unit) -> String {
         ("CARGO_PKG_VERSION_MINOR", minor),
         ("CARGO_PKG_VERSION_PATCH", patch),
         ("CARGO_PKG_VERSION_PRE", version_pre),
+        ("CARGO_PKG_AUTHORS", metadata.authors.as_str()),
+        ("CARGO_PKG_DESCRIPTION", metadata.description.as_str()),
+        ("CARGO_PKG_HOMEPAGE", metadata.homepage.as_str()),
+        ("CARGO_PKG_REPOSITORY", metadata.repository.as_str()),
+        ("CARGO_PKG_LICENSE", metadata.license.as_str()),
+        ("CARGO_PKG_LICENSE_FILE", metadata.license_file.as_str()),
+        ("CARGO_PKG_RUST_VERSION", metadata.rust_version.as_str()),
     ] {
         let _ = writeln!(script, "export {name}={}", shell_env_value(value));
     }
 
-    script
+    Ok(script)
 }
 
 fn cargo_manifest_links_export(unit: &Unit) -> Result<String> {
     // Cargo injects package.links for build.rs. nix-cargo-unit runs build scripts
     // outside Cargo, and crates like ring panic when CARGO_MANIFEST_LINKS is absent.
-    Ok(cargo_manifest_links(unit)?
+    Ok(cargo_manifest_package(unit)?
+        .and_then(|package| package.links)
         .map(|links| format!("export CARGO_MANIFEST_LINKS={}\n", shell_env_value(&links)))
         .unwrap_or_default())
 }
 
 fn shell_env_value(value: &str) -> String {
-    if value.is_empty() {
-        // The shell spelling for an empty single-quoted value is also the Nix
-        // indented-string terminator. Use double quotes so generated Nix parses.
-        "\"\"".to_string()
-    } else {
-        shell::quote(value)
+    nix_indented_string_fragment(&shell_double_quote_literal(value))
+}
+
+fn shell_double_quote_literal(value: &str) -> String {
+    let mut out = String::with_capacity(value.len() + 2);
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' | '\\' | '$' | '`' => {
+                out.push('\\');
+                out.push(ch);
+            }
+            _ => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+fn nix_indented_string_fragment(value: &str) -> String {
+    value.replace("''", "'''").replace("${", "''${")
+}
+
+#[derive(Default)]
+struct CargoManifestPackageMetadata {
+    authors: String,
+    description: String,
+    homepage: String,
+    repository: String,
+    license: String,
+    license_file: String,
+    rust_version: String,
+}
+
+fn cargo_manifest_package_metadata(package: &CargoManifestPackage) -> CargoManifestPackageMetadata {
+    CargoManifestPackageMetadata {
+        authors: manifest_string_list(package.authors.as_ref()).join(":"),
+        description: manifest_string(package.description.as_ref()),
+        homepage: manifest_string(package.homepage.as_ref()),
+        repository: manifest_string(package.repository.as_ref()),
+        license: manifest_string(package.license.as_ref()),
+        license_file: manifest_string(package.license_file.as_ref()),
+        rust_version: manifest_string(package.rust_version.as_ref()),
     }
 }
 
-fn cargo_manifest_links(unit: &Unit) -> Result<Option<String>> {
+fn manifest_string(value: Option<&toml::Value>) -> String {
+    value
+        .and_then(toml::Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn manifest_string_list(value: Option<&toml::Value>) -> Vec<String> {
+    value
+        .and_then(toml::Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(ToString::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn optional_cargo_manifest_package(unit: &Unit) -> Result<Option<CargoManifestPackage>> {
+    let manifest_path = crate_root_for_unit(unit).join("Cargo.toml");
+    let manifest = match fs::read_to_string(&manifest_path) {
+        Ok(manifest) => manifest,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(err) => {
+            return Err(err)
+                .wrap_err_with(|| format!("reading package manifest {}", manifest_path.display()));
+        }
+    };
+
+    cargo_manifest_package_from_str(&manifest)
+        .wrap_err_with(|| format!("parsing package manifest {}", manifest_path.display()))
+}
+
+fn cargo_manifest_package(unit: &Unit) -> Result<Option<CargoManifestPackage>> {
     let manifest_path = crate_root_for_unit(unit).join("Cargo.toml");
     let manifest = fs::read_to_string(&manifest_path)
         .wrap_err_with(|| format!("reading package manifest {}", manifest_path.display()))?;
 
-    cargo_manifest_package_links(&manifest)
+    cargo_manifest_package_from_str(&manifest)
         .wrap_err_with(|| format!("parsing package manifest {}", manifest_path.display()))
 }
 
-fn cargo_manifest_package_links(manifest: &str) -> Result<Option<String>> {
+fn cargo_manifest_package_from_str(manifest: &str) -> Result<Option<CargoManifestPackage>> {
     let manifest: CargoManifest = toml::from_str(manifest)?;
-    Ok(manifest.package.and_then(|package| package.links))
+    Ok(manifest.package)
+}
+
+#[cfg(test)]
+fn cargo_manifest_package_links(manifest: &str) -> Result<Option<String>> {
+    Ok(cargo_manifest_package_from_str(manifest)?.and_then(|package| package.links))
 }
 
 fn append_cargo_feature_exports(script: &mut String, unit: &Unit) {
@@ -1308,7 +1447,8 @@ fn append_dependency_metadata_exports(
 ) -> Result<()> {
     for dep_run_index in &build_script_run.dependency_runs {
         let dep_run_unit = &graph.units[*dep_run_index];
-        let Some(links) = cargo_manifest_links(dep_run_unit)? else {
+        let Some(links) = cargo_manifest_package(dep_run_unit)?.and_then(|package| package.links)
+        else {
             continue;
         };
         let dep_run_ref = format!("${{units.{}}}", nix_attr(&prepared.names[*dep_run_index]));
@@ -1942,15 +2082,17 @@ fn render_target_sets(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
         graph.root_sets.clone()
     };
     let test_keys = compute_test_keys(graph, prepared);
+    let benchmark_keys = compute_benchmark_keys(graph, prepared);
 
     root_sets
         .iter()
         .map(|roots| {
             format!(
-                "    {{\n      roots = [ {} ];\n      binaries = {{\n{}      }};\n      libraries = {{\n{}      }};\n      tests = {{\n{}      }};\n    }}",
+                "    {{\n      roots = [ {} ];\n      binaries = {{\n{}      }};\n      libraries = {{\n{}      }};\n      benchmarks = {{\n{}      }};\n      tests = {{\n{}      }};\n    }}",
                 render_unit_refs(roots, prepared),
                 render_root_entries_for(roots, &graph.units, prepared, Unit::is_bin),
                 render_root_entries_for(roots, &graph.units, prepared, Unit::is_library),
+                render_benchmark_entries_for(roots, &graph.units, prepared, &benchmark_keys),
                 render_test_entries_for(roots, &graph.units, prepared, &test_keys),
             )
         })
@@ -1958,29 +2100,31 @@ fn render_target_sets(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
         .join("\n")
 }
 
-/// Globally stable key per root test unit. Picks `target.name` when no other
-/// root test unit shares it, falling back to the unit-specific name so the
-/// shared test manifest can reference every binary under the same key the
-/// `tests = { ... }` block uses, regardless of which target set it appears in.
-fn compute_test_keys(graph: &UnitGraph, prepared: &PreparedGraph) -> BTreeMap<usize, String> {
+/// Globally stable key per root runnable unit. Picks `target.name` when no
+/// other matching root unit shares it, falling back to the unit-specific name.
+fn compute_root_keys(
+    graph: &UnitGraph,
+    prepared: &PreparedGraph,
+    include: impl Fn(&Unit) -> bool,
+) -> BTreeMap<usize, String> {
     let mut all_roots: BTreeSet<usize> = graph.roots.iter().copied().collect();
     for set in &graph.root_sets {
         all_roots.extend(set.iter().copied());
     }
-    let test_roots: Vec<usize> = all_roots
+    let roots: Vec<usize> = all_roots
         .into_iter()
-        .filter(|index| graph.units[*index].is_test())
+        .filter(|index| include(&graph.units[*index]))
         .collect();
 
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for index in &test_roots {
+    for index in &roots {
         *counts
             .entry(graph.units[*index].target.name.as_str())
             .or_insert(0) += 1;
     }
 
     let mut keys = BTreeMap::new();
-    for index in test_roots {
+    for index in roots {
         let unit = &graph.units[index];
         let key = if counts[unit.target.name.as_str()] == 1 {
             unit.target.name.clone()
@@ -1992,9 +2136,53 @@ fn compute_test_keys(graph: &UnitGraph, prepared: &PreparedGraph) -> BTreeMap<us
     keys
 }
 
+fn compute_test_keys(graph: &UnitGraph, prepared: &PreparedGraph) -> BTreeMap<usize, String> {
+    compute_root_keys(graph, prepared, Unit::is_test)
+}
+
+fn compute_benchmark_keys(graph: &UnitGraph, prepared: &PreparedGraph) -> BTreeMap<usize, String> {
+    compute_root_keys(graph, prepared, Unit::is_benchmark)
+}
+
 fn test_binary_expr(unit: &Unit, prepared: &PreparedGraph, index: usize) -> String {
     let unit_ref = format!("${{units.{}}}", nix_attr(&prepared.names[index]));
     format!("{unit_ref}/bin/{}", unit.target.name)
+}
+
+fn render_benchmark_entries_for(
+    roots: &[usize],
+    units: &[Unit],
+    prepared: &PreparedGraph,
+    keys: &BTreeMap<usize, String>,
+) -> String {
+    let mut entries = String::new();
+    let mut seen = BTreeSet::new();
+    for index in roots {
+        let unit = &units[*index];
+        if !unit.is_benchmark() {
+            continue;
+        }
+        let key = keys
+            .get(index)
+            .expect("compute_benchmark_keys covers every root benchmark unit")
+            .clone();
+        if !seen.insert(key.clone()) {
+            continue;
+        }
+        let _ = writeln!(
+            entries,
+            "    {} = units.{};",
+            nix_attr(&key),
+            nix_attr(&prepared.names[*index])
+        );
+    }
+
+    entries
+}
+
+fn render_benchmark_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
+    let keys = compute_benchmark_keys(graph, prepared);
+    render_benchmark_entries_for(&graph.roots, &graph.units, prepared, &keys)
 }
 
 fn render_test_entries_for(
@@ -2048,6 +2236,45 @@ fn render_test_target_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> St
         let source = prepared
             .source_entry(index)
             .expect("prepared graph has source entries for every test target");
+        let package_root = if source.relative.is_empty() {
+            "."
+        } else {
+            source.relative.as_str()
+        };
+        by_key.insert(
+            key.clone(),
+            format!(
+                "{{ name = {}; binary = \"{}\"; packageName = {}; packageVersion = {}; packageRoot = {}; sourceStoreName = {}; }}",
+                nix_attr(key),
+                test_binary_expr(unit, prepared, index),
+                nix_attr(&unit.package_name()),
+                nix_attr(unit.package_version()),
+                nix_attr(package_root),
+                nix_attr(&source.name),
+            ),
+        );
+    }
+    let mut entries = String::new();
+    for (_key, target) in by_key {
+        let _ = writeln!(entries, "    {target}");
+    }
+    entries
+}
+
+/// One `{ name; binary; }` per unique benchmark target across every root set.
+/// The template feeds this into benchmark plans and previous-vs-next Tango
+/// comparisons without another Cargo metadata pass.
+fn render_benchmark_target_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> String {
+    let keys = compute_benchmark_keys(graph, prepared);
+    let mut by_key: BTreeMap<String, String> = BTreeMap::new();
+    for (&index, key) in &keys {
+        let unit = &graph.units[index];
+        if by_key.contains_key(key) {
+            continue;
+        }
+        let source = prepared
+            .source_entry(index)
+            .expect("prepared graph has source entries for every benchmark target");
         let package_root = if source.relative.is_empty() {
             "."
         } else {
@@ -2256,6 +2483,77 @@ mod tests {
         assert!(rendered.contains("source-roots.tsv"));
         assert!(rendered.contains("testManifestDrv ="));
         assert!(rendered.contains("cargo-unit-test-manifest"));
+    }
+
+    #[test]
+    fn exposes_benchmark_roots_as_tango_comparison_inputs() {
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "hello",
+                    "src_path": "/workspace/src/lib.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "bench", "opt_level": "3" },
+                  "features": [],
+                  "mode": "build",
+                  "dependencies": []
+                },
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["bench"],
+                    "crate_types": ["bin"],
+                    "name": "greeting",
+                    "src_path": "/workspace/benches/greeting.rs",
+                    "edition": "2024",
+                    "test": false
+                  },
+                  "profile": { "name": "bench", "opt_level": "3" },
+                  "features": [],
+                  "mode": "test",
+                  "dependencies": [
+                    { "index": 0, "extern_crate_name": "hello" }
+                  ]
+                }
+              ],
+              "roots": [1]
+            }"#,
+        )
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("benchmarks = {"));
+        assert!(rendered.contains("\"greeting\" = units."));
+        assert!(rendered.contains("benchmarkTargets = ["));
+        assert!(rendered.contains("{ name = \"greeting\"; binary ="));
+        assert!(
+            rendered.contains("benchmarkPlan = mkBenchmarkPlan \"cargo-unit-benchmark-plan\";")
+        );
+        assert!(rendered.contains("compareTangoBenchmarks = mkTangoBenchmarkComparison;"));
+        assert!(rendered.contains("targetSets = ["));
+        assert!(!rendered.contains("\"greeting\" = mkTestEntry"));
+        assert!(!rendered.contains("rustc_args+=( '--test' )"));
+        assert!(rendered.contains("rustc_args+=( '--cfg' )"));
+        assert!(rendered.contains("rustc_args+=( 'test' )"));
     }
 
     #[test]
@@ -3147,6 +3445,10 @@ version = "4.6.1"
     #[test]
     fn empty_shell_env_values_do_not_close_generated_nix_strings() {
         assert_eq!(shell_env_value(""), "\"\"");
+        assert_eq!(
+            shell_env_value("compiler's ${api}"),
+            r#""compiler's \''${api}""#
+        );
     }
 
     #[test]
@@ -3196,6 +3498,13 @@ links = 5
             r#"[package]
 name = "native"
 version = "0.1.0-alpha.1"
+authors = ["Native Team", "Build Crew"]
+description = "Native FFI fixtures"
+homepage = "https://example.com/native"
+repository = "https://example.com/native.git"
+license = "MIT"
+license-file = "LICENSE"
+rust-version = "1.85"
 links = "native_ffi"
 "#,
         )
@@ -3257,8 +3566,17 @@ links = "native_ffi"
         .unwrap();
 
         assert!(rendered.contains("export TARGET='x86_64-unknown-linux-gnu'"));
-        assert!(rendered.contains("export CARGO_PKG_VERSION_PRE='alpha.1'"));
-        assert!(rendered.contains("export CARGO_MANIFEST_LINKS='native_ffi'"));
+        assert!(rendered.contains("export CARGO_PKG_VERSION_PRE=\"alpha.1\""));
+        assert!(rendered.contains("export CARGO_PKG_AUTHORS=\"Native Team:Build Crew\""));
+        assert!(rendered.contains("export CARGO_PKG_DESCRIPTION=\"Native FFI fixtures\""));
+        assert!(rendered.contains("export CARGO_PKG_HOMEPAGE=\"https://example.com/native\""));
+        assert!(
+            rendered.contains("export CARGO_PKG_REPOSITORY=\"https://example.com/native.git\"")
+        );
+        assert!(rendered.contains("export CARGO_PKG_LICENSE=\"MIT\""));
+        assert!(rendered.contains("export CARGO_PKG_LICENSE_FILE=\"LICENSE\""));
+        assert!(rendered.contains("export CARGO_PKG_RUST_VERSION=\"1.85\""));
+        assert!(rendered.contains("export CARGO_MANIFEST_LINKS=\"native_ffi\""));
         assert!(rendered.contains("export CARGO_FEATURE_ARCH=1"));
         assert!(rendered.contains("export CARGO_FEATURE_SIMD_SUPPORT=1"));
         assert!(rendered.contains("\"$RUSTC\" --print cfg --target \"$TARGET\""));
@@ -3342,7 +3660,7 @@ links = "nested_native"
 
         assert!(rendered.contains("export CARGO_MANIFEST_DIR=\"$src\""));
         assert!(!rendered.contains("export CARGO_MANIFEST_DIR=\"$src/builder\""));
-        assert!(rendered.contains("export CARGO_MANIFEST_LINKS='nested_native'"));
+        assert!(rendered.contains("export CARGO_MANIFEST_LINKS=\"nested_native\""));
         fs::remove_dir_all(workspace).unwrap();
     }
 

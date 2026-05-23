@@ -108,6 +108,9 @@ let
   testTargets = [
 {{ test_target_entries }}  ];
 
+  benchmarkTargets = [
+{{ benchmark_target_entries }}  ];
+
   mkTestPlan = name:
     pkgs.runCommand name
       {
@@ -140,6 +143,131 @@ let
         + ''
           find "$out/packages" -name test-binaries -type f -exec sort -u -o '{}' '{}' ';'
           sort -u -o "$out/source-roots.tsv" "$out/source-roots.tsv"
+        ''
+      );
+
+  mkBenchmarkPlan = name:
+    pkgs.runCommand name
+      {
+        __structuredAttrs = true;
+        strictDeps = true;
+        nativeBuildInputs = [ pkgs.coreutils ];
+      }
+      (
+        ''
+          set -euo pipefail
+
+          mkdir -p "$out/packages"
+          : > "$out/source-roots.tsv"
+          : > "$out/benchmarks.tsv"
+        ''
+        + pkgs.lib.concatMapStrings (target: ''
+          package_dir="$out/packages"/${pkgs.lib.escapeShellArg target.packageName}
+          benchmark_dir="$package_dir/benchmarks"
+          mkdir -p "$benchmark_dir"
+          printf '%s\n' ${pkgs.lib.escapeShellArg target.packageRoot} > "$package_dir/package-root"
+          printf '%s\t%s\n' \
+            ${pkgs.lib.escapeShellArg target.sourceStoreName} \
+            ${pkgs.lib.escapeShellArg target.packageRoot} \
+            >> "$out/source-roots.tsv"
+          benchmark_binary="$(readlink -f ${pkgs.lib.escapeShellArg target.binary})"
+          if [ ! -x "$benchmark_binary" ]; then
+            echo >&2 "error: cargo-unit benchmark binary is missing or not executable: $benchmark_binary"
+            exit 1
+          fi
+          ln -s "$benchmark_binary" "$benchmark_dir"/${pkgs.lib.escapeShellArg target.name}
+          printf '%s\t%s\t%s\n' \
+            ${pkgs.lib.escapeShellArg target.packageName} \
+            ${pkgs.lib.escapeShellArg target.name} \
+            "$benchmark_binary" \
+            >> "$out/benchmarks.tsv"
+        '') benchmarkTargets
+        + ''
+          sort -u -o "$out/source-roots.tsv" "$out/source-roots.tsv"
+          sort -u -o "$out/benchmarks.tsv" "$out/benchmarks.tsv"
+        ''
+      );
+
+  sanitizeBenchmarkPath = pkgs.lib.replaceStrings [ "/" ":" " " ] [ "_" "_" "_" ];
+
+  mkTangoBenchmarkComparison =
+    {
+      baseline,
+      name ? "cargo-unit-tango-benchmark-comparison",
+      args ? [],
+    }:
+    assert pkgs.lib.assertMsg (benchmarkTargets != [ ]) ''
+      cargo-unit compareTangoBenchmarks requires at least one benchmark target.
+      Include `--benches` or a specific `--bench <name>` in cargoTargets.
+    '';
+    let
+      baselinePlan =
+        if builtins.isAttrs baseline && baseline ? benchmarkPlan then
+          baseline.benchmarkPlan
+        else
+          baseline;
+    in
+    pkgs.runCommand name
+      {
+        __structuredAttrs = true;
+        strictDeps = true;
+        nativeBuildInputs = [ pkgs.coreutils ];
+      }
+      (
+        ''
+          set -euo pipefail
+
+          mkdir -p "$out/logs"
+          : > "$out/benchmarks.tsv"
+          failures=0
+        ''
+        + pkgs.lib.concatMapStrings (
+          target:
+          let
+            label = "${target.packageName}-${target.name}";
+            logName = sanitizeBenchmarkPath label;
+          in
+          ''
+            baseline_binary=${pkgs.lib.escapeShellArg "${baselinePlan}/packages/${target.packageName}/benchmarks/${target.name}"}
+            candidate_binary=${pkgs.lib.escapeShellArg target.binary}
+            log="$out/logs"/${pkgs.lib.escapeShellArg "${logName}.log"}
+
+            if [ ! -x "$baseline_binary" ]; then
+              echo >&2 "error: missing baseline Tango benchmark for ${label}: $baseline_binary"
+              failures=$((failures + 1))
+            else
+              run_dir="$(mktemp -d)"
+              local_candidate="$run_dir/candidate"
+              local_baseline="$run_dir/baseline"
+              cp -L "$candidate_binary" "$local_candidate"
+              cp -L "$baseline_binary" "$local_baseline"
+              chmod +x "$local_candidate" "$local_baseline"
+
+              set +e
+              "$local_candidate" compare ${pkgs.lib.escapeShellArgs args} "$local_baseline" > "$log" 2>&1
+              status=$?
+              set -e
+              cat "$log"
+              printf '%s\t%s\t%s\t%s\t%s\n' \
+                ${pkgs.lib.escapeShellArg target.packageName} \
+                ${pkgs.lib.escapeShellArg target.name} \
+                "$baseline_binary" \
+                "$candidate_binary" \
+                "$log" \
+                >> "$out/benchmarks.tsv"
+
+              if [ "$status" -ne 0 ]; then
+                failures=$((failures + 1))
+              fi
+            fi
+          ''
+        ) benchmarkTargets
+        + ''
+          sort -u -o "$out/benchmarks.tsv" "$out/benchmarks.tsv"
+          if [ "$failures" -ne 0 ]; then
+            exit 1
+          fi
+          touch "$out/done"
         ''
       );
 
@@ -233,6 +361,7 @@ in
 {
   inherit policyChecks sourceAudit units;
   testPlan = mkTestPlan "cargo-unit-test-plan";
+  benchmarkPlan = mkBenchmarkPlan "cargo-unit-benchmark-plan";
   roots = [ {{ roots }} ];
   checkedRoots = [ {{ checked_roots }} ];
   packages = {
@@ -241,8 +370,11 @@ in
 {{ binary_entries }}  };
   libraries = {
 {{ library_entries }}  };
+  benchmarks = {
+{{ benchmark_entries }}  };
   tests = {
 {{ test_entries }}  };
+  compareTangoBenchmarks = mkTangoBenchmarkComparison;
   targetSets = [
 {{ target_set_entries }}
   ];

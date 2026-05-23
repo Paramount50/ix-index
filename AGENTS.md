@@ -76,6 +76,8 @@ Non-obvious technical decisions take a public reference inline next to the line.
 
 ## Rust style
 
+Use Rust edition 2024 for repo-owned crates, fixtures, examples, and generated manifests. Do not downgrade to edition 2021 to work around a dependency, macro, or tool issue; fix the real compatibility problem or document the upstream blocker next to the exception.
+
 Prefer local type annotations over turbofish when they make the data shape clearer. For example, use `let args: Vec<_> = env::args().collect();` instead of `let args = env::args().collect::<Vec<_>>();`. Keep turbofish for cases where an expression-local type is genuinely clearer, such as method chains where naming an intermediate value would add noise.
 
 Do not use Rust `#[path = ...]` to paper over module layout. Move files so the filesystem hierarchy matches normal `mod` declarations.

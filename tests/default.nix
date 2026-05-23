@@ -516,6 +516,8 @@ let
   cargoUnitFixture = fs.toSource {
     root = ./fixtures/cargo-unit-hello;
     fileset = fs.unions [
+      ./fixtures/cargo-unit-hello/benches
+      ./fixtures/cargo-unit-hello/build.rs
       ./fixtures/cargo-unit-hello/Cargo.lock
       ./fixtures/cargo-unit-hello/Cargo.toml
       ./fixtures/cargo-unit-hello/src
@@ -528,6 +530,7 @@ let
     cargoTargetNames = [
       "build"
       "test"
+      "bench"
     ];
     cargoTargets = [
       [ "--workspace" ]
@@ -535,10 +538,23 @@ let
         "--workspace"
         "--tests"
       ]
+      [
+        "--workspace"
+        "--benches"
+      ]
     ];
   };
 
   cargoUnitHello = cargoUnitWorkspace.binaries.cargo-unit-hello;
+  cargoUnitTangoComparison = cargoUnitWorkspace.compareTangoBenchmarks {
+    baseline = cargoUnitWorkspace;
+    args = [
+      "--time"
+      "0.01"
+      "--fail-threshold"
+      "100000"
+    ];
+  };
 
   cargoUnitBinaries = {
     inherit (cargoUnitWorkspace.targetSets.build.binaries)
@@ -2513,8 +2529,24 @@ let
         message = "cargo-unit workspaces should expose test targets as separate checks";
       }
       {
+        assertion = builtins.hasAttr "greeting" cargoUnitWorkspace.targetSets.bench.benchmarks;
+        message = "cargo-unit workspaces should expose benchmark targets separately from tests";
+      }
+      {
+        assertion = builtins.hasAttr "greeting" cargoUnitWorkspace.benchmarks;
+        message = "cargo-unit workspaces should expose aggregate benchmark targets";
+      }
+      {
         assertion = cargoUnitWorkspace ? testPlan;
         message = "cargo-unit workspaces should expose a reusable test plan";
+      }
+      {
+        assertion = cargoUnitWorkspace ? benchmarkPlan;
+        message = "cargo-unit workspaces should expose a reusable benchmark plan";
+      }
+      {
+        assertion = cargoUnitWorkspace ? compareTangoBenchmarks;
+        message = "cargo-unit workspaces should expose a Tango comparison builder";
       }
       {
         assertion =
@@ -3035,6 +3067,11 @@ let
     grep -q '/bin/cargo_unit_hello$' ${cargoUnitWorkspace.testPlan}/packages/cargo-unit-hello/test-binaries
     grep -qx '.' ${cargoUnitWorkspace.testPlan}/packages/cargo-unit-hello/package-root
     grep -q '^cargo-unit-source-cargo-unit-hello-0.1.0-.*	[.]$' ${cargoUnitWorkspace.testPlan}/source-roots.tsv
+    test -x ${cargoUnitWorkspace.benchmarkPlan}/packages/cargo-unit-hello/benchmarks/greeting
+    grep -q '^cargo-unit-hello	greeting	.*/bin/greeting$' ${cargoUnitWorkspace.benchmarkPlan}/benchmarks.tsv
+    test -e ${cargoUnitTangoComparison}/done
+    grep -q '^cargo-unit-hello	greeting	' ${cargoUnitTangoComparison}/benchmarks.tsv
+    grep -q '^greeting ' ${cargoUnitTangoComparison}/logs/cargo-unit-hello-greeting.log
 
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
     test -d ${bunSite.bunNodeModules}/node_modules/clsx
