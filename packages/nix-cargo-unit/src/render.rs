@@ -2056,9 +2056,9 @@ fn render_test_target_entries(graph: &UnitGraph, prepared: &PreparedGraph) -> St
         by_key.insert(
             key.clone(),
             format!(
-                "{{ name = {}; binary = {}; packageName = {}; packageVersion = {}; packageRoot = {}; sourceStoreName = {}; }}",
+                "{{ name = {}; binary = \"{}\"; packageName = {}; packageVersion = {}; packageRoot = {}; sourceStoreName = {}; }}",
                 nix_attr(key),
-                nix_attr(&test_binary_expr(unit, prepared, index)),
+                test_binary_expr(unit, prepared, index),
                 nix_attr(&unit.package_name()),
                 nix_attr(unit.package_version()),
                 nix_attr(package_root),
@@ -2248,6 +2248,7 @@ mod tests {
         assert!(rendered.contains("mkTestCases ="));
         assert!(rendered.contains("testTargets = ["));
         assert!(rendered.contains("{ name = \"hello\"; binary ="));
+        assert!(!rendered.contains("units.\\\""));
         assert!(rendered.contains("packageName = \"hello\";"));
         assert!(rendered.contains("packageRoot = \".\";"));
         assert!(rendered.contains("sourceStoreName = \"cargo-unit-source-hello-0.1.0-"));
