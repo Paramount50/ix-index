@@ -16,6 +16,7 @@
   minestom = ./services/minestom.nix;
   minecraft-bedrock = ./services/minecraft-bedrock.nix;
   postgresql = ./services/postgresql.nix;
+  observability = ./services/observability;
   remote-desktop = ./services/remote-desktop.nix;
   resource-monitor = ./services/resource-monitor;
   velocity = ./services/velocity.nix;

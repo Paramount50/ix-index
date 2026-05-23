@@ -1024,6 +1024,47 @@ let
       plan = fleet.planValue.nodes.nginx;
     };
 
+  observabilityStackExample =
+    let
+      fleet = import ../examples/observability-stack {
+        index = {
+          lib = ix;
+        };
+      };
+      queryTool =
+        config:
+        lib.findFirst (
+          package: (package.meta.mainProgram or null) == "ix-observe"
+        ) null config.environment.systemPackages;
+    in
+    {
+      inherit fleet;
+      observability =
+        let
+          config = fleet.nodes.observability;
+        in
+        {
+          inherit config;
+          cfg = config.services.ix-observability;
+          collector = config.services.opentelemetry-collector.settings;
+          grafana = config.services.grafana;
+          plan = fleet.planValue.nodes.observability;
+          queryTool = queryTool config;
+          dashboardPath =
+            (builtins.elemAt config.services.grafana.provision.dashboards.settings.providers 0).options.path;
+        };
+      app =
+        let
+          config = fleet.nodes.app;
+        in
+        {
+          inherit config;
+          cfg = config.services.ix-observability;
+          collector = config.services.opentelemetry-collector.settings;
+          plan = fleet.planValue.nodes.app;
+        };
+    };
+
   dailyScraperS3 =
     let
       config = evalConfig [
@@ -1701,6 +1742,82 @@ let
               "http://127.0.0.1/"
             ];
         message = "nginx-lifecycle fleet plan should prove the service unit and HTTP loopback path";
+      }
+    ];
+
+    observability-stack = [
+      {
+        assertion =
+          observabilityStackExample.observability.cfg.stack.enable
+          && observabilityStackExample.observability.cfg.agent.enable
+          && observabilityStackExample.observability.config.services.clickhouse.enable
+          && observabilityStackExample.observability.config.services.grafana.enable
+          && observabilityStackExample.observability.config.services.opentelemetry-collector.enable;
+        message = "observability-stack should enable the full local observability stack";
+      }
+      {
+        assertion =
+          observabilityStackExample.observability.config.services.opentelemetry-collector.package.pname
+          == "otelcol-contrib";
+        message = "ix-observability should use the contrib collector so ClickHouse export is available";
+      }
+      {
+        assertion =
+          observabilityStackExample.observability.collector.receivers.otlp.protocols.grpc.endpoint
+          == "0.0.0.0:4317"
+          && observabilityStackExample.observability.collector.exporters.clickhouse.database == "otel"
+          &&
+            observabilityStackExample.observability.collector.exporters.clickhouse.traces_table_name
+            == "otel_traces"
+          &&
+            observabilityStackExample.observability.collector.service.pipelines.logs.exporters
+            == [ "clickhouse" ];
+        message = "observability-stack collector should receive OTLP and export logs/traces/metrics to ClickHouse";
+      }
+      {
+        assertion =
+          let
+            datasource = builtins.head observabilityStackExample.observability.grafana.provision.datasources.settings.datasources;
+          in
+          datasource.uid == "ix-clickhouse"
+          && datasource.type == "grafana-clickhouse-datasource"
+          && datasource.jsonData.traces.defaultTable == "otel_traces"
+          && datasource.jsonData.logs.defaultTable == "otel_logs";
+        message = "observability-stack should provision Grafana with the ClickHouse OTel datasource";
+      }
+      {
+        assertion =
+          observabilityStackExample.observability.plan.l7ProxyPorts == [ 3000 ]
+          && builtins.elem 3000 observabilityStackExample.observability.config.networking.firewall.allowedTCPPorts
+          && builtins.elem 4317 observabilityStackExample.observability.config.networking.firewall.allowedTCPPorts
+          && builtins.elem 9000 observabilityStackExample.observability.config.networking.firewall.allowedTCPPorts;
+        message = "observability-stack should expose Grafana, OTLP, and ClickHouse for the example fleet";
+      }
+      {
+        assertion =
+          observabilityStackExample.app.cfg.stack.enable == false
+          && observabilityStackExample.app.cfg.agent.enable
+          && observabilityStackExample.app.cfg.agent.endpoint == "observability:4317"
+          && observabilityStackExample.app.collector.exporters.otlp.endpoint == "observability:4317"
+          &&
+            observabilityStackExample.app.collector.receivers."filelog/app".include
+            == [ "/var/log/ix-observability-demo/app.log" ]
+          && observabilityStackExample.app.collector.service.pipelines.logs.exporters == [ "otlp" ];
+        message = "observability-stack app node should run an agent collector that forwards file logs and OTLP";
+      }
+      {
+        assertion =
+          let
+            checks = observabilityStackExample.app.plan.healthChecks;
+          in
+          checks.observability-demo.from == "guest"
+          && checks.observability-ingested.attempts == 60
+          && checks.observability-ingested.timeoutSec == 10;
+        message = "observability-stack app node should prove local emission and ClickHouse ingestion";
+      }
+      {
+        assertion = observabilityStackExample.observability.queryTool != null;
+        message = "observability-stack should install the ix-observe query helper for agents";
       }
     ];
 
@@ -2803,6 +2920,13 @@ let
       grep -q 'secret: ix-survival-example-forwarding-secret-change-me' ${survivalExample.managed.minecraftConfig}/paper-global.yml
       grep -q '^server-port=25566$' ${survivalExample.managed.minecraftServerFiles}/server.properties
       grep -q '^online-mode=false$' ${survivalExample.managed.minecraftServerFiles}/server.properties
+    '';
+
+    observability-stack = ''
+      test -x ${observabilityStackExample.observability.queryTool}/bin/ix-observe
+      grep -q '"uid":"ix-observability"' ${observabilityStackExample.observability.dashboardPath}/overview.json
+      grep -q 'otel_traces' ${observabilityStackExample.observability.dashboardPath}/overview.json
+      grep -q 'otel_logs' ${observabilityStackExample.observability.dashboardPath}/overview.json
     '';
 
     extended-attributes = ''
