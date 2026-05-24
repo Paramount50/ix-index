@@ -3048,7 +3048,7 @@ let
 
     observability-stack = ''
       test -x ${observabilityStackExample.observability.queryTool}/bin/ix-observe
-      grep -q '"uid":"ix-observability"' ${observabilityStackExample.observability.dashboardPath}/overview.json
+      grep -q '"uid": "ix-observability"' ${observabilityStackExample.observability.dashboardPath}/overview.json
       grep -q 'otel_traces' ${observabilityStackExample.observability.dashboardPath}/overview.json
       grep -q 'otel_logs' ${observabilityStackExample.observability.dashboardPath}/overview.json
     '';
