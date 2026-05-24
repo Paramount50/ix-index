@@ -5,7 +5,7 @@
   },
   "languages": {
     "Nix": {
-      "language_servers": ["typenix", "!nil", "!nixd"],
+      "language_servers": ["nixd", "!nil"],
       "formatter": {
         "external": {
           "command": "nixfmt",
@@ -35,7 +35,7 @@
     }
   },
   "lsp": {
-    "typenix": {
+    "nixd": {
       "binary": {
         "path": "typenix-lsp",
         "arguments": []
