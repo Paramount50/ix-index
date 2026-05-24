@@ -14,6 +14,28 @@ export type SiteUpdate = {
 
 export const siteUpdates: SiteUpdate[] = [
   {
+    id: 'fleet-secret-refs',
+    date: '2026-05-24',
+    title: 'Fleet secret refs become typed plan data',
+    summary:
+      'ix fleets can now declare secret references once and hand VM modules stable runtime paths.',
+    paragraphs: [
+      'Fleet specs carry a provider block plus per-secret keys, while modules read `secretRefs` instead of spelling `/run/secrets` paths by hand.',
+      'The first documented shape uses a Vaultwarden-style backend for S3 scraper credentials. The generated plan still stays pure JSON, so a future reconciler can materialize files before services start.',
+      'This does not put secret bytes in the Nix store. Services still consume runtime files through systemd credentials where the module already supports that pattern.'
+    ],
+    links: [
+      {
+        label: 'fleet helper',
+        href: 'https://github.com/indexable-inc/index/blob/main/lib/fleet.nix'
+      },
+      {
+        label: 'scraper secret example',
+        href: 'https://github.com/indexable-inc/index/blob/main/examples/python-daily-scraper/README.md#s3-output'
+      }
+    ]
+  },
+  {
     id: 'site-audio-briefs',
     date: '2026-05-23',
     title: 'Audio briefs land on the site',

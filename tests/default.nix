@@ -854,7 +854,17 @@ let
 
   fleet = ix.mkFleet {
     deployment.region = "us-west-1";
-    secrets.sessionKey.generate = true;
+    secrets = {
+      provider = {
+        type = "vaultwarden";
+        mountRoot = "/run/secrets/fleet";
+        collection = "production";
+      };
+      sessionKey = {
+        key = "web/session-key";
+        generate = true;
+      };
+    };
 
     nodes = {
       db = {
@@ -870,10 +880,11 @@ let
         };
         modules = [
           (
-            { nodes, ... }:
+            { nodes, secretRefs, ... }:
             {
               services.remote-desktop.enable = true;
               environment.etc."db-host".text = nodes.db.config.networking.hostName;
+              environment.etc."session-key-ref".text = secretRefs.sessionKey;
             }
           )
         ];
@@ -1390,6 +1401,20 @@ let
       execStart = unit.serviceConfig.ExecStart;
       portClaim = noYourkitConfig.ix.networking.portClaims.minestom-yourkit or null;
     };
+
+  nomadSecretRefsExample = import ../examples/nomad-secret-refs/example.nix {
+    index = {
+      lib = ix;
+    };
+  };
+  invalidSecretNameEval = builtins.tryEval (
+    builtins.deepSeq
+      (ix.secrets.normalize {
+        provider.type = "vaultwarden";
+        values."../aws.env".key = "daily-scraper/aws-env";
+      }).refs
+      true
+  );
 
   # --- Per-image assertion groups -------------------------------------------
 
@@ -2484,6 +2509,63 @@ let
         message = "cargo-unit workspaces should expose an unused dependency policy check by default";
       }
       {
+        assertion =
+          let
+            inherit (nomadSecretRefsExample) secretSet;
+          in
+          secretSet.provider.type == "vaultwarden"
+          && secretSet.provider.client == "rbw"
+          && secretSet.provider.folder == "production"
+          && secretSet.refs."daily-scraper/aws.env" == "/run/ix-secrets/daily-scraper/aws.env"
+          && secretSet.values."daily-scraper/aws.env".key == "daily-scraper/aws-env"
+          && secretSet.values."daily-scraper/aws.env".field == "notes";
+        message = "secret refs should normalize provider keys and consumer paths generically";
+      }
+      {
+        assertion =
+          let
+            job = builtins.readFile nomadSecretRefsExample.nomadJob;
+          in
+          lib.hasInfix ''source      = "/run/ix-secrets/daily-scraper/aws.env"'' job
+          && lib.hasInfix ''destination = "secrets/aws.env"'' job
+          && lib.hasInfix "env         = true" job;
+        message = "secret refs should render into a Nomad environment template";
+      }
+      {
+        assertion =
+          let
+            manifest = builtins.fromJSON (builtins.readFile nomadSecretRefsExample.kubernetesExternalSecret);
+          in
+          manifest.kind == "ExternalSecret"
+          && manifest.metadata.namespace == "batch"
+          && manifest.spec.secretStoreRef.name == "vaultwarden"
+          && builtins.length manifest.spec.data == 2;
+        message = "secret refs should render into a Kubernetes external secret manifest";
+      }
+      {
+        assertion = nomadSecretRefsExample.checkSecrets.meta.mainProgram == "check-secret-refs";
+        message = "Vaultwarden secret refs should expose an rbw preflight command";
+      }
+      {
+        assertion =
+          nomadSecretRefsExample.materializeSecrets.meta.mainProgram == "materialize-secret-refs"
+          && lib.hasInfix "rbw" nomadSecretRefsExample.materializeSecrets.meta.description;
+        message = "Vaultwarden secret refs should expose an rbw materializer command";
+      }
+      {
+        assertion =
+          nomadSecretRefsExample.validateNomadJob.meta.mainProgram == "nomad-daily-scraper-secrets-validate";
+        message = "Nomad secret refs should compose check, materialize, and job validation";
+      }
+      {
+        assertion = nomadSecretRefsExample.e2e.name == "nomad-secret-refs-e2e";
+        message = "Nomad secret refs should expose a pure check/materialize/validate e2e derivation";
+      }
+      {
+        assertion = !invalidSecretNameEval.success;
+        message = "secret refs should reject unsafe relative names during eval";
+      }
+      {
         assertion = cargoUnitWorkspace.policyChecks ? cargoAudit;
         message = "cargo-unit workspaces should expose a cargo-audit policy check by default";
       }
@@ -2772,6 +2854,11 @@ let
       }
       {
         assertion =
+          fleet.nodes.web.environment.etc."session-key-ref".text == "/run/secrets/fleet/sessionKey";
+        message = "fleet node modules should be able to consume declarative secret refs";
+      }
+      {
+        assertion =
           let
             bootstrap =
               (ix.evalImageConfig {
@@ -2874,7 +2961,12 @@ let
         message = "fleet plans should reject cyclic dependsOn entries during eval";
       }
       {
-        assertion = fleet.planValue.secrets.sessionKey.generate;
+        assertion =
+          fleet.planValue.secrets.provider.type == "vaultwarden"
+          && fleet.planValue.secrets.provider.collection == "production"
+          && fleet.planValue.secrets.values.sessionKey.key == "web/session-key"
+          && fleet.planValue.secrets.values.sessionKey.path == "/run/secrets/fleet/sessionKey"
+          && fleet.planValue.secrets.values.sessionKey.generate;
         message = "fleet plans should carry declarative secret specs";
       }
       {
@@ -3054,6 +3146,8 @@ let
   };
 
   helperScript = ''
+    test -e ${nomadSecretRefsExample.e2e}
+
     ${lib.getExe pythonAppClosureProbe} > python-app-closure-probe.out
     grep -q 'python app source is in the runtime closure' python-app-closure-probe.out
 

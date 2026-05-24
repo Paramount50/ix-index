@@ -29,15 +29,32 @@ ix up
 
 The example leaves S3 sync disabled. [`service.nix`](service.nix) reads a
 `dailyScraper` module argument, so a fleet can enable S3 without forking the
-service module:
+service module. The fleet declares the secret once, then the VM module consumes
+the generated runtime file reference:
 
 ```nix
 {
-  _module.args.dailyScraper.s3 = {
-    uri = "s3://andrew-scraper-output/github";
-    deleteRemoved = true;
-    awsEnvironmentFile = "/run/secrets/daily-scraper/aws.env";
+  secrets = {
+    provider = {
+      type = "vaultwarden";
+      mountRoot = "/run/secrets";
+      collection = "production";
+    };
+    "daily-scraper/aws.env".key = "daily-scraper/aws-env";
   };
+
+  nodes.scraper.modules = [
+    (
+      { secretRefs, ... }:
+      {
+        _module.args.dailyScraper.s3 = {
+          uri = "s3://andrew-scraper-output/github";
+          deleteRemoved = true;
+          awsEnvironmentFile = secretRefs."daily-scraper/aws.env";
+        };
+      }
+    )
+  ];
 };
 ```
 
@@ -48,6 +65,26 @@ kept out of the Nix store. Its contents use systemd `EnvironmentFile` syntax:
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
 AWS_REGION=us-east-1
+```
+
+The generated fleet plan carries the provider-facing key and the VM-facing path:
+
+```json
+{
+  "secrets": {
+    "provider": {
+      "type": "vaultwarden",
+      "mountRoot": "/run/secrets",
+      "collection": "production"
+    },
+    "values": {
+      "daily-scraper/aws.env": {
+        "key": "daily-scraper/aws-env",
+        "path": "/run/secrets/daily-scraper/aws.env"
+      }
+    }
+  }
+}
 ```
 
 ## Swap In Your Script

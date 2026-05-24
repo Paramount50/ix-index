@@ -213,6 +213,9 @@ let
     validTypeCheckingModes = basedpyrightTypeCheckingModes;
   };
   buildGradleFatJar = import ./build-gradle-fat-jar.nix { inherit lib; };
+  secrets = import ./secrets.nix {
+    inherit lib pkgs writeNushellApplication;
+  };
   languages = {
     cpp = import ./languages/cpp.nix { inherit errors; };
     elixir = import ./languages/elixir.nix { inherit errors; };
@@ -728,6 +731,7 @@ let
       mkMinecraftNbtFormat
       mkMinecraftSyncManaged
       relativePath
+      secrets
       systemdHardening
       uvLock
       uvLockFor
@@ -818,6 +822,7 @@ let
         bootstrapImage
         ;
       pkgs = hostPkgs;
+      secretsLib = secrets;
       ixFleet = (packageSetFor hostPkgs).ix-fleet;
     };
 
@@ -1014,6 +1019,7 @@ let
       mkMinecraftSyncManaged
       packageSetFor
       relativePath
+      secrets
       systemdHardening
       uvLock
       uvLockFor

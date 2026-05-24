@@ -66,6 +66,30 @@ class FleetPlanValidationTests(unittest.TestCase):
             ["db", "web"],
         )
 
+    def test_accepts_declarative_secret_backend_and_refs(self) -> None:
+        data = fleet_plan(["web"], [fleet_node("web")])
+        data["secrets"] = {
+            "provider": {
+                "type": "vaultwarden",
+                "mountRoot": "/run/secrets/fleet",
+                "collection": "production",
+            },
+            "values": {
+                "sessionKey": {
+                    "key": "web/session-key",
+                    "path": "/run/secrets/fleet/sessionKey",
+                    "generate": True,
+                },
+            },
+        }
+
+        plan = ix_fleet.FleetPlan.model_validate(data)
+
+        self.assertEqual(plan.secrets.provider.type, "vaultwarden")
+        self.assertEqual(plan.secrets.provider.model_extra, {"collection": "production"})
+        self.assertEqual(plan.secrets.values["sessionKey"].path, "/run/secrets/fleet/sessionKey")
+        self.assertEqual(plan.secrets.values["sessionKey"].model_extra, {"generate": True})
+
 
 class PushReplacementImageTests(unittest.TestCase):
     def test_uses_image_subcommand(self) -> None:

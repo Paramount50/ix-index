@@ -10,6 +10,7 @@
 {
   lib,
   pkgs,
+  secretsLib,
   evalImageConfig,
   ixFleet,
   writeNushellApplication,
@@ -45,6 +46,8 @@ let
     snapshot = true;
     switch.buildOn = "remote";
   };
+  secretSet = secretsLib.normalize secrets;
+  secretRefs = secretSet.refs;
 
   mergeDeployments =
     parts:
@@ -208,6 +211,8 @@ let
             inherit name;
             nodes = nodeRefs;
             fleet.nodes = nodeRefs;
+            inherit secretRefs;
+            fleet.secretRefs = secretRefs;
           };
 
           ix.image.name = lib.mkDefault name;
@@ -302,7 +307,7 @@ let
   planValue = {
     order = builtins.attrNames checkedNodeSpecs;
     nodes = nodePlan;
-    inherit secrets;
+    secrets = secretSet.plan;
   };
 
   plan = pkgs.writeText "ix-fleet-plan.json" (builtins.toJSON planValue);

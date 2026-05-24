@@ -85,12 +85,37 @@ class FleetNode(BaseModel):
     healthChecks: dict[str, HealthCheck] = Field(default_factory=dict)
 
 
+class SecretProvider(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    type: str = Field(min_length=1)
+    mountRoot: str = Field(min_length=1)
+
+
+class SecretSpec(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    key: str = Field(min_length=1)
+    path: str = Field(min_length=1)
+
+
+class FleetSecrets(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    provider: SecretProvider
+    values: dict[str, SecretSpec] = Field(default_factory=dict)
+
+
 class FleetPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     order: list[str]
     nodes: dict[str, FleetNode]
-    secrets: dict[str, typing.Any] = Field(default_factory=dict)
+    secrets: FleetSecrets = Field(
+        default_factory=lambda: FleetSecrets(
+            provider=SecretProvider(type="runtime-directory", mountRoot="/run/secrets"),
+        )
+    )
 
     @model_validator(mode="after")
     def validate_graph(self) -> typing.Self:
