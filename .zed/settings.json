@@ -1,15 +1,11 @@
 {
-  "auto_install_extensions": {
-    "nix": true,
-    "nu": true
-  },
   "file_types": {
     "Nu": ["nu"],
     "JSONC": ["common.json", "*-mods.json"]
   },
   "languages": {
     "Nix": {
-      "language_servers": ["nixd", "!nil"],
+      "language_servers": ["typenix", "!nil", "!nixd"],
       "formatter": {
         "external": {
           "command": "nixfmt",
@@ -39,11 +35,10 @@
     }
   },
   "lsp": {
-    "nixd": {
-      "initialization_options": {
-        "formatting": {
-          "command": ["nixfmt"]
-        }
+    "typenix": {
+      "binary": {
+        "path": "typenix-lsp",
+        "arguments": []
       }
     },
     "basedpyright": {
