@@ -103,8 +103,6 @@ let
     output-dir = cfg.runtimeDirectory;
     interval-seconds = cfg.intervalSeconds;
     df = lib.getExe' pkgs.coreutils "df";
-  }
-  // {
     total-cores = metricValues.vcpu;
     total-memory-gib = metricValues.memoryGiB;
     total-storage-tib = metricValues.storageTiB;

@@ -11,7 +11,7 @@ export type UsageStats = {
 };
 
 // vm-config.json is the single source of truth shared with default.nix's
-// Nushell stats writer. Edit values there; never inline a constant here.
+// Rust stats writer. Edit values there; never inline a constant here.
 export const SERVER = vmConfig.server;
 export const BILLING = vmConfig.billing;
 
