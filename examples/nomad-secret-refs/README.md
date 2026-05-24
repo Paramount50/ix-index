@@ -56,11 +56,11 @@ lib.getExe pkgs.nomad` from an allowed package set. Switch that final verb to
 `run` when the deployment pipeline should submit the job instead of only
 validating it.
 
-[`example.nix`](example.nix) also exposes `e2e`, a pure derivation that swaps in
-fake `rbw` and fake `nomad` binaries. It proves the chain without contacting a
-real Vaultwarden server: the fake rbw accepts only the declared folder, field,
-and key; the fake Nomad validates the rendered template source; the derivation
-checks the materialized env file and its `0600` mode.
+[`example.nix`](example.nix) also exposes `buildCheck`, a pure derivation backed
+by Nix assertions over structured command metadata. It verifies that the provider
+adapter calls the real `pkgs.rbw` binary, carries the `production` folder and
+`notes` field, and renders the Nomad template path the materializer will create
+at runtime.
 
 ## Nomad Consumer
 

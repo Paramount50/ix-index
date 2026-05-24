@@ -2558,8 +2558,12 @@ let
         message = "Nomad secret refs should compose check, materialize, and job validation";
       }
       {
-        assertion = nomadSecretRefsExample.e2e.name == "nomad-secret-refs-e2e";
-        message = "Nomad secret refs should expose a pure check/materialize/validate e2e derivation";
+        assertion = nomadSecretRefsExample.buildCheck.name == "nomad-secret-refs-build-check";
+        message = "Nomad secret refs should expose a pure build check that keeps real rbw wired";
+      }
+      {
+        assertion = lib.all (passed: passed) (lib.attrValues nomadSecretRefsExample.buildChecks);
+        message = "Nomad secret refs build checks should be declarative Nix assertions";
       }
       {
         assertion = !invalidSecretNameEval.success;
@@ -3146,7 +3150,7 @@ let
   };
 
   helperScript = ''
-    test -e ${nomadSecretRefsExample.e2e}
+    test -e ${nomadSecretRefsExample.buildCheck}
 
     ${lib.getExe pythonAppClosureProbe} > python-app-closure-probe.out
     grep -q 'python app source is in the runtime closure' python-app-closure-probe.out

@@ -73,95 +73,113 @@ let
     };
 
   rbwCheckCommand =
-    {
-      provider,
-      values,
-      rbwProgram ? lib.getExe pkgs.rbw,
-    }:
-    writeNushellApplication pkgs {
-      name = "check-secret-refs";
-      text = ''
-        def check-secret [key: string, field: any, folder: any] {
-          let folder_args = if ($folder | is-empty) { [] } else { [--folder $folder] }
-          let value_args = if ($field | is-empty) { [--raw] } else { [--field $field] }
-          ^${rbwProgram} get ...$folder_args ...$value_args $key | ignore
-        }
-
-        def --wrapped main [...names: string] {
-          let requested = if ($names | is-empty) {
-            ${builtins.toJSON (lib.attrNames values)}
-          } else {
-            $names
-          }
-          let known = ${builtins.toJSON (lib.attrNames values)}
-          let keys = ${builtins.toJSON (lib.mapAttrs (_name: value: value.key) values)}
-          let fields = ${builtins.toJSON (lib.mapAttrs (_name: value: value.field or null) values)}
-          let folders = ${
-            builtins.toJSON (lib.mapAttrs (_name: value: value.folder or provider.folder or null) values)
+    args:
+    let
+      inherit (args) provider values;
+      rbwProgram = args.rbwProgram or (lib.getExe pkgs.rbw);
+      command = writeNushellApplication pkgs {
+        name = "check-secret-refs";
+        text = ''
+          def check-secret [key: string, field: any, folder: any] {
+            let folder_args = if ($folder | is-empty) { [] } else { [--folder $folder] }
+            let value_args = if ($field | is-empty) { [--raw] } else { [--field $field] }
+            ^${rbwProgram} get ...$folder_args ...$value_args $key | ignore
           }
 
-          for name in $requested {
-            if not ($name in $known) {
-              error make { msg: $"unknown secret ref ($name)" }
+          def --wrapped main [...names: string] {
+            let requested = if ($names | is-empty) {
+              ${builtins.toJSON (lib.attrNames values)}
+            } else {
+              $names
             }
-            let key = ($keys | get $name)
-            let field = ($fields | get $name)
-            let folder = ($folders | get $name)
-            check-secret $key $field $folder
+            let known = ${builtins.toJSON (lib.attrNames values)}
+            let keys = ${builtins.toJSON (lib.mapAttrs (_name: value: value.key) values)}
+            let fields = ${builtins.toJSON (lib.mapAttrs (_name: value: value.field or null) values)}
+            let folders = ${
+              builtins.toJSON (lib.mapAttrs (_name: value: value.folder or provider.folder or null) values)
+            }
+
+            for name in $requested {
+              if not ($name in $known) {
+                error make { msg: $"unknown secret ref ($name)" }
+              }
+              let key = ($keys | get $name)
+              let field = ($fields | get $name)
+              let folder = ($folders | get $name)
+              check-secret $key $field $folder
+            }
           }
-        }
-      '';
-      meta.description = "Fail fast when declared ${provider.type} secret refs are missing";
+        '';
+        meta.description = "Fail fast when declared ${provider.type} secret refs are missing";
+      };
+    in
+    command
+    // {
+      passthru = (command.passthru or { }) // {
+        secretPlan = {
+          inherit provider values;
+        };
+        inherit rbwProgram;
+      };
     };
 
   rbwMaterializeCommand =
-    {
-      provider,
-      values,
-      rbwProgram ? lib.getExe pkgs.rbw,
-    }:
-    writeNushellApplication pkgs {
-      name = "materialize-secret-refs";
-      text = ''
-        def read-secret [key: string, field: any, folder: any] {
-          let folder_args = if ($folder | is-empty) { [] } else { [--folder $folder] }
-          if ($field | is-empty) {
-            ^${rbwProgram} get ...$folder_args $key
-          } else {
-            ^${rbwProgram} get ...$folder_args --field $field $key
-          }
-        }
-
-        def --wrapped main [...names: string] {
-          let requested = if ($names | is-empty) {
-            ${builtins.toJSON (lib.attrNames values)}
-          } else {
-            $names
-          }
-          let known = ${builtins.toJSON (lib.attrNames values)}
-          let keys = ${builtins.toJSON (lib.mapAttrs (_name: value: value.key) values)}
-          let paths = ${builtins.toJSON (lib.mapAttrs (_name: value: value.path) values)}
-          let fields = ${builtins.toJSON (lib.mapAttrs (_name: value: value.field or null) values)}
-          let folders = ${
-            builtins.toJSON (lib.mapAttrs (_name: value: value.folder or provider.folder or null) values)
+    args:
+    let
+      inherit (args) provider values;
+      rbwProgram = args.rbwProgram or (lib.getExe pkgs.rbw);
+      command = writeNushellApplication pkgs {
+        name = "materialize-secret-refs";
+        text = ''
+          def read-secret [key: string, field: any, folder: any] {
+            let folder_args = if ($folder | is-empty) { [] } else { [--folder $folder] }
+            if ($field | is-empty) {
+              ^${rbwProgram} get ...$folder_args $key
+            } else {
+              ^${rbwProgram} get ...$folder_args --field $field $key
+            }
           }
 
-          for name in $requested {
-            if not ($name in $known) {
-              error make { msg: $"unknown secret ref ($name)" }
+          def --wrapped main [...names: string] {
+            let requested = if ($names | is-empty) {
+              ${builtins.toJSON (lib.attrNames values)}
+            } else {
+              $names
+            }
+            let known = ${builtins.toJSON (lib.attrNames values)}
+            let keys = ${builtins.toJSON (lib.mapAttrs (_name: value: value.key) values)}
+            let paths = ${builtins.toJSON (lib.mapAttrs (_name: value: value.path) values)}
+            let fields = ${builtins.toJSON (lib.mapAttrs (_name: value: value.field or null) values)}
+            let folders = ${
+              builtins.toJSON (lib.mapAttrs (_name: value: value.folder or provider.folder or null) values)
             }
 
-            let key = ($keys | get $name)
-            let path = ($paths | get $name)
-            let field = ($fields | get $name)
-            let folder = ($folders | get $name)
-            mkdir ($path | path dirname)
-            read-secret $key $field $folder | save --force $path
-            chmod 0600 $path
+            for name in $requested {
+              if not ($name in $known) {
+                error make { msg: $"unknown secret ref ($name)" }
+              }
+
+              let key = ($keys | get $name)
+              let path = ($paths | get $name)
+              let field = ($fields | get $name)
+              let folder = ($folders | get $name)
+              mkdir ($path | path dirname)
+              read-secret $key $field $folder | save --force $path
+              chmod 0600 $path
+            }
           }
-        }
-      '';
-      meta.description = "Materialize declared ${provider.type} secret refs through rbw";
+        '';
+        meta.description = "Materialize declared ${provider.type} secret refs through rbw";
+      };
+    in
+    command
+    // {
+      passthru = (command.passthru or { }) // {
+        secretPlan = {
+          inherit provider values;
+        };
+        inherit rbwProgram;
+      };
     };
 
   nomadEnvTemplates =
@@ -194,22 +212,37 @@ let
     let
       configJson = builtins.toJSON ({ inherit image; } // config);
       templates = nomadEnvTemplates envSecretRefs;
-    in
-    pkgs.writeText "nomad-${name}.hcl" ''
-      job ${builtins.toJSON name} {
-        datacenters = ${builtins.toJSON datacenters}
+      job = pkgs.writeText "nomad-${name}.hcl" ''
+        job ${builtins.toJSON name} {
+          datacenters = ${builtins.toJSON datacenters}
 
-        group ${builtins.toJSON group} {
-          task ${builtins.toJSON task} {
-            driver = ${builtins.toJSON driver}
+          group ${builtins.toJSON group} {
+            task ${builtins.toJSON task} {
+              driver = ${builtins.toJSON driver}
 
-            config = ${configJson}
+              config = ${configJson}
 
-      ${lib.concatStringsSep "\n" (map renderNomadTemplate templates)}
+        ${lib.concatStringsSep "\n" (map renderNomadTemplate templates)}
+            }
           }
         }
-      }
-    '';
+      '';
+    in
+    job
+    // {
+      passthru = (job.passthru or { }) // {
+        inherit
+          config
+          datacenters
+          driver
+          group
+          image
+          name
+          task
+          templates
+          ;
+      };
+    };
 
   nomadRunCommand =
     {
@@ -224,21 +257,35 @@ let
       checkSecrets = rbwCheckCommand (secretSet.plan // { inherit rbwProgram; });
       materializeSecrets = rbwMaterializeCommand (secretSet.plan // { inherit rbwProgram; });
       action = if run then "run" else "validate";
+      command = writeNushellApplication pkgs {
+        name = "nomad-${name}-secrets-${action}";
+        runtimeInputs = [
+          checkSecrets
+          materializeSecrets
+        ];
+        text = ''
+          def --wrapped main [...args] {
+            check-secret-refs
+            materialize-secret-refs
+            ^${nomadProgram} job ${action} ${job} ...$args
+          }
+        '';
+        meta.description = "Check Vaultwarden refs, materialize files, then nomad job ${action}";
+      };
     in
-    writeNushellApplication pkgs {
-      name = "nomad-${name}-secrets-${action}";
-      runtimeInputs = [
-        checkSecrets
-        materializeSecrets
-      ];
-      text = ''
-        def --wrapped main [...args] {
-          check-secret-refs
-          materialize-secret-refs
-          ^${nomadProgram} job ${action} ${job} ...$args
-        }
-      '';
-      meta.description = "Check Vaultwarden refs, materialize files, then nomad job ${action}";
+    command
+    // {
+      passthru = (command.passthru or { }) // {
+        inherit
+          action
+          checkSecrets
+          job
+          materializeSecrets
+          nomadProgram
+          rbwProgram
+          secretSet
+          ;
+      };
     };
 
   renderKubernetesExternalSecret =
