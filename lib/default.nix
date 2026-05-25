@@ -151,26 +151,15 @@ let
     as `pkgs.<name>`. Flake-output-only packages live in `packageSetFor`
     instead so they don't leak into the nixpkgs namespace inside images.
   */
-  overlay =
-    final: _prev:
-    let
-      ixForOverlay = {
-        buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
-      };
-      checkedOciImageBuilder = final.callPackage paths.packages.ociImageBuilder {
-        pkgs = final;
-        ix = ixForOverlay;
-      };
-    in
-    {
-      drgn = final.callPackage paths.packages.drgn { };
+  overlay = final: _prev: {
+    drgn = final.callPackage paths.packages.drgn { };
 
-      minecraft-hot-reload-agent = final.callPackage paths.packages.minecraft.hotReloadAgent { };
-      minecraft-rcon = final.callPackage paths.packages.minecraft.rcon {
-        writePythonApplication = writePythonApplication final;
-      };
-      oci-image-builder = checkedOciImageBuilder.passthru.unchecked or checkedOciImageBuilder;
+    minecraft-hot-reload-agent = final.callPackage paths.packages.minecraft.hotReloadAgent { };
+    minecraft-rcon = final.callPackage paths.packages.minecraft.rcon {
+      writePythonApplication = writePythonApplication final;
     };
+    oci-image-builder = buildIxRustTool final paths.packages.ociImageBuilder;
+  };
   overlays = [ overlay ];
 
   /**
@@ -189,7 +178,6 @@ let
     import ./bun-lock.nix {
       inherit lib pkgs;
     };
-  bunLock = bunLockFor pkgs;
   buildBunSite = import ./build-bun-site.nix {
     inherit bunLockFor;
   };
@@ -199,7 +187,6 @@ let
     import ./uv-lock.nix {
       inherit lib pkgs;
     };
-  uvLock = uvLockFor pkgs;
   basedpyrightTypeCheckingModes = [
     "off"
     "basic"
@@ -266,20 +253,24 @@ let
       rustToolchain = rustNightlyToolchainFor pkgs;
       writePythonApplication = writePythonApplication pkgs;
     };
-  cargoUnitFor =
-    pkgs:
+  # Build a repo-owned Rust tool whose default.nix calls `ix.buildRustPackage`.
+  # Returns the policy-unchecked variant when present, so generators that
+  # only need the binary do not drag the policy-check graph into their closure.
+  buildIxRustTool =
+    hostPkgs: path:
     let
-      rust = rustFor pkgs;
-      checkedNixCargoUnit = pkgs.callPackage paths.packages.nixCargoUnit {
-        inherit pkgs;
-        ix = {
-          buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
-        };
+      checked = hostPkgs.callPackage path {
+        pkgs = hostPkgs;
+        ix.buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
       };
     in
+    checked.passthru.unchecked or checked;
+  cargoUnitFor =
+    pkgs:
     import ./cargo-unit.nix {
-      inherit lib pkgs rust;
-      nixCargoUnit = checkedNixCargoUnit.passthru.unchecked or checkedNixCargoUnit;
+      inherit lib pkgs;
+      rust = rustFor pkgs;
+      nixCargoUnit = buildIxRustTool pkgs paths.packages.nixCargoUnit;
     };
   cargoUnit = cargoUnitFor pkgs;
 
@@ -297,7 +288,7 @@ let
   /**
     Helpers that throw with a fixable error message instead of a deep-eval
     crash. See [`lib/errors.nix`](lib/errors.nix) for the full surface:
-    `assertEnum`, `atMostOne`, `exactlyOne`, `requireAttr`, `requireInput`.
+    `assertEnum`, `requireArg`, `requireAttr`.
   */
   errors = import ./errors.nix { inherit lib; };
 
@@ -426,13 +417,7 @@ let
         "zlib"
       ];
       jsonFormat = pkgs.formats.json { };
-      checkedMinecraftNbt = pkgs.callPackage paths.packages.minecraft.nbt {
-        inherit pkgs;
-        ix = {
-          buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
-        };
-      };
-      minecraftNbt = checkedMinecraftNbt.passthru.unchecked or checkedMinecraftNbt;
+      minecraftNbt = buildIxRustTool pkgs paths.packages.minecraft.nbt;
     in
     assert lib.assertMsg (builtins.elem format validFormats)
       "mkMinecraftNbtFormat: format must be one of ${lib.concatStringsSep ", " validFormats}";
@@ -465,17 +450,9 @@ let
   */
   mkMinecraftSyncManaged =
     args:
-    let
-      checkedPackage = pkgs.callPackage paths.packages.minecraft.syncManaged {
-        inherit pkgs;
-        ix = {
-          buildRustPackage = pkgs: (rustFor pkgs).buildPackage;
-        };
-      };
-    in
     import ./minecraft-sync-managed.nix (
       {
-        package = checkedPackage.passthru.unchecked or checkedPackage;
+        package = buildIxRustTool pkgs paths.packages.minecraft.syncManaged;
         inherit writeNushellApplication;
       }
       // args
@@ -720,11 +697,7 @@ let
       buildRustPackage
       buildNpmSite
       buildUvApplication
-      bunLock
-      bunLockFor
       cargoUnit
-      cargoUnitFor
-      errors
       languages
       minecraft
       mkMinecraftLoader
@@ -733,8 +706,6 @@ let
       relativePath
       secrets
       systemdHardening
-      uvLock
-      uvLockFor
       writeNushellApplication
       writePythonApplication
       ;
@@ -968,24 +939,7 @@ let
       map (e: lib.nameValuePair e.name (import e.path { index = indexShim; })) (flatPairs ++ nestedPairs)
     );
 
-  /**
-    Default-system shortcut over `exampleFleetsFor`. Used by aggregators
-    like `examplesHealthChecks` that only need plan data (which is
-    system-independent), not the wrapper derivations.
-  */
-  exampleFleets = exampleFleetsFor { hostSystem = system; };
-
-  /**
-    `ix.healthChecks` declared by every example, keyed by example name and
-    fleet node. Plain-data attrset suitable for `nix eval --json` and `jq`
-    pipelines; the `health-checks` Nu wrapper pretty-prints the same data
-    as a table.
-  */
-  examplesHealthChecks = lib.mapAttrs (
-    _name: fleet: lib.mapAttrs (_node: nodePlan: nodePlan.healthChecks) fleet.planValue.nodes
-  ) exampleFleets;
-
-  # Self-reference (let-bindings are mutually recursive): `exampleFleets`
+  # Self-reference (let-bindings are mutually recursive): `exampleFleetsFor`
   # passes `ixReturn` back into examples as `index.lib`. Forced only when
   # an example actually reads from it.
   ixReturn = {
@@ -997,21 +951,14 @@ let
       evalImageConfig
       mkImage
       mkFleet
-      mkFleetFor
       discoverImages
-      exampleFleets
       exampleFleetsFor
-      examplesHealthChecks
       artifacts
       buildBunSite
       buildGradleFatJar
       buildNpmSite
       buildUvApplication
-      bunLock
-      bunLockFor
       cargoUnit
-      cargoUnitFor
-      errors
       languages
       minecraft
       mkMinecraftLoader
@@ -1021,8 +968,6 @@ let
       relativePath
       secrets
       systemdHardening
-      uvLock
-      uvLockFor
       writeNushellApplication
       writePythonApplication
       ;
