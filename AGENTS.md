@@ -41,9 +41,36 @@ If the shared checkout already has unrelated edits, name the paths and the one
 line summary of what they appear to be doing before creating the new worktree.
 Avoid stashing operator work out of the way.
 
-After local checks pass, push the branch and open a PR targeting `main`. Enable
-auto-merge when branch protection and review state allow it. Remove the worktree
-and delete the local branch after the PR has merged.
+After local checks pass, push the branch and open a PR targeting `main`. Watch
+required checks with `gh pr checks --watch --fail-fast`; if a check fails,
+inspect the run logs, fix the branch, push again, and keep watching until the PR
+is green.
+
+`gh pr checks` may show stale failed runs next to newer passing reruns for the
+same check name. When the output is mixed, inspect
+`gh pr view --json mergeStateStatus,statusCheckRollup,latestReviews` and trust
+the latest run for the current head SHA rather than the oldest failure in the
+list.
+
+Treat PR comments and reviews as part of the work. Read them with
+`gh pr view --comments` and the review fields from `gh pr view --json reviews`.
+Address Codex comments in code when they identify a real issue, reply when a
+comment is intentionally declined, and resolve review threads before enabling
+auto-merge. Enable auto-merge only after required checks pass and required
+review state is clear.
+
+Unresolved Codex review threads are immediate blockers. Do not wait on more
+checks when Codex has left an open thread: fix the code or resolve the thread
+with the GitHub review-thread API, then request a fresh Codex review if the head
+changed. If the head did not change and GitHub does not rerun the failed gate,
+rerun it with `gh run rerun <run-id> --failed`.
+
+When manually triggering Codex, include the full current head SHA in the request,
+for example `@codex review head <sha>`. This gives no-findings responses a
+specific revision to answer. Avoid sending a later generic `@codex review` for
+the same head because it weakens that audit trail.
+
+Remove the worktree and delete the local branch after the PR has merged.
 
 Commit one logical change at a time. Use the pathspec form so unrelated staged
 or unstaged files cannot ride along:
