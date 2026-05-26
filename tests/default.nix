@@ -1069,6 +1069,23 @@ let
     ];
   };
 
+  vitestWorkspaceFixture = fs.toSource {
+    root = ./fixtures/vitest-workspace;
+    fileset = fs.unions [
+      ./fixtures/vitest-workspace/package-lock.json
+      ./fixtures/vitest-workspace/package.json
+      ./fixtures/vitest-workspace/src
+      ./fixtures/vitest-workspace/vitest.config.js
+    ];
+  };
+
+  vitestWorkspace = ix.buildNpmVitest pkgs {
+    pname = "vitest-workspace-fixture";
+    version = "0.1.0";
+    src = vitestWorkspaceFixture;
+  };
+  vitestWorkspaceCases = builtins.attrValues vitestWorkspace.cases;
+
   svelteSite = ix.buildSvelteSite pkgs {
     pname = "svelte-site-fixture";
     version = "0.1.0";
@@ -2277,6 +2294,29 @@ let
       {
         assertion = !(builtins.elem "cursor-cli" developmentBase.packageNames);
         message = "development-base should keep unrelated unfree CLIs out of the image";
+      }
+    ];
+
+    vitest = [
+      {
+        assertion = builtins.length vitestWorkspaceCases == 2;
+        message = "vitest workspace fixture should enumerate one case per project";
+      }
+      {
+        assertion = lib.all (
+          case:
+          case.testProject != null
+          && case.testFile == "src/shared.test.js"
+          &&
+            case.vitestArgs == [
+              "src/shared.test.js"
+              "--project"
+              case.testProject
+              "--testNamePattern"
+              "^shared project case$"
+            ]
+        ) vitestWorkspaceCases;
+        message = "vitest per-case checks should filter project-specific manifest entries by project";
       }
     ];
 
@@ -3512,6 +3552,8 @@ let
         echo "xattrs are not supported by the Nix build sandbox filesystem; checked activation rendering by eval"
       fi
     '';
+
+    vitest = lib.concatMapStringsSep "\n" (case: "test -d ${case}") vitestWorkspaceCases;
 
     minecraft = ''
       ! grep -R 'rcon.password' ${minecraft.rcon.managed.serverFiles}
