@@ -5,7 +5,7 @@ use std::io;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use clap::Parser;
 use serde_json::Value;
 
@@ -62,6 +62,34 @@ fn managed_files(source_dir: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
+fn validate_rel_path_shape(rel: &str) -> Result<()> {
+    ensure!(!rel.is_empty(), "path is empty");
+
+    ensure!(!Path::new(rel).is_absolute(), "path is absolute: {rel}");
+
+    if rel
+        .split('/')
+        .any(|segment| segment.is_empty() || segment == "." || segment == "..")
+    {
+        bail!("path contains unsafe segment: {rel}");
+    }
+
+    Ok(())
+}
+
+fn validate_rel_path(rel: &str) -> Result<()> {
+    validate_rel_path_shape(rel)?;
+
+    if !rel
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '/' | '+' | '-'))
+    {
+        bail!("path contains shell-sensitive or unsafe characters: {rel}");
+    }
+
+    Ok(())
+}
+
 fn collect_managed_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> Result<()> {
     for entry in fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
         let entry = entry.with_context(|| format!("reading entry in {}", dir.display()))?;
@@ -90,8 +118,9 @@ fn collect_managed_files(root: &Path, dir: &Path, files: &mut Vec<String>) -> Re
     Ok(())
 }
 
-fn manifest_rel(line: &str) -> &str {
-    line.split_once(' ').map_or(line, |(rel, _)| rel)
+fn manifest_entry(line: &str) -> (&str, Option<&str>) {
+    line.rsplit_once(' ')
+        .map_or((line, None), |(rel, target)| (rel, Some(target)))
 }
 
 fn read_manifest_lines(manifest: &Path) -> Result<Vec<String>> {
@@ -121,11 +150,19 @@ fn sync_tree(
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
 
-    for line in read_manifest_lines(manifest)? {
-        let rel = manifest_rel(&line);
-        if !rel.is_empty() && !preserve_removed.contains(rel) {
-            remove_if_present(&target_dir.join(rel))?;
+    for (i, line) in read_manifest_lines(manifest)?.into_iter().enumerate() {
+        let (rel, _) = manifest_entry(&line);
+        if rel.is_empty() || preserve_removed.contains(rel) {
+            continue;
         }
+        validate_rel_path_shape(rel).with_context(|| {
+            format!(
+                "checking manifest path safety in {} at line {}",
+                manifest.display(),
+                i + 1
+            )
+        })?;
+        remove_if_present(&target_dir.join(rel))?;
     }
 
     let tmp = manifest.with_file_name(format!(
@@ -141,6 +178,12 @@ fn sync_tree(
 
     let mut manifest_lines = String::new();
     for rel in managed_files(source_dir)? {
+        validate_rel_path(&rel).with_context(|| {
+            format!(
+                "checking managed file path safety in {}",
+                source_dir.display()
+            )
+        })?;
         let source_path = source_dir.join(&rel);
         let target_path = target_dir.join(&rel);
         if let Some(parent) = target_path.parent() {
@@ -169,9 +212,11 @@ fn sync_tree(
 }
 
 fn managed_target_for(manifest: &Path, rel: &str) -> Result<Option<String>> {
-    let prefix = format!("{rel} ");
     for line in read_manifest_lines(manifest)? {
-        if let Some(target) = line.strip_prefix(&prefix) {
+        let (entry_rel, target) = manifest_entry(&line);
+        if entry_rel == rel
+            && let Some(target) = target
+        {
             return Ok(Some(target.to_owned()));
         }
     }
@@ -260,7 +305,7 @@ fn plan_dropin_reloads(config: &Config, plan: &mut BTreeSet<(String, String)>) -
     }
 
     for line in read_manifest_lines(&dropin_manifest)? {
-        let rel = manifest_rel(&line);
+        let (rel, _) = manifest_entry(&line);
         if !is_jar_path(rel) || rel == "PlugManX.jar" {
             continue;
         }
@@ -305,7 +350,7 @@ fn plan_server_file_reloads(config: &Config, plan: &mut BTreeSet<(String, String
     }
 
     for line in read_manifest_lines(&server_manifest)? {
-        let rel = manifest_rel(&line);
+        let (rel, _) = manifest_entry(&line);
         let Some(plugin) = plugin_name_from_config_path(rel) else {
             continue;
         };
@@ -624,6 +669,7 @@ fn main() -> Result<()> {
         &BTreeSet::from(["ops.json".to_owned(), "whitelist.json".to_owned()]),
     )?;
     for world in &config.datapack_worlds {
+        validate_rel_path_shape(world).context("checking datapack world name safety")?;
         sync_tree(
             &config.managed_root.join("managed-datapacks"),
             &config.data_dir.join(world).join("datapacks"),
@@ -650,6 +696,53 @@ mod tests {
             ("uuid".to_owned(), Value::String(uuid.to_owned())),
             ("name".to_owned(), Value::String(name.to_owned())),
         ]))
+    }
+
+    #[test]
+    fn validate_rel_path_rejects_unsafe_paths() {
+        assert!(validate_rel_path("safe/path.json").is_ok());
+        assert!(validate_rel_path("config.toml").is_ok());
+        assert!(validate_rel_path("mods/pack+v1..2.toml").is_ok());
+
+        assert!(validate_rel_path("My World").is_err());
+        assert!(validate_rel_path("../escape.json").is_err());
+        assert!(validate_rel_path("path/../escape.json").is_err());
+        assert!(validate_rel_path("./escape.json").is_err());
+        assert!(validate_rel_path("path/./escape.json").is_err());
+        assert!(validate_rel_path("path//escape.json").is_err());
+        assert!(validate_rel_path("path/escape.json/").is_err());
+        assert!(validate_rel_path("/absolute/path").is_err());
+        assert!(validate_rel_path("path with space.json").is_err());
+        assert!(validate_rel_path("path;with;shell").is_err());
+        assert!(validate_rel_path("path/with$(cmd)").is_err());
+        assert!(validate_rel_path("path/with`cmd`").is_err());
+        assert!(validate_rel_path("path/with|pipe").is_err());
+        assert!(validate_rel_path("path/with\\backslash").is_err());
+        assert!(validate_rel_path("").is_err());
+    }
+
+    #[test]
+    fn validate_rel_path_shape_allows_legacy_manifest_cleanup_paths() {
+        assert!(validate_rel_path_shape("plugins/Foo;Bar.yml").is_ok());
+        assert!(validate_rel_path_shape("plugins/with space.yml").is_ok());
+        assert!(validate_rel_path_shape("My World").is_ok());
+
+        assert!(validate_rel_path_shape("../escape.json").is_err());
+        assert!(validate_rel_path_shape("path/../escape.json").is_err());
+        assert!(validate_rel_path_shape("path//escape.json").is_err());
+        assert!(validate_rel_path_shape("/absolute/path").is_err());
+    }
+
+    #[test]
+    fn manifest_entry_keeps_legacy_paths_with_spaces() {
+        assert_eq!(
+            manifest_entry("plugins/Foo Bar.yml /nix/store/source"),
+            ("plugins/Foo Bar.yml", Some("/nix/store/source"))
+        );
+        assert_eq!(
+            manifest_entry("plugins/Foo;Bar.yml"),
+            ("plugins/Foo;Bar.yml", None)
+        );
     }
 
     #[test]

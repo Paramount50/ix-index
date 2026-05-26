@@ -55,6 +55,40 @@ let
     ) "duplicate .properties keys after flattening: ${lib.concatStringsSep ", " duplicateNames}";
     lib.listToAttrs pairs;
 
+  isSafeRelativePathShape =
+    path:
+    let
+      isAbsolute = lib.hasPrefix "/" path;
+      segments = lib.splitString "/" path;
+      hasParent = builtins.elem ".." segments;
+      hasCurrent = builtins.elem "." segments;
+      # Detects internal empty segments (//), leading empty (absolute), or trailing empty (config/).
+      hasEmpty = builtins.elem "" segments;
+    in
+    path != "" && !isAbsolute && !hasParent && !hasCurrent && !hasEmpty;
+
+  isSafeRelativePath =
+    path:
+    let
+      # Managed files are rendered through shell builders and later synced at
+      # runtime, so keep the module and sync-managed character policy aligned.
+      isSafe = builtins.match "^[a-zA-Z0-9._/+-]+$" path != null;
+    in
+    isSafeRelativePathShape path && isSafe;
+
+  isSafeRelativeName =
+    name:
+    let
+      isSafe = builtins.match "^[a-zA-Z0-9._+-]+$" name != null;
+      isParent = name == "..";
+      isCurrent = name == ".";
+    in
+    isSafe && !isParent && !isCurrent;
+
+  unsafePaths = paths: lib.filter (path: !isSafeRelativePath path) paths;
+  unsafePathShapes = paths: lib.filter (path: !isSafeRelativePathShape path) paths;
+  unsafeNames = names: lib.filter (name: !isSafeRelativeName name) names;
+
   modCatalogType = types.submodule {
     options = {
       url = mkOption { type = types.str; };
@@ -602,39 +636,31 @@ let
         datapack.src;
   }) enabledDatapacks;
   invalidManagedPaths =
-    lib.optional (
-      !(ix.relativePath.isSafeName cfg.dropinDir)
-    ) "services.minecraft.dropinDir=${cfg.dropinDir}"
+    lib.optional (!isSafeRelativeName cfg.dropinDir) "services.minecraft.dropinDir=${cfg.dropinDir}"
     ++ map (path: "services.minecraft.configFiles.${path}") (
-      ix.relativePath.unsafe (lib.attrNames cfg.configFiles)
+      unsafePaths (lib.attrNames cfg.configFiles)
     )
     ++ map (path: "services.minecraft.serverFiles.${path}") (
-      ix.relativePath.unsafe (lib.attrNames cfg.serverFiles)
+      unsafePaths (lib.attrNames cfg.serverFiles)
     )
-    ++ map (path: "services.minecraft.mods.${path}") (
-      ix.relativePath.unsafeNames (lib.attrNames cfg.mods)
-    )
-    ++ map (path: "services.minecraft.plugins.${path}") (
-      ix.relativePath.unsafeNames (lib.attrNames cfg.plugins)
-    )
+    ++ map (path: "services.minecraft.mods.${path}") (unsafeNames (lib.attrNames cfg.mods))
+    ++ map (path: "services.minecraft.plugins.${path}") (unsafeNames (lib.attrNames cfg.plugins))
     ++ lib.concatMap (
       name:
       let
         fileName = datapackFileName name cfg.datapacks.${name};
       in
       lib.optional (
-        !(ix.relativePath.isSafeName fileName)
+        !isSafeRelativeName fileName
       ) "services.minecraft.datapacks.${name}.fileName=${fileName}"
     ) (lib.attrNames cfg.datapacks)
     ++ lib.concatMap (
       name:
       map (path: "services.minecraft.datapacks.${name}.files.${path}") (
-        ix.relativePath.unsafe (datapackGeneratedPaths cfg.datapacks.${name})
+        unsafePaths (datapackGeneratedPaths cfg.datapacks.${name})
       )
     ) (lib.attrNames cfg.datapacks)
-    ++ map (path: "services.minecraft world directory ${path}") (
-      ix.relativePath.unsafe annotatedWorldNames
-    );
+    ++ map (path: "services.minecraft world directory ${path}") (unsafePathShapes annotatedWorldNames);
 
   managed =
     let
@@ -1098,7 +1124,7 @@ in
       }
       {
         assertion = invalidManagedPaths == [ ];
-        message = "services.minecraft managed paths must be relative paths without empty, '.', or '..' segments: ${lib.concatStringsSep ", " invalidManagedPaths}";
+        message = "services.minecraft managed paths must be relative paths without empty, '.', or '..' segments; managed file paths must also avoid shell-sensitive characters: ${lib.concatStringsSep ", " invalidManagedPaths}";
       }
       {
         assertion = rawAccessFileNames == [ ];
