@@ -1525,6 +1525,16 @@ let
       };
     }
   ];
+  velocityConcreteAddress = evalConfig [
+    {
+      services.velocity = {
+        enable = true;
+        address = "10.0.0.5";
+        port = 25570;
+        openFirewall = false;
+      };
+    }
+  ];
 
   relativePathUnsafeShellEval = builtins.tryEval (
     builtins.deepSeq (ix.relativePath.shellPath "$out" "../bad") true
@@ -2341,6 +2351,14 @@ let
         assertion =
           minecraft.cfg.properties."online-mode" && minecraft.cfg.properties."enforce-secure-profile";
         message = "default minecraft image should keep account authentication and secure profiles explicit";
+      }
+      {
+        assertion =
+          velocityConcreteAddress.ix.healthChecks.velocity-status.command == [
+            (lib.getExe repoPackages.mc-probe)
+            "10.0.0.5:25570"
+          ];
+        message = "velocity SLP health checks should probe concrete bind addresses";
       }
       {
         assertion =
