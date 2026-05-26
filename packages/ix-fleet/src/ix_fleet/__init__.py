@@ -659,8 +659,13 @@ async def replace_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
 
 async def up_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
     if dry_run:
-        verb = "recreate" if node.recreateOnUp else "ensure"
-        step(f"{verb} {node.name} from uploaded image {image}")
+        if node.recreateOnUp:
+            step(f"recreate {node.name} from uploaded image {image}")
+            run_cli(["ix", "rm", "--force", node.name], dry_run=dry_run)
+            await create_node(node, image, dry_run=dry_run)
+        else:
+            step(f"create or replace {node.name} from uploaded image {image}")
+            await replace_node(node, image, dry_run=dry_run)
         return
 
     existing = find_node(await list_nodes(), node.name)
@@ -678,8 +683,7 @@ async def up_node(node: FleetNode, image: str, *, dry_run: bool) -> None:
         await create_node(node, image, dry_run=dry_run)
         return
 
-    if existing.get("status") != "running":
-        run_cli(["ix", "start", node.name], dry_run=dry_run)
+    await replace_node(node, image, dry_run=dry_run)
 
 
 async def cmd_diff(plan: FleetPlan, args: argparse.Namespace) -> None:
