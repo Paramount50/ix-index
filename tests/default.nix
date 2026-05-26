@@ -680,6 +680,128 @@ let
     packages = [ "." ];
   };
 
+  goUnitStdlibFixture = fs.toSource {
+    root = ./fixtures/go-unit-stdlib;
+    fileset = fs.unions [
+      ./fixtures/go-unit-stdlib/go.mod
+      ./fixtures/go-unit-stdlib/main.go
+      ./fixtures/go-unit-stdlib/main_test.go
+    ];
+  };
+  goUnitMissingGoSumFixture = fs.toSource {
+    root = ./fixtures/go-unit-hello;
+    fileset = fs.unions [
+      ./fixtures/go-unit-hello/go.mod
+      ./fixtures/go-unit-hello/main.go
+      ./fixtures/go-unit-hello/main_test.go
+    ];
+  };
+  goUnitRequireNoSpaceFixture = fs.toSource {
+    root = ./fixtures/go-unit-require-nospace;
+    fileset = fs.unions [
+      ./fixtures/go-unit-require-nospace/go.mod
+      ./fixtures/go-unit-require-nospace/main.go
+    ];
+  };
+
+  goUnitStdlibWorkspace = ix.goUnit.buildWorkspace {
+    pname = "go-unit-stdlib";
+    src = goUnitStdlibFixture;
+    vendorHash = null;
+    packages = [ "." ];
+  };
+
+  goUnitDerivedStdlibSource = pkgs.runCommand "go-unit-stdlib-source" { } ''
+    cp -R ${goUnitStdlibFixture}/. "$out"
+  '';
+
+  goUnitDerivedStdlibWorkspace = ix.goUnit.buildWorkspace {
+    pname = "go-unit-stdlib-derived";
+    src = goUnitDerivedStdlibSource;
+    vendorHash = null;
+    packages = [ "." ];
+  };
+  goUnitDerivedSource = pkgs.runCommand "go-unit-hello-source" { } ''
+    cp -R ${goUnitFixture}/. "$out"
+  '';
+  goUnitDerivedWorkspaceWithVendorHashFile = ix.goUnit.buildWorkspace {
+    pname = "go-unit-hello-derived";
+    src = goUnitDerivedSource;
+    goMod = ./fixtures/go-unit-hello/go.mod;
+    goSum = ./fixtures/go-unit-hello/go.sum;
+    vendorHashFile = ./fixtures/go-unit-hello/go-modules.nix;
+    packages = [ "." ];
+  };
+  goUnitDerivedMissingGoSumKeyEval =
+    let
+      workspace = ix.goUnit.buildWorkspace {
+        pname = "go-unit-hello-derived-missing-go-sum";
+        src = goUnitDerivedSource;
+        goMod = ./fixtures/go-unit-hello/go.mod;
+        vendorHashFile = ./fixtures/go-unit-hello/go-modules.nix;
+        packages = [ "." ];
+      };
+    in
+    builtins.tryEval workspace.default.drvPath;
+  goUnitMissingGoModFixture = fs.toSource {
+    root = ./fixtures/go-unit-hello;
+    fileset = ./fixtures/go-unit-hello/main.go;
+  };
+  goUnitMissingGoModEval =
+    builtins.tryEval
+      (ix.goUnit.buildWorkspace {
+        pname = "go-unit-missing-go-mod";
+        src = goUnitMissingGoModFixture;
+        vendorHash = null;
+        packages = [ "." ];
+      }).vendorHashKey;
+  goUnitMissingGoModPackagesEval = builtins.tryEval (
+    builtins.attrNames
+      (ix.goUnit.buildWorkspace {
+        pname = "go-unit-missing-go-mod";
+        src = goUnitMissingGoModFixture;
+        vendorHash = null;
+        packages = [ "." ];
+      }).packages
+  );
+  goUnitMissingGoSumEval = builtins.tryEval (
+    builtins.attrNames
+      (ix.goUnit.buildWorkspace {
+        pname = "go-unit-missing-go-sum";
+        src = goUnitMissingGoSumFixture;
+        vendorHash = "sha256-36P4vOdzJotmVZon5Zud/d/jxzv4ad04aQT2G/EE3U8=";
+        packages = [ "." ];
+      }).packages
+  );
+  goUnitMissingGoSumNoSumEval = builtins.tryEval (
+    builtins.attrNames
+      (ix.goUnit.buildWorkspace {
+        pname = "go-unit-missing-go-sum-no-sum";
+        src = goUnitMissingGoSumFixture;
+        vendorHash = null;
+        packages = [ "." ];
+      }).packages
+  );
+  goUnitRequireNoSpaceNoSumEval = builtins.tryEval (
+    builtins.attrNames
+      (ix.goUnit.buildWorkspace {
+        pname = "go-unit-require-nospace-no-sum";
+        src = goUnitRequireNoSpaceFixture;
+        vendorHash = null;
+        packages = [ "." ];
+      }).packages
+  );
+  goUnitMissingExplicitGoSumEval = builtins.tryEval (
+    builtins.attrNames
+      (ix.goUnit.buildWorkspace {
+        pname = "go-unit-missing-explicit-go-sum";
+        src = goUnitMissingGoSumFixture;
+        goSum = goUnitMissingGoSumFixture + "/go.sum";
+        vendorHash = "sha256-36P4vOdzJotmVZon5Zud/d/jxzv4ad04aQT2G/EE3U8=";
+        packages = [ "." ];
+      }).packages
+  );
+
   goUnitPackageCollisionEval =
     builtins.tryEval
       (ix.goUnit.buildWorkspace {
@@ -2709,6 +2831,52 @@ let
         message = "go-unit workspaces should resolve default go.mod and go.sum below modRoot";
       }
       {
+        assertion = goUnitStdlibWorkspace.sourceAudit.module.lockFile == null;
+        message = "go-unit workspaces should allow stdlib-only modules without go.sum";
+      }
+      {
+        assertion = goUnitStdlibWorkspace.packages.root.goUnit.goSum == null;
+        message = "go-unit package derivations should pass null goSum for modules without go.sum";
+      }
+      {
+        assertion = goUnitDerivedStdlibWorkspace.vendorHashKey == null;
+        message = "go-unit workspaces should not read derivation source module files during eval";
+      }
+      {
+        assertion =
+          goUnitDerivedWorkspaceWithVendorHashFile.packages.root.goUnit.vendorHashKey
+          == goUnitWorkspace.vendorHashKey;
+        message = "go-unit derivation sources should use explicit vendor hash files by key";
+      }
+      {
+        assertion = !goUnitDerivedMissingGoSumKeyEval.success;
+        message = "go-unit derivation sources should not derive vendor keys from go.mod alone";
+      }
+      {
+        assertion = !goUnitMissingGoModEval.success;
+        message = "go-unit local sources should reject missing go.mod during eval";
+      }
+      {
+        assertion = !goUnitMissingGoModPackagesEval.success;
+        message = "go-unit local package surfaces should reject missing go.mod during eval";
+      }
+      {
+        assertion = !goUnitMissingGoSumEval.success;
+        message = "go-unit local sources should reject missing go.sum even with a direct vendor hash";
+      }
+      {
+        assertion = !goUnitMissingGoSumNoSumEval.success;
+        message = "go-unit local sources with external requirements should not use the no-sum path";
+      }
+      {
+        assertion = !goUnitRequireNoSpaceNoSumEval.success;
+        message = "go-unit no-sum detection should reject compact require blocks";
+      }
+      {
+        assertion = !goUnitMissingExplicitGoSumEval.success;
+        message = "go-unit explicit go.sum paths should reject filtered-out files during eval";
+      }
+      {
         assertion = !goUnitPackageCollisionEval.success;
         message = "go-unit workspaces should reject package patterns with colliding output names";
       }
@@ -3465,6 +3633,12 @@ let
     ${goUnitNestedWorkspace.default}/bin/go-unit-nested > go-unit-nested.out
     grep -q 'hello from nested go-unit: Hello, world.' go-unit-nested.out
     test -e ${goUnitNestedWorkspace.tests.root}/done
+    ${goUnitStdlibWorkspace.default}/bin/go-unit-stdlib > go-unit-stdlib.out
+    grep -q 'HELLO FROM GO-UNIT STDLIB' go-unit-stdlib.out
+    test -e ${goUnitStdlibWorkspace.tests.root}/done
+    ${goUnitDerivedStdlibWorkspace.default}/bin/go-unit-stdlib > go-unit-stdlib-derived.out
+    grep -q 'HELLO FROM GO-UNIT STDLIB' go-unit-stdlib-derived.out
+    test -e ${goUnitDerivedStdlibWorkspace.tests.root}/done
 
     grep -q 'class="ix bun"' ${bunSite}/share/bun-site-fixture/index.html
     test -d ${bunSite.bunNodeModules}/node_modules/clsx
