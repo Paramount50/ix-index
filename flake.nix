@@ -88,6 +88,7 @@
           minestom.servers.hello = ./packages/minestom/servers/hello;
           nixCargoUnit = ./packages/nix-cargo-unit;
           ociImageBuilder = ./packages/oci-image-builder;
+          room = ./packages/room;
           run = ./packages/run;
           mcp = ./packages/mcp;
           tonboArtifacts = ./packages/tonbo-artifacts;

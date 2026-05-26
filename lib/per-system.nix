@@ -209,6 +209,7 @@ let
         "minecraft-sync-managed"
         "nix-cargo-unit"
         "oci-image-builder"
+        "room"
       ] repoPackages;
       moduleRustPackages = {
         resource-monitor-stats-writer =
@@ -340,10 +341,13 @@ in
         llm-clippy
         nix-cargo-unit
         oci-image-builder
+        room
+        room-site
         run
         mcp
         ;
       loop-viewer-dev = repoPackages.loop-viewer.passthru.devServer;
+      room-site-dev = repoPackages.room-site.passthru.devServer;
       minestom-hello-server-jar = repoPackages.minestom.helloServerJar;
     }
     // examplePackages
