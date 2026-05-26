@@ -3,7 +3,7 @@ use std::{
     fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdin, ChildStdout, Command, ExitCode, Stdio},
     sync::{Arc, Mutex},
 };
 
@@ -406,7 +406,7 @@ fn uuid_like(sessions: &HashMap<String, PythonSession>) -> String {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command.unwrap_or(CliCommand::Serve) {
         CliCommand::Serve => {
@@ -414,14 +414,17 @@ async fn main() -> Result<()> {
             service.waiting().await?;
         }
         CliCommand::Repl => {
-            let command = if cli.python.is_empty() {
+            let (command, _temp_dir) = if cli.python.is_empty() {
                 let temp_dir = tempfile::Builder::new()
                     .prefix("ix-mcp-python-repl-")
                     .tempdir()
                     .context("failed to create Python REPL directory")?;
-                create_default_environment(temp_dir.path())?
+                let command = create_default_environment(temp_dir.path())?;
+                // The default command points inside the venv, so keep the temp
+                // directory alive until the interactive process exits.
+                (command, Some(temp_dir))
             } else {
-                cli.python
+                (cli.python, None)
             };
             let status = Command::new(&command[0])
                 .args(&command[1..])
@@ -431,7 +434,11 @@ async fn main() -> Result<()> {
                 .with_context(|| {
                     format!("failed to start Python REPL command {}", command.join(" "))
                 })?;
-            std::process::exit(status.code().unwrap_or(1));
+            let code = status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .unwrap_or(1);
+            return Ok(ExitCode::from(code));
         }
         CliCommand::Eval { expression } => {
             let mut manager = SessionManager::default();
@@ -455,7 +462,7 @@ async fn main() -> Result<()> {
             println!("{}", session.request("exec", json!({ "source": source }))?);
         }
     }
-    Ok(())
+    Ok(ExitCode::SUCCESS)
 }
 
 fn command_arg(command: Vec<String>) -> Option<Vec<String>> {
