@@ -260,21 +260,21 @@ fn infer_document_from_path<'a>(documents: &'a [Document], path: &Path) -> Optio
 }
 
 fn destination_path(document: &Document, path: &Path, selected_count: usize) -> PathBuf {
-    if selected_count == 1 && path_looks_like_file(path) {
+    if selected_count == 1 && path_looks_like_file(path, document) {
         path.to_path_buf()
     } else {
         path.join(&document.file_name)
     }
 }
 
-fn path_looks_like_file(path: &Path) -> bool {
+fn path_looks_like_file(path: &Path, document: &Document) -> bool {
     if let Some(is_file) = existing_path_is_file(path) {
         return is_file;
     }
 
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.contains('.'))
+        .is_some_and(|name| name == document.file_name)
 }
 
 fn existing_path_is_file(path: &Path) -> Option<bool> {
@@ -413,8 +413,9 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("temp dir is created");
         let dotted_dir = temp_dir.path().join("checkout.with.dots");
         fs::create_dir(&dotted_dir).expect("dotted dir is created");
+        let documents = documents();
 
-        assert!(!path_looks_like_file(&dotted_dir));
+        assert!(!path_looks_like_file(&dotted_dir, &documents[0]));
     }
 
     #[test]
@@ -428,5 +429,13 @@ mod tests {
         .expect("selection succeeds");
 
         assert_eq!(selected.len(), 2);
+    }
+
+    #[test]
+    fn single_target_treats_missing_dotted_path_as_directory() {
+        let documents = documents();
+        let path = destination_path(&documents[0], Path::new("checkout.with.dots"), 1);
+
+        assert_eq!(path, PathBuf::from("checkout.with.dots/AGENTS.md"));
     }
 }

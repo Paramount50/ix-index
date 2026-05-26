@@ -115,6 +115,48 @@ jobs:
       - name: Restore trusted reviewer instructions
         run: |
           set -euo pipefail
+          resolve_base_instruction_path() {
+            local resolved="$1"
+            for _ in {1..20}; do
+              local entry mode object_type link_target
+              entry="$(git ls-tree "${BASE_SHA}" -- "${resolved}")"
+              if [ -z "${entry}" ]; then
+                echo "::error::Trusted instruction path ${resolved} is missing from base ${BASE_SHA}."
+                return 1
+              fi
+              IFS=$' \t' read -r mode object_type _ <<< "${entry}"
+              if [ "${mode}" != "120000" ]; then
+                if [ "${object_type}" != "blob" ]; then
+                  echo "::error::Trusted instruction path ${resolved} is ${object_type}, expected a file."
+                  return 1
+                fi
+                printf '%s\n' "${resolved}"
+                return 0
+              fi
+
+              link_target="$(git show "${BASE_SHA}:${resolved}")"
+              resolved="$(
+                python3 - "${resolved}" "${link_target}" <<'PY'
+          import posixpath
+          import sys
+
+          current, target = sys.argv[1:]
+          if target.startswith("/"):
+              raise SystemExit(f"absolute symlink target is not allowed: {target}")
+
+          normalized = posixpath.normpath(posixpath.join(posixpath.dirname(current), target))
+          if normalized == ".." or normalized.startswith("../"):
+              raise SystemExit(f"symlink target escapes repository: {target}")
+
+          print(normalized)
+          PY
+              )"
+            done
+
+            echo "::error::Trusted instruction symlink chain is too deep for $1."
+            return 1
+          }
+
           mapfile -d '' instruction_paths < <(
             {
               git ls-files -z | grep -z -E '(^|/)(AGENTS|CLAUDE)\.md$' || true
@@ -123,7 +165,10 @@ jobs:
           )
           for path in "${instruction_paths[@]}"; do
             if git cat-file -e "${BASE_SHA}:${path}" 2>/dev/null; then
-              git restore --source "${BASE_SHA}" --worktree -- "${path}"
+              resolved_path="$(resolve_base_instruction_path "${path}")"
+              mkdir -p -- "$(dirname -- "${path}")"
+              rm -f -- "${path}"
+              git show "${BASE_SHA}:${resolved_path}" > "${path}"
             else
               rm -f -- "${path}"
             fi
