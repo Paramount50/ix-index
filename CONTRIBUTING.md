@@ -58,6 +58,31 @@ against the previous workspace's `benchmarkPlan`. It fails on Tango's significan
 regression signal and writes one log per benchmark under `$out/logs`; tune the
 threshold with Tango's `--fail-threshold` flag.
 
+## Cargo Unit Coverage
+
+`ix.cargoUnit.buildWorkspace` exposes `coverageReport` when the target set
+contains tests. Build the workspace with `extraRustcArgs` passing
+`-Cinstrument-coverage`; the report derivation runs each test binary, merges the
+LLVM profiles, and writes normalized LCOV to `$out/lcov.info`.
+The selected Rust toolchain must include matching LLVM tools, or
+`makeCoverageReport` must receive explicit `llvmCov` and `llvmProfdata` paths.
+
+```nix
+ix.cargoUnit.buildWorkspace {
+  src = workspaceSrc;
+  workspaceRoot = workspaceSrc;
+  cargoArgs = [
+    "--workspace"
+    "--tests"
+  ];
+  profile = "dev";
+  extraRustcArgs = [ "-Cinstrument-coverage" ];
+}
+```
+
+Use `makeCoverageReport { testArgsByPackage = { my-crate = [ "--skip" "slow" ]; }; }`
+when a package needs the same libtest arguments every coverage run.
+
 ## Coding standards
 
 The full style guide lives in [AGENTS.md](AGENTS.md). Skim the section that matches what you're touching:
