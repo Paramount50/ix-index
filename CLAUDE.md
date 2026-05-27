@@ -611,6 +611,13 @@ guessing which file holds the answer. Use `git clone --depth=1
 https://github.com/<owner>/<repo> /tmp/<repo>` for a fast read-only checkout
 and delete the directory when the question is answered.
 
+Before settling on an API shape, helper structure, or library pattern, spawn a
+subagent to check what the current idiom is. Pair `mcp__exa__web_search_exa`
+with `/tmp` clones of the maintained upstreams so the subagent can read real
+call sites and recent release notes, then report back a short summary. Cheap
+research up front beats shipping a pattern that the ecosystem has already moved
+past.
+
 Search before claiming external facts, API behavior, flags, versions, or current
 ownership. Live state beats docs when the task is about a running system; if
 observers disagree, debug the observer path too.
