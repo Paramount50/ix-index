@@ -9,10 +9,12 @@ let
   sectionList = [
     (section "intro" "00-intro.md")
     (section "scope" "01-scope-of-agents-md.md")
+    (section "craft" "01b-craft-standard.md")
     (section "workflow" "02-workflow.md")
     (section "indexGitPush" "02a-index-git-push.md")
     (section "siteUpdates" "03-site-updates.md")
     (section "writingStyle" "04-writing-style.md")
+    (section "replyShape" "04b-reply-shape.md")
     (section "inlineComments" "05-inline-comments.md")
     (section "rustStyle" "06-rust-style.md")
     (section "pythonStyle" "07-python-style.md")
@@ -42,8 +44,10 @@ let
   profiles = {
     common = [
       "scope"
+      "craft"
       "workflow"
       "writingStyle"
+      "replyShape"
       "inlineComments"
       "rustStyle"
       "pythonStyle"
@@ -129,11 +133,15 @@ let
     )
     + "\n";
 
-  documentList = map (target: {
-    target = target.name;
-    inherit (target) fileName;
-    text = render { target = target.name; };
-  }) targetList;
+  documentListFor =
+    renderArgs:
+    map (target: {
+      target = target.name;
+      inherit (target) fileName;
+      text = render (renderArgs // { target = target.name; });
+    }) targetList;
+
+  documentList = documentListFor { };
 
   documents = lib.listToAttrs (
     map (document: {
@@ -141,6 +149,60 @@ let
       value = removeAttrs document [ "target" ];
     }) documentList
   );
+
+  mkApp =
+    {
+      pkgs,
+      binary,
+      enabledSections ? allSections,
+      extraSections ? [ ],
+      extraSectionsByTarget ? { },
+      targetSections ? { },
+    }:
+    let
+      customDocumentList = documentListFor {
+        inherit
+          enabledSections
+          extraSections
+          extraSectionsByTarget
+          targetSections
+          ;
+      };
+      generatedDocuments = lib.listToAttrs (
+        map (document: {
+          name = document.target;
+          value = pkgs.writeText document.fileName document.text;
+        }) customDocumentList
+      );
+      documentsConfig = pkgs.writeText "agents-md-documents.json" (
+        builtins.toJSON (
+          map (document: {
+            inherit (document) target;
+            file_name = document.fileName;
+            generated_path = "${generatedDocuments.${document.target}}";
+          }) customDocumentList
+        )
+      );
+    in
+    pkgs.runCommand "agents-md"
+      {
+        nativeBuildInputs = [ pkgs.makeWrapper ];
+        strictDeps = true;
+        meta = (binary.meta or { }) // {
+          description = "Diff, check, and write generated Codex and Claude instruction files";
+          mainProgram = "agents-md";
+        };
+        passthru = (binary.passthru or { }) // {
+          inherit documentsConfig;
+          documentList = customDocumentList;
+        };
+      }
+      ''
+        mkdir -p "$out/bin"
+        makeWrapper ${binary}/bin/agents-md "$out/bin/agents-md" \
+          --set AGENTS_MD_DOCUMENTS ${documentsConfig} \
+          --set AGENTS_MD_DELTA ${lib.getExe pkgs.delta}
+      '';
 in
 {
   /**
@@ -196,4 +258,15 @@ in
     - `targetSections`: attrset from target name to extra named section keys.
   */
   inherit render;
+
+  /**
+    Wrap the `agents-md` CLI with a caller-specific document set.
+
+    Consumer repositories pass the unwrapped binary from
+    `index.packages.<system>.agents-md.passthru.unwrapped` plus their own
+    render arguments and get back a `nix run`-able package that writes the
+    consumer's `AGENTS.md` and `CLAUDE.md`. Arguments after `binary` mirror
+    `render` and are applied to every target.
+  */
+  inherit mkApp;
 }
