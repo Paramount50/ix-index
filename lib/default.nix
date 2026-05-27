@@ -7,6 +7,7 @@
   determinate,
   home-manager,
   hermes-agent,
+  clippy-fork,
   cliArtifacts ? { },
 }:
 let
@@ -259,6 +260,7 @@ let
           final
           buildIxRustTool
           rustNightlyClippyToolchainFor
+          clippy-fork
           ;
         pkgs = final;
         inherit (entry) path;
@@ -369,10 +371,19 @@ let
         "rustfmt"
       ];
     };
+  # ix.buildRustPackage closure handed to `callPackage`'d Rust packages.
+  # Kept minimal so it stays usable from the bootstrap path (no `cargoUnit`,
+  # no `rustWorkspace`); `buildIxRustTool` adds those for packages that need
+  # them.
+  ixBuildSurfaceFor = _pkgs: {
+    buildRustPackage = innerPkgs: (rustFor innerPkgs).buildPackage;
+  };
   llmClippyFor =
     pkgs:
     pkgs.callPackage (packagePath "llm-clippy") {
+      ix = ixBuildSurfaceFor pkgs;
       rustToolchain = rustNightlyClippyToolchainFor pkgs;
+      src = clippy-fork;
     };
   rustFor =
     pkgs:
@@ -778,6 +789,7 @@ let
           packageSystem
           cliArtifacts
           rustNightlyClippyToolchainFor
+          clippy-fork
           ixForPackages
           ;
         ix = ixForPackages;
