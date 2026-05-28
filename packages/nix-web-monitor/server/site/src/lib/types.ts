@@ -100,8 +100,10 @@ export type DerivationEdge = v.InferOutput<typeof derivationEdgeSchema>;
 export type MonitorSnapshot = v.InferOutput<typeof snapshotSchema>;
 export type Delta = v.InferOutput<typeof deltaSchema>;
 
-/// Purely client-side, never received over the wire.
-export type ConnectionStatus = 'connecting' | 'live' | 'closed' | 'error';
+/// Purely client-side, never received over the wire. `reconnecting` is surfaced
+/// only after a session has been down past the grace window, so a brief blip
+/// that the client recovers from never flips the indicator off `live`.
+export type ConnectionStatus = 'connecting' | 'live' | 'reconnecting' | 'closed' | 'error';
 
 /// Log-level filter choices for the log panel. Shared with the app shell so
 /// the errors panel and keyboard shortcuts can drive the same filter state.

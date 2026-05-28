@@ -168,11 +168,22 @@ main {
   animation: pulse 1.8s ease-out infinite;
 }
 
-.kpi[data-status='connecting'] {
+.kpi[data-status='connecting'],
+.kpi[data-status='reconnecting'] {
   color: var(--amber);
 }
-.kpi[data-status='connecting'] .kpi-dot {
+.kpi[data-status='connecting'] .kpi-dot,
+.kpi[data-status='reconnecting'] .kpi-dot {
   background: var(--amber);
+}
+.kpi[data-status='reconnecting'] .kpi-dot {
+  animation: blink 1s steps(2, start) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.25;
+  }
 }
 
 .kpi[data-status='closed'] {

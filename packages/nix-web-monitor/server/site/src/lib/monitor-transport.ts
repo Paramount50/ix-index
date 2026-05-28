@@ -158,8 +158,20 @@ function decodeDelta(payload: Uint8Array): Delta | null {
   }
 }
 
+/// How long a session may be down before the indicator leaves `live`. A drop
+/// the client reconnects through within this window never flickers the status,
+/// which is what kept the old single-shot driver oscillating live/error on a
+/// lossy link.
+const GRACE_MS = 1_200;
+/// Reconnect backoff bounds. The floor keeps a flapping session from busy-
+/// looping; the ceiling keeps a hard-down endpoint from being hammered while
+/// still recovering within a few seconds once it returns.
+const BACKOFF_MIN_MS = 250;
+const BACKOFF_MAX_MS = 5_000;
+
 /// Open the WebTransport session and drive the snapshot/status callbacks until
-/// the returned disposer is called or the stream ends. No fallback transport.
+/// the returned disposer is called or the monitored run finishes. A dropped
+/// session reconnects with backoff; there is still no cross-protocol fallback.
 export function openMonitorEvents(onSnapshot: SnapshotHandler, onStatus: StatusHandler): () => void {
   onStatus('connecting');
 
@@ -175,31 +187,74 @@ export function openMonitorEvents(onSnapshot: SnapshotHandler, onStatus: StatusH
   const aborted = new AbortController();
   const isAborted = (): boolean => aborted.signal.aborted;
   let transport: WebTransport | null = null;
+  // `live` once a session has ever come up: it picks the degraded label
+  // (`reconnecting` vs the initial `error`) and is the signal that a drop is
+  // transient rather than a cold start against a server that is not up yet.
+  let everLive = false;
+  let degradeTimer: ReturnType<typeof setTimeout> | null = null;
 
-  void run();
+  // Hold the visible status on its pre-drop value until the link has been down
+  // for `GRACE_MS`; only then surface the degraded label. A reconnect inside
+  // the window cancels the timer, so brief blips stay invisible.
+  const armDegrade = (): void => {
+    if (degradeTimer !== null) return;
+    degradeTimer = setTimeout(() => {
+      degradeTimer = null;
+      if (!isAborted()) onStatus(everLive ? 'reconnecting' : 'error');
+    }, GRACE_MS);
+  };
+  const clearDegrade = (): void => {
+    if (degradeTimer === null) return;
+    clearTimeout(degradeTimer);
+    degradeTimer = null;
+  };
 
-  async function run(): Promise<void> {
-    try {
-      const info = await fetchTransportInfo();
-      transport = new WebTransport(`https://${location.hostname}:${String(info.port)}/`, {
-        serverCertificateHashes: [{ algorithm: 'sha-256', value: new Uint8Array(info.certHash) }]
-      });
-      await transport.ready;
+  void loop();
+
+  async function loop(): Promise<void> {
+    let attempt = 0;
+    while (!isAborted()) {
+      let finished = false;
+      try {
+        const info = await fetchTransportInfo();
+        if (isAborted()) return;
+        transport = new WebTransport(`https://${location.hostname}:${String(info.port)}/`, {
+          serverCertificateHashes: [{ algorithm: 'sha-256', value: new Uint8Array(info.certHash) }]
+        });
+        await transport.ready;
+        if (isAborted()) return;
+        attempt = 0;
+        everLive = true;
+        clearDegrade();
+        onStatus('live');
+        finished = await consume(transport);
+      } catch {
+        // Fall through to the reconnect/degrade handling below.
+      }
       if (isAborted()) return;
-      onStatus('live');
-      await consume(transport);
-      if (!isAborted()) onStatus('closed');
-    } catch {
-      if (!isAborted()) onStatus('error');
+      transport?.close();
+      transport = null;
+      // A clean end carrying the `finished` delta means the run is over; stop.
+      // Any other end (thrown, or stream closed mid-run) is treated as a drop.
+      if (finished) {
+        onStatus('closed');
+        return;
+      }
+      armDegrade();
+      attempt += 1;
+      await delay(Math.min(BACKOFF_MAX_MS, BACKOFF_MIN_MS * 2 ** (attempt - 1)));
     }
   }
 
-  async function consume(wt: WebTransport): Promise<void> {
+  /// Drain one session's delta stream into snapshots. Returns `true` when the
+  /// stream ended on a `finished` delta (run complete) and `false` when it ended
+  /// otherwise, which the caller treats as a drop to reconnect through.
+  async function consume(wt: WebTransport): Promise<boolean> {
     // The DOM lib types incoming streams loosely; narrow to the byte stream we
     // know the server opens.
     const streams = wt.incomingUnidirectionalStreams.getReader();
     const result = await streams.read();
-    if (result.done) return;
+    if (result.done) return false;
     const stream = result.value as ReadableStream<Uint8Array>;
 
     const working = createWorking();
@@ -222,10 +277,27 @@ export function openMonitorEvents(onSnapshot: SnapshotHandler, onStatus: StatusH
       applyDelta(working, delta);
       if (delta.type === 'finished') {
         flush();
-        break;
+        return true;
       }
       schedule();
     }
+    return false;
+  }
+
+  /// Backoff sleep that resolves early when the disposer aborts, so teardown
+  /// does not wait out a pending reconnect delay.
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(resolve, ms);
+      aborted.signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        { once: true }
+      );
+    });
   }
 
   /// Reassemble length-prefixed msgpack frames from the raw byte stream and
@@ -251,6 +323,7 @@ export function openMonitorEvents(onSnapshot: SnapshotHandler, onStatus: StatusH
 
   return () => {
     aborted.abort();
+    clearDegrade();
     transport?.close();
   };
 }
