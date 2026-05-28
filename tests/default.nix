@@ -2990,6 +2990,12 @@ let
         message = "selectBinaryWithTests should schedule package-owned test binaries";
       }
       {
+        assertion = builtins.all (test: lib.isDerivation test) (
+          builtins.attrValues cargoUnitSelectedHello.passthru.tests
+        );
+        message = "selectBinaryWithTests should expose only derivations in passthru.tests";
+      }
+      {
         assertion =
           !(builtins.hasAttr "cargo_unit_hello-tests-returns_greeting" cargoUnitSelectedHello.passthru.tests);
         message = "selectBinaryWithTests should not force per-case test manifests into flake checks by default";
@@ -3096,9 +3102,9 @@ let
       }
       {
         # Repo packages route through `cargoUnit.buildWorkspace` via
-        # `ix.rustWorkspace.units`, so they pick up per-unit clippy under
-        # `policyChecks.clippy` (a fan-out attrset) rather than the legacy
-        # workspace-level `cargoClippy` single derivation.
+        # `ix.rustWorkspace.units`, so they pick up the aggregate per-unit
+        # clippy policy check rather than the legacy workspace-level
+        # `cargoClippy` single derivation.
         assertion = repoPackages.minecraft-nbt.passthru.policyChecks ? clippy;
         message = "repo Rust packages should expose per-unit clippy policy checks by default";
       }
