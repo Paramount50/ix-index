@@ -8,11 +8,15 @@
     logs: LogEntry[];
     selectedActivityId: number | null;
     onclearselection: () => void;
+    /// Drawer collapse state, owned by the shell. The panel only renders the
+    /// caret and reports clicks; the shell resizes the drawer around it.
+    collapsed: boolean;
+    oncollapse: () => void;
   };
 
   const RECENT_LOG_LIMIT = 500;
 
-  const { logs, selectedActivityId, onclearselection }: Props = $props();
+  const { logs, selectedActivityId, onclearselection, collapsed, oncollapse }: Props = $props();
 
   let level = $state<LogLevelFilter>('all');
   let search = $state('');
@@ -140,6 +144,15 @@
 
 <section class="panel logs-panel">
   <PanelHeader title="logs">
+    <button
+      type="button"
+      class="twirl logs-collapse"
+      onclick={oncollapse}
+      title={collapsed ? 'show logs' : 'hide logs'}
+      aria-expanded={!collapsed}
+    >
+      {collapsed ? '▸' : '▾'}
+    </button>
     <div class="log-controls">
       <div class="filter-chips" role="tablist" aria-label="log level filter">
         {#each LOG_LEVEL_FILTERS as choice (choice)}

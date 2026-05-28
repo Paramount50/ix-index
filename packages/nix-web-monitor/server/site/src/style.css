@@ -326,10 +326,24 @@ main {
 
 /* ---------- workspace layout ---------- */
 
+/* The build DAG is the primary surface: it fills the body, with the live
+ * activity tree as a side column and the raw log stream demoted to a short,
+ * collapsible drawer along the bottom. */
+.body {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) 5px var(--logs-height, 220px);
+  background: var(--bg);
+}
+
+.body.logs-collapsed {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 5px var(--sidebar-width, 22rem);
+  grid-template-columns: minmax(0, 1fr) 5px var(--sidebar-width, 24rem);
   background: var(--bg);
 }
 
@@ -342,10 +356,23 @@ main {
   background: var(--bg);
 }
 
-.side-pane {
-  display: grid;
-  grid-template-rows: minmax(4rem, calc(var(--builds-fraction, 0.45) * 100% - 2.5px)) 5px minmax(4rem, 1fr);
-  background: var(--line);
+.logs-drawer {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+}
+
+/* Collapsed: keep the panel header (filters, counts, the caret) on screen as a
+ * one-line strip while hiding the stream itself, so reopening is one click. */
+.logs-collapsed .log-stream {
+  display: none;
+}
+
+.logs-collapse {
+  width: 1.1rem;
 }
 
 /* Visible 1px line + 5px hit area: the element is 5px wide but the visible
@@ -919,15 +946,17 @@ main.dragging-v .splitter-v::after {
 /* ---------- responsive ---------- */
 
 @media (max-width: 960px) {
+  /* Stack the DAG over the activity tree and drop the column splitter; the log
+   * drawer keeps its own resizable row below. */
   .workspace {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) 0 minmax(0, 0.8fr);
+    grid-template-rows: minmax(0, 1fr) minmax(8rem, 0.6fr);
+  }
+  .workspace .splitter-h {
+    display: none;
   }
   .side-pane {
-    grid-template-rows: minmax(8rem, 1fr) 5px minmax(8rem, 1fr);
-  }
-  .splitter-h {
-    display: none;
+    border-top: 1px solid var(--line);
   }
   .progress {
     margin-left: 0;

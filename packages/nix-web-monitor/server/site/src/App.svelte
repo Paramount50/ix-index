@@ -9,27 +9,30 @@
   import { openMonitorEvents } from '$lib/monitor-store';
   import { EMPTY_SNAPSHOT, type ConnectionStatus, type MonitorSnapshot } from '$lib/types';
 
+  /// Width of the live-activity sidebar that sits to the right of the build DAG.
   const SIDEBAR_KEY = 'nix-web-monitor.sidebar-width';
-  const SIDEBAR_DEFAULT = 360;
+  const SIDEBAR_DEFAULT = 380;
   const SIDEBAR_MIN = 220;
-  const SIDEBAR_MAX_FRACTION = 0.7;
+  const SIDEBAR_MAX_FRACTION = 0.6;
 
-  const BUILDS_KEY = 'nix-web-monitor.builds-fraction';
-  const BUILDS_DEFAULT = 0.45;
-  const BUILDS_MIN_FRACTION = 0.15;
-  const BUILDS_MAX_FRACTION = 0.85;
+  /// Height of the bottom log drawer. The DAG is the primary surface, so logs
+  /// open as a short, resizable, collapsible drawer rather than half the screen.
+  const LOGS_KEY = 'nix-web-monitor.logs-height';
+  const LOGS_DEFAULT = 220;
+  const LOGS_MIN = 80;
+  const LOGS_MAX_FRACTION = 0.7;
+
+  const LOGS_COLLAPSED_KEY = 'nix-web-monitor.logs-collapsed';
 
   let snapshot = $state<MonitorSnapshot>(EMPTY_SNAPSHOT);
   let status = $state<ConnectionStatus>('connecting');
   let sidebarWidth = $state(loadNumber(SIDEBAR_KEY, SIDEBAR_DEFAULT, SIDEBAR_MIN));
-  let buildsFraction = $state(
-    loadNumber(BUILDS_KEY, BUILDS_DEFAULT, BUILDS_MIN_FRACTION, BUILDS_MAX_FRACTION)
-  );
+  let logsHeight = $state(loadNumber(LOGS_KEY, LOGS_DEFAULT, LOGS_MIN));
+  let logsCollapsed = $state(loadBool(LOGS_COLLAPSED_KEY, false));
   let draggingAxis = $state<'horizontal' | 'vertical' | null>(null);
-  let sidePane = $state<HTMLElement | null>(null);
-  /// When set, the log panel filters to entries whose activityId matches this
-  /// build's activity. Clicking the same build again or hitting the clear
-  /// chip in the log panel resets it.
+  /// When set, the log drawer filters to entries whose activityId matches this
+  /// build's activity. Clicking the same build again or hitting the clear chip
+  /// in the log panel resets it.
   let selectedActivityId = $state<number | null>(null);
   /// Log panel instance, used to drive its filter from the errors panel. Typed
   /// to the imperative surface we call so the binding stays checked rather than
@@ -45,6 +48,18 @@
 
   function dismissErrors(): void {
     errorsDismissed = snapshot.errors.length;
+  }
+
+  /// Selecting a build to inspect its logs also opens the drawer if it was
+  /// collapsed, so the filtered lines are actually visible.
+  function selectBuild(id: number | null): void {
+    selectedActivityId = id;
+    if (id !== null && logsCollapsed) setLogsCollapsed(false);
+  }
+
+  function setLogsCollapsed(next: boolean): void {
+    logsCollapsed = next;
+    persistBool(LOGS_COLLAPSED_KEY, next);
   }
 
   onMount(() => {
@@ -73,7 +88,18 @@
     return parsed;
   }
 
+  function loadBool(key: string, fallback: boolean): boolean {
+    if (typeof window === 'undefined') return fallback;
+    const stored = window.localStorage.getItem(key);
+    if (stored === null) return fallback;
+    return stored === 'true';
+  }
+
   function persist(key: string, value: number): void {
+    window.localStorage.setItem(key, String(value));
+  }
+
+  function persistBool(key: string, value: boolean): void {
     window.localStorage.setItem(key, String(value));
   }
 
@@ -82,22 +108,22 @@
     return Math.min(max, Math.max(SIDEBAR_MIN, width));
   }
 
-  function clampBuildsFraction(fraction: number): number {
-    return Math.min(BUILDS_MAX_FRACTION, Math.max(BUILDS_MIN_FRACTION, fraction));
+  function clampLogsHeight(height: number): number {
+    const max = Math.max(LOGS_MIN, window.innerHeight * LOGS_MAX_FRACTION);
+    return Math.min(max, Math.max(LOGS_MIN, height));
   }
 
   function onPointerMove(event: PointerEvent): void {
     if (draggingAxis === 'horizontal') {
       sidebarWidth = clampSidebarWidth(window.innerWidth - event.clientX);
-    } else if (draggingAxis === 'vertical' && sidePane !== null) {
-      const rect = sidePane.getBoundingClientRect();
-      buildsFraction = clampBuildsFraction((event.clientY - rect.top) / rect.height);
+    } else if (draggingAxis === 'vertical') {
+      logsHeight = clampLogsHeight(window.innerHeight - event.clientY);
     }
   }
 
   function onPointerUp(): void {
     if (draggingAxis === 'horizontal') persist(SIDEBAR_KEY, sidebarWidth);
-    else if (draggingAxis === 'vertical') persist(BUILDS_KEY, buildsFraction);
+    else if (draggingAxis === 'vertical') persist(LOGS_KEY, logsHeight);
     draggingAxis = null;
   }
 
@@ -124,17 +150,17 @@
     persist(SIDEBAR_KEY, sidebarWidth);
   }
 
-  function buildsKeydown(event: KeyboardEvent): void {
-    const step = event.shiftKey ? 0.08 : 0.03;
+  function logsKeydown(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 48 : 16;
     if (event.key === 'ArrowUp') {
-      buildsFraction = clampBuildsFraction(buildsFraction - step);
+      logsHeight = clampLogsHeight(logsHeight + step);
     } else if (event.key === 'ArrowDown') {
-      buildsFraction = clampBuildsFraction(buildsFraction + step);
+      logsHeight = clampLogsHeight(logsHeight - step);
     } else {
       return;
     }
     event.preventDefault();
-    persist(BUILDS_KEY, buildsFraction);
+    persist(LOGS_KEY, logsHeight);
   }
 </script>
 
@@ -155,46 +181,57 @@
     {/if}
   </div>
 
-  <section class="workspace" style="--sidebar-width: {String(sidebarWidth)}px">
-    <section class="main-pane">
+  <section
+    class="body"
+    class:logs-collapsed={logsCollapsed}
+    style="--logs-height: {String(logsHeight)}px"
+  >
+    <section class="workspace" style="--sidebar-width: {String(sidebarWidth)}px">
+      <section class="main-pane">
+        <BuildTable
+          builds={snapshot.builds}
+          dependencies={snapshot.dependencies}
+          expected={snapshot.expected}
+          finished={snapshot.finished}
+          exitCode={snapshot.exitCode}
+          {selectedActivityId}
+          onselect={selectBuild}
+        />
+      </section>
+      <Splitter
+        orientation="vertical"
+        label="Resize activity sidebar"
+        valueNow={Math.round(sidebarWidth)}
+        onstart={startHorizontal}
+        onkeydown={sidebarKeydown}
+      />
+      <aside class="side-pane">
+        <ActivityGraph activities={snapshot.activities} builds={snapshot.builds} />
+      </aside>
+    </section>
+
+    {#if !logsCollapsed}
+      <Splitter
+        orientation="horizontal"
+        label="Resize log drawer"
+        valueNow={Math.round(logsHeight)}
+        onstart={startVertical}
+        onkeydown={logsKeydown}
+      />
+    {/if}
+    <section class="logs-drawer">
       <LogPanel
         bind:this={logPanel}
         logs={snapshot.logs}
         {selectedActivityId}
-        onclearselection={() => (selectedActivityId = null)}
-      />
-    </section>
-    <Splitter
-      orientation="vertical"
-      label="Resize sidebar"
-      valueNow={Math.round(sidebarWidth)}
-      onstart={startHorizontal}
-      onkeydown={sidebarKeydown}
-    />
-    <aside
-      class="side-pane"
-      bind:this={sidePane}
-      style="--builds-fraction: {String(buildsFraction)}"
-    >
-      <BuildTable
-        builds={snapshot.builds}
-        dependencies={snapshot.dependencies}
-        expected={snapshot.expected}
-        finished={snapshot.finished}
-        exitCode={snapshot.exitCode}
-        {selectedActivityId}
-        onselect={(id: number | null) => {
-          selectedActivityId = id;
+        collapsed={logsCollapsed}
+        oncollapse={() => {
+          setLogsCollapsed(!logsCollapsed);
+        }}
+        onclearselection={() => {
+          selectedActivityId = null;
         }}
       />
-      <Splitter
-        orientation="horizontal"
-        label="Resize builds panel"
-        valueNow={Math.round(buildsFraction * 100)}
-        onstart={startVertical}
-        onkeydown={buildsKeydown}
-      />
-      <ActivityGraph activities={snapshot.activities} builds={snapshot.builds} />
-    </aside>
+    </section>
   </section>
 </main>
