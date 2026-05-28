@@ -14,11 +14,6 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     rust-overlay.url = "github:oxalica/rust-overlay";
-    # Determinate Nix replaces the in-VM Nix CLI and daemon with the
-    # Determinate Systems distribution: faster eval (lazy-trees), JSON
-    # logging, and hash-mismatch auto-fixes. Pinned to major version 3;
-    # routine bumps come from `nix flake update`.
-    determinate.url = "https://flakehub.com/f/DeterminateSystems/determinate/3";
 
     # Home Manager wired in via its NixOS module for per-tool XDG-shaped
     # config (Nushell, atuin, zoxide, starship, ...). Tracks master so it
@@ -61,7 +56,6 @@
     {
       nixpkgs,
       rust-overlay,
-      determinate,
       home-manager,
       hermes-agent,
       symphony,
@@ -105,7 +99,6 @@
           nixpkgs
           paths
           rust-overlay
-          determinate
           home-manager
           hermes-agent
           symphony

@@ -4,7 +4,6 @@
   nixpkgs,
   paths,
   rust-overlay,
-  determinate,
   home-manager,
   hermes-agent,
   symphony,
@@ -315,7 +314,6 @@ let
         nixpkgs
         paths
         system
-        determinate
         home-manager
         overlays
         ixSpecialArgs
