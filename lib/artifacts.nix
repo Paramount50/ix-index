@@ -48,6 +48,16 @@ let
   modCatalogs = generatedCatalogs paths.minecraftMods;
   paperPluginCatalogs = generatedCatalogs paths.minecraftPaperPlugins;
   velocityPluginCatalogs = generatedCatalogs paths.minecraftVelocityPlugins;
+  loaderLockKeys = [
+    "url"
+    "hash"
+  ];
+  projectLoaderManifestKeys = [
+    "loader"
+    "project"
+    "releaseChannel"
+    "versions"
+  ];
 
   /**
     Read a loader manifest directory (`manifest.json` + `<ver>.json` locks),
@@ -77,11 +87,7 @@ let
         else
           manifest;
 
-      lockKeys = [
-        "url"
-        "hash"
-      ]
-      ++ extraLockKeys;
+      lockKeys = loaderLockKeys ++ extraLockKeys;
       readLock =
         ver:
         let
@@ -89,10 +95,7 @@ let
           lockPathStr = toString lockPath;
           exists = builtins.pathExists lockPath;
           lock = if exists then lib.importJSON lockPath else { };
-          missingLockKeys = lib.filter (key: !(lock ? ${key})) [
-            "url"
-            "hash"
-          ];
+          missingLockKeys = lib.filter (key: !(lock ? ${key})) loaderLockKeys;
         in
         if !exists then
           throw "ix.lib.artifacts: ${lockPathStr} is missing; add it or remove `${ver}` from ${manifestPathStr}"
@@ -112,22 +115,12 @@ let
 
   paperLoader = readLoaderManifest {
     root = paths.minecraftLoaders.paper;
-    requiredManifestKeys = [
-      "loader"
-      "project"
-      "releaseChannel"
-      "versions"
-    ];
+    requiredManifestKeys = projectLoaderManifestKeys;
     extraLockKeys = [ "build" ];
   };
   velocityLoader = readLoaderManifest {
     root = paths.minecraftLoaders.velocity;
-    requiredManifestKeys = [
-      "loader"
-      "project"
-      "releaseChannel"
-      "versions"
-    ];
+    requiredManifestKeys = projectLoaderManifestKeys;
     extraLockKeys = [ "build" ];
   };
   fabricLoader = readLoaderManifest {
@@ -140,9 +133,8 @@ let
     ];
   };
 
-  attachSrc = lock: lock // { src = mkArtifact lock; };
-  paperServers = lib.mapAttrs (_: attachSrc) paperLoader.locks;
-  velocityServers = lib.mapAttrs (_: attachSrc) velocityLoader.locks;
+  paperServers = attachArtifactSources paperLoader.locks;
+  velocityServers = attachArtifactSources velocityLoader.locks;
   fabricServers = lib.mapAttrs' (mcVer: lock: {
     name = "${mcVer}-fabric";
     value = mkArtifact lock;
@@ -191,7 +183,7 @@ in
     # Velocity plugins are cross-Minecraft-version: `velocityPluginCatalog`
     # is the unversioned default surfaced to modules. Per-version overrides
     # can still come from `velocityPluginCatalogs.<version>` if added.
-    velocityPluginCatalog = velocityPluginCatalogs.common or { };
+    velocityPluginCatalog = velocityPluginCatalogs.common;
     servers = fabricServers // paperServerSrcs;
   };
 }
