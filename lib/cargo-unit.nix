@@ -404,6 +404,19 @@ let
           ) (target.cases or { })
         ) (lib.getAttrs (builtins.filter (name: targets ? ${name}) targetNames) targets);
       policyChecks = workspace.policyChecks or { };
+      # `policyChecks.clippy` is a per-unit fan-out attrset (one derivation per
+      # linted Cargo unit), so spreading it straight into `passthru.tests` would
+      # leave `tests.clippy` as an attrset, which `nix flake check` rejects
+      # because the value is not a derivation. Flatten it into one
+      # `clippy-<unit>` test per derivation while leaving `policyChecks.clippy`
+      # itself untouched for callers that read the fan-out attrset.
+      policyChecksAsTests =
+        let
+          flattenedClippy = lib.mapAttrs' (unitName: drv: lib.nameValuePair "clippy-${unitName}" drv) (
+            policyChecks.clippy or { }
+          );
+        in
+        (builtins.removeAttrs policyChecks [ "clippy" ]) // flattenedClippy;
       testCases =
         flattenCaseTargets "" selectedTestTargets (workspace.tests or { })
         // flattenCaseTargets "doctest-" selectedDoctestTargets (workspace.doctests or { });
@@ -421,7 +434,8 @@ let
         (binaryDrv.passthru or { })
         // passthru
         // {
-          tests = (binaryDrv.passthru.tests or { }) // policyChecks // (passthru.tests or { }) // tests;
+          tests =
+            (binaryDrv.passthru.tests or { }) // policyChecksAsTests // (passthru.tests or { }) // tests;
           inherit policyChecks;
           inherit (workspace) policy;
         };
