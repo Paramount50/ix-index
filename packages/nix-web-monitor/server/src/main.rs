@@ -39,8 +39,10 @@ const KEEP_ALIVE: Duration = Duration::from_secs(3);
 )]
 #[allow(clippy::struct_field_names)] // `nix_args` is the wire-level name passed to `nix`; renaming would hurt the CLI help text.
 struct Args {
-    /// Interface used by the web monitor.
-    #[arg(long, default_value = "127.0.0.1")]
+    /// Interface used by the web monitor. Defaults to all interfaces so the UI
+    /// is reachable over LAN/Tailscale without a flag; the WebTransport identity
+    /// already covers off-host names via cert-hash pinning.
+    #[arg(long, default_value = "0.0.0.0")]
     host: String,
 
     /// TCP port for the static UI and JSON endpoints.
