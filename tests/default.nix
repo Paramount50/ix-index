@@ -1729,40 +1729,8 @@ let
       }).refs
       true
   );
-  discoverTreeDuplicateExpr = pkgs.writeText "discover-tree-duplicate.nix" ''
-    let
-      lib = import ${nixpkgs}/lib;
-      discovery = import ${../lib/discovery.nix} {
-        inherit lib;
-        paths = { };
-        artifacts = { };
-        mkImage = _: null;
-        mkFleetFor = _: _: null;
-        ixReturn = { };
-      };
-    in
-    builtins.deepSeq
-      (discovery.discoverTree {
-        root = ${./fixtures/discover-tree-duplicates};
-      })
-      true
-  '';
-  discoveryScript = ''
-    set +e
-    ${pkgs.nix}/bin/nix-instantiate --eval --strict ${discoverTreeDuplicateExpr} > discover-tree.out 2> discover-tree.err
-    status=$?
-    set -e
-
-    if test "$status" -eq 0; then
-      echo "discoverTree duplicate fixture evaluated successfully, expected duplicate-name failure" >&2
-      exit 1
-    fi
-
-    grep -F "discoverTree: duplicate output name 'shared'" discover-tree.err
-    grep -F "first/shared" discover-tree.err
-    grep -F "second/shared" discover-tree.err
-  '';
-
+  discoverTreeDuplicateMessages =
+    (ix.inspectTree { root = ./fixtures/discover-tree-duplicates; }).duplicateMessages;
   # --- Per-image assertion groups -------------------------------------------
 
   groups = {
@@ -2963,6 +2931,20 @@ let
         message = "secret refs should reject unsafe relative names during eval";
       }
       {
+        assertion = lib.any (
+          msg: lib.hasInfix "discoverTree: duplicate output name 'shared'" msg
+        ) discoverTreeDuplicateMessages;
+        message = "discoverTree should name the duplicated output in its failure message";
+      }
+      {
+        assertion = lib.any (msg: lib.hasInfix "first/shared" msg) discoverTreeDuplicateMessages;
+        message = "discoverTree duplicate failure should cite the first claiming path";
+      }
+      {
+        assertion = lib.any (msg: lib.hasInfix "second/shared" msg) discoverTreeDuplicateMessages;
+        message = "discoverTree duplicate failure should cite the second claiming path";
+      }
+      {
         assertion = cargoUnitWorkspace.policyChecks ? cargoAudit;
         message = "cargo-unit workspaces should expose a cargo-audit policy check by default";
       }
@@ -2983,17 +2965,16 @@ let
         message = "cargo-unit policyChecks.clippy should produce multiple per-unit derivations for a multi-target fixture";
       }
       {
-        assertion = builtins.all (
-          unit: lib.isDerivation unit
-        ) (builtins.attrValues cargoUnitWorkspace.policyChecks.clippy);
+        assertion = builtins.all (unit: lib.isDerivation unit) (
+          builtins.attrValues cargoUnitWorkspace.policyChecks.clippy
+        );
         message = "cargo-unit policyChecks.clippy entries should each be a derivation";
       }
       {
         # clippyUnits sits at the top of the units attrset so callers that
         # don't want the policyChecks aggregator can still pick individual
         # units by their unit attribute name (matches `units.<name>`).
-        assertion =
-          cargoUnitWorkspace.clippyUnits == cargoUnitWorkspace.policyChecks.clippy;
+        assertion = cargoUnitWorkspace.clippyUnits == cargoUnitWorkspace.policyChecks.clippy;
         message = "cargo-unit should expose clippyUnits at the top level identical to policyChecks.clippy";
       }
       {
@@ -3147,14 +3128,8 @@ let
           let
             denied = repoPackages.minecraft-nbt.passthru.policy.clippy.deniedLints;
           in
-          builtins.all (lint: builtins.elem lint denied) [
-            "warnings"
-            "clippy::all"
-            "clippy::pedantic"
-            "clippy::nursery"
-            "clippy::cargo"
-          ];
-        message = "repo Rust clippy checks should deny the shared strict lint set by default";
+          denied == [ ];
+        message = "repo Rust clippy policy should defer default lint levels to Cargo.toml";
       }
       {
         assertion = repoPackages.minecraft-nbt.passthru.tests ? package;
@@ -3713,18 +3688,12 @@ let
     mkdir -p "$out"
   '';
 
-  discoveryTest = pkgs.runCommand "ix-test-discovery" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
-    ${discoveryScript}
-    mkdir -p "$out"
-  '';
-
   cargoUnitRealWorkspacesTest =
     mkTest "cargo-unit-real-workspaces" cargoUnitRealWorkspaceAssertions
       cargoUnitRealWorkspaceScript;
 in
 {
   inherit imageTests groups cargoUnitRealWorkspaceAssertions;
-  discovery = discoveryTest;
   cargoUnitRealWorkspaces = cargoUnitRealWorkspacesTest;
 
   # Aggregate. Pulls every per-image test into one derivation so
@@ -3734,7 +3703,6 @@ in
     ++ [
       fleetTest
       helperTest
-      discoveryTest
     ]
   );
 }
