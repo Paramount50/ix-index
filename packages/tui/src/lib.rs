@@ -1,3 +1,23 @@
+//! PTY-backed terminal management: spawn child processes attached to real
+//! pseudo-terminals, drive them with input, and read back a VT100-rendered
+//! viewport, scrollback, and per-cell styling.
+//!
+//! [`TuiManager`] spawns processes and tracks them; each spawn returns a
+//! [`TuiInstance`] handle that carries every read and write method. Blocking
+//! methods drive the manager's shared tokio runtime; their `_async` twins
+//! return futures for callers that already have one.
+//!
+//! ```no_run
+//! use std::time::Duration;
+//! use tui::{SpawnConfig, TuiManager};
+//!
+//! let manager = TuiManager::new();
+//! let term = manager.spawn("cat".into(), vec![], SpawnConfig::default())?;
+//! term.write("hello\n")?;
+//! let lines = term.read_blocking(Duration::from_secs(1))?;
+//! # Ok::<(), tui::Error>(())
+//! ```
+
 #![allow(
     clippy::missing_errors_doc,
     reason = "library API errors are documented via the typed `Error` enum"
@@ -16,18 +36,15 @@
 )]
 
 mod actor;
-mod cache;
 mod error;
 mod manager;
 mod slice;
 mod types;
 
-pub use cache::Cache;
 pub use error::{Error, Result};
-pub use manager::TuiManager;
-pub use manager::reader::FullOutput;
+pub use manager::{TuiInstance, TuiManager};
 pub use slice::{ColRange, RowRange, slice_2d};
-pub use types::{StyledCell, TuiInstance};
+pub use types::{Color, FullOutput, SpawnConfig, StyledCell};
 
 #[cfg(test)]
 mod tests;

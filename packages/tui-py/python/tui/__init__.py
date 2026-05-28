@@ -8,6 +8,7 @@ keystrokes, and observe their VT100-rendered viewport. The public surface is:
     Size            (rows, cols) terminal size
     Key             common keystrokes as ANSI byte strings, with .ctrl/.alt
     StyledCell      one viewport cell: character + VT100 attributes
+    Color           a cell color: None (default), int (palette), or (r, g, b)
     WaitTimeout     raised by `Tui.wait_for(...)` when nothing matched in time
 
 Every blocking I/O method has an `a`-prefixed coroutine variant that returns a
@@ -31,11 +32,13 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._tui import (
+    StyledCell as StyledCell,
     TuiInstance as _RawTuiInstance,
     __version__,
 )
 
 __all__ = [
+    "Color",
     "Key",
     "Pattern",
     "Size",
@@ -52,6 +55,12 @@ __all__ = [
 # --------------------------------------------------------------------------- #
 
 
+#: A VT100 cell color: `None` is the terminal default, an `int` in `0..=255` is
+#: a palette index, and an `(r, g, b)` tuple is 24-bit truecolor. Read off a
+#: `StyledCell` via `cell.fg` / `cell.bg`.
+Color: TypeAlias = int | tuple[int, int, int] | None
+
+
 @dataclass(frozen=True, slots=True)
 class Size:
     """Terminal dimensions, in cells."""
@@ -62,22 +71,6 @@ class Size:
     def __iter__(self) -> Iterator[int]:
         yield self.rows
         yield self.cols
-
-
-@dataclass(frozen=True, slots=True)
-class StyledCell:
-    """One viewport cell with its VT100 attributes.
-
-    `fg`/`bg` are vt100-formatted color strings or `None` for the default.
-    """
-
-    char: str
-    fg: str | None
-    bg: str | None
-    bold: bool
-    italic: bool
-    underline: bool
-    inverse: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,21 +184,6 @@ def _build_predicate(pattern: Pattern) -> Callable[[Snapshot], bool]:
     return pattern
 
 
-def _wrap_styled(raw_row: list) -> list[StyledCell]:
-    return [
-        StyledCell(
-            char=c.character,
-            fg=c.fgcolor,
-            bg=c.bgcolor,
-            bold=c.bold,
-            italic=c.italic,
-            underline=c.underline,
-            inverse=c.inverse,
-        )
-        for c in raw_row
-    ]
-
-
 # --------------------------------------------------------------------------- #
 # Tui
 # --------------------------------------------------------------------------- #
@@ -220,10 +198,11 @@ class Tui:
             tui.enter("1 + 2")
             snap = tui.wait_for("3", timeout=2.0)
 
-    A single process-wide tokio runtime drives every spawned PTY. Sync methods
-    release the GIL on the underlying Rust call; async methods return native
-    asyncio coroutines bridged through pyo3-async-runtimes — no thread-pool
-    hop.
+    The terminal opens at `rows` x `cols` (default 80x24) with `scrollback_lines`
+    of history (default 10,000). A single process-wide tokio runtime drives
+    every spawned PTY. Sync methods release the GIL on the underlying Rust call;
+    async methods return native asyncio coroutines bridged through
+    pyo3-async-runtimes, with no thread-pool hop.
 
     There is no force-kill path today. `interrupt()` sends Ctrl+C, which most
     cooperative programs respect; `with` blocks will interrupt on exit.
@@ -235,9 +214,11 @@ class Tui:
         self,
         command: str,
         *args: str,
-        scrollback_lines: int = 10_000,
+        rows: int | None = None,
+        cols: int | None = None,
+        scrollback_lines: int | None = None,
     ) -> None:
-        self._raw = _RawTuiInstance(command, list(args), scrollback_lines)
+        self._raw = _RawTuiInstance(command, list(args), rows, cols, scrollback_lines)
 
     @classmethod
     def _from_raw(cls, raw: _RawTuiInstance) -> Self:
@@ -311,10 +292,10 @@ class Tui:
 
     def snapshot(self) -> Snapshot:
         """Immutable point-in-time view of viewport + scrollback."""
-        full = self._raw.read_full()
+        scrollback, viewport = self._raw.read_full()
         return Snapshot(
-            viewport=tuple(full.viewport),
-            scrollback=tuple(full.scrollback),
+            viewport=tuple(viewport),
+            scrollback=tuple(scrollback),
             size=self.size,
         )
 
@@ -334,7 +315,7 @@ class Tui:
 
     def styled_cells(self) -> list[list[StyledCell]]:
         """Per-cell styling for the viewport, indexed as `[row][col]`."""
-        return [_wrap_styled(row) for row in self._raw.read_styled_cells()]
+        return self._raw.read_styled_cells()
 
     # -- waits --------------------------------------------------------------
 
@@ -384,10 +365,10 @@ class Tui:
 
     async def asnapshot(self) -> Snapshot:
         """Native asyncio-awaitable snapshot."""
-        full = await self._raw.read_full_async()
+        scrollback, viewport = await self._raw.read_full_async()
         return Snapshot(
-            viewport=tuple(full.viewport),
-            scrollback=tuple(full.scrollback),
+            viewport=tuple(viewport),
+            scrollback=tuple(scrollback),
             size=self.size,
         )
 
@@ -395,8 +376,7 @@ class Tui:
         return await self._raw.read_chars_array_async()
 
     async def astyled_cells(self) -> list[list[StyledCell]]:
-        rows = await self._raw.read_styled_cells_async()
-        return [_wrap_styled(row) for row in rows]
+        return await self._raw.read_styled_cells_async()
 
     async def await_for(
         self,

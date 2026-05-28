@@ -1,5 +1,6 @@
 use uuid::Uuid;
 
+use crate::types::StyledCell;
 use crate::{Error, error::Result};
 
 const SCROLLBACK_OFFSET_MAX: usize = usize::MAX;
@@ -57,8 +58,7 @@ pub fn extract_chars(id: Uuid, parser: &vt100::Parser) -> Result<Vec<Vec<char>>>
     for row in 0..rows {
         let mut row_chars = Vec::with_capacity(usize::from(cols));
         for col in 0..cols {
-            let cell = screen.cell(row, col);
-            let ch = match cell {
+            let ch = match screen.cell(row, col) {
                 Some(cell) => cell.contents().chars().next().unwrap_or(' '),
                 None => ' ',
             };
@@ -70,18 +70,25 @@ pub fn extract_chars(id: Uuid, parser: &vt100::Parser) -> Result<Vec<Vec<char>>>
     Ok(result)
 }
 
-fn color_to_string(color: vt100::Color) -> String {
-    match color {
-        vt100::Color::Default => "default".to_string(),
-        vt100::Color::Idx(idx) => format!("idx:{idx}"),
-        vt100::Color::Rgb(r, g, b) => format!("rgb:{r},{g},{b}"),
+fn cell_at(screen: &vt100::Screen, row: u16, col: u16) -> StyledCell {
+    match screen.cell(row, col) {
+        Some(cell) => StyledCell {
+            character: cell.contents().chars().next().unwrap_or(' '),
+            fg: cell.fgcolor().into(),
+            bg: cell.bgcolor().into(),
+            bold: cell.bold(),
+            italic: cell.italic(),
+            underline: cell.underline(),
+            inverse: cell.inverse(),
+        },
+        None => StyledCell::default(),
     }
 }
 
 pub fn extract_styled_cells(
     id: Uuid,
     parser: &vt100::Parser,
-) -> Result<ndarray::Array2<crate::types::StyledCell>> {
+) -> Result<ndarray::Array2<StyledCell>> {
     let screen = parser.screen();
     let (rows, cols) = screen.size();
 
@@ -93,37 +100,17 @@ pub fn extract_styled_cells(
     let cols_usize = usize::from(cols);
 
     let mut data = Vec::with_capacity(rows_usize * cols_usize);
-
     for row in 0..rows {
         for col in 0..cols {
-            let cell = screen.cell(row, col);
-            let styled_cell = match cell {
-                Some(cell) => crate::types::StyledCell {
-                    character: cell.contents().chars().next().unwrap_or(' '),
-                    fgcolor: Some(color_to_string(cell.fgcolor())),
-                    bgcolor: Some(color_to_string(cell.bgcolor())),
-                    bold: cell.bold(),
-                    italic: cell.italic(),
-                    underline: cell.underline(),
-                    inverse: cell.inverse(),
-                },
-                None => crate::types::StyledCell {
-                    character: ' ',
-                    fgcolor: None,
-                    bgcolor: None,
-                    bold: false,
-                    italic: false,
-                    underline: false,
-                    inverse: false,
-                },
-            };
-            data.push(styled_cell);
+            data.push(cell_at(screen, row, col));
         }
     }
 
-    ndarray::Array2::from_shape_vec((rows_usize, cols_usize), data).map_err(|e| {
+    ndarray::Array2::from_shape_vec((rows_usize, cols_usize), data).map_err(|source| {
         Error::ArrayConversion {
-            message: format!("Failed to create Array2 from screen data: {e}"),
+            rows: rows_usize,
+            cols: cols_usize,
+            source,
         }
     })
 }

@@ -47,6 +47,13 @@ with Tui("python", "-q") as tui:
 `tui.snapshot()` returns a frozen `Snapshot` (viewport, scrollback, size). It
 supports `str(snap)`, `"needle" in snap`, and `.text` / `.full_text`.
 
+The terminal opens at 80x24 with 10,000 lines of scrollback. Override per
+instance with keyword args:
+
+```python
+Tui("bash", "--norc", "-i", rows=40, cols=120, scrollback_lines=50_000)
+```
+
 ## Examples
 
 ### Drive a REPL and read its output
@@ -121,7 +128,10 @@ with Tui("bash", "--norc", "-i") as t:
 
 `tui.chars()` returns a `numpy.uint32` array of Unicode codepoints, shape
 `(rows, cols)`. `tui.styled_cells()` returns a nested list of `StyledCell`
-dataclasses (`char`, `fg`, `bg`, `bold`, `italic`, `underline`, `inverse`).
+objects (`char`, `fg`, `bg`, `bold`, `italic`, `underline`, `inverse`).
+
+`fg` and `bg` are `Color` values: `None` for the terminal default, an `int` in
+`0..=255` for a palette index, or an `(r, g, b)` tuple for truecolor.
 
 ```python
 import numpy as np
@@ -136,6 +146,7 @@ with Tui("bash", "--norc", "-i") as t:
     styled = t.styled_cells()
     bolds = [(r, c) for r, row in enumerate(styled)
                     for c, cell in enumerate(row) if cell.bold]
+    reds = [cell.char for row in styled for cell in row if cell.fg == 1]
 ```
 
 ### Handle timeouts
@@ -170,7 +181,8 @@ print(len(Tui.list_all()))   # 2
 | `Snapshot`     | Frozen viewport + scrollback + size.                   |
 | `Size`         | `(rows, cols)` dataclass.                              |
 | `Key`          | ANSI keystroke constants + `Key.ctrl`/`Key.alt`.       |
-| `StyledCell`   | One cell with VT100 attributes.                        |
+| `StyledCell`   | One cell: `char`, `fg`/`bg`, and VT100 attributes.     |
+| `Color`        | `None` (default), `int` (palette), or `(r, g, b)`.     |
 | `WaitTimeout`  | Raised by `wait_for` / `await_for` on deadline expiry. |
 
 [maturin]: https://www.maturin.rs/

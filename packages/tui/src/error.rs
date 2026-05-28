@@ -39,8 +39,12 @@ pub enum Error {
     #[snafu(display("Column index {index} out of bounds (line length: {line_len})"))]
     ColIndexOutOfBounds { index: usize, line_len: usize },
 
-    #[snafu(display("{message}"))]
-    ArrayConversion { message: String },
+    #[snafu(display("failed to build {rows}x{cols} styled-cell array: {source}"))]
+    ArrayConversion {
+        rows: usize,
+        cols: usize,
+        source: ndarray::ShapeError,
+    },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

@@ -1,11 +1,18 @@
-use crate::TuiManager;
+use std::time::Duration;
+
+use crate::{SpawnConfig, TuiManager};
+
+fn spawn(manager: &TuiManager, command: &str, args: &[&str]) -> crate::TuiInstance {
+    let args = args.iter().map(|a| (*a).to_string()).collect();
+    manager
+        .spawn(command.to_string(), args, SpawnConfig::default())
+        .expect("spawn failed")
+}
 
 #[test]
 fn spawn_and_list() {
     let manager = TuiManager::new();
-    let instance = manager
-        .spawn("echo".to_string(), vec!["test".to_string()], 10000)
-        .expect("spawn failed");
+    let instance = spawn(&manager, "echo", &["test"]);
 
     let list = manager.list();
     assert_eq!(list.len(), 1);
@@ -17,15 +24,15 @@ fn spawn_and_list() {
 #[test]
 fn write_and_read() {
     let manager = TuiManager::new();
-    let instance = manager
-        .spawn("cat".to_string(), vec![], 10000)
-        .expect("spawn failed");
+    let instance = spawn(&manager, "cat", &[]);
 
-    manager.write(&instance, "hello\n").expect("write failed");
+    instance.write("hello\n").expect("write failed");
 
-    std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::sleep(Duration::from_millis(100));
 
-    let output = manager.read_blocking(&instance, 1000).expect("read failed");
+    let output = instance
+        .read_blocking(Duration::from_secs(1))
+        .expect("read failed");
 
     assert!(!output.is_empty());
     let first = output
@@ -37,22 +44,16 @@ fn write_and_read() {
 #[test]
 fn vim_spawns_and_produces_output() {
     let manager = TuiManager::new();
-    let instance = manager
-        .spawn(
-            "vim".to_string(),
-            vec!["-u".to_string(), "NONE".to_string()],
-            10000,
-        )
-        .expect("vim spawn failed");
+    let instance = spawn(&manager, "vim", &["-u", "NONE"]);
 
     let list = manager.list();
     assert_eq!(list.len(), 1);
     let first = list.first().expect("should have vim instance");
     assert_eq!(first.command, "vim");
 
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    std::thread::sleep(Duration::from_secs(1));
 
-    let output = manager.read(&instance);
+    let output = instance.read_viewport();
     assert!(
         output.is_ok(),
         "vim should eventually have screen content available"
@@ -62,28 +63,22 @@ fn vim_spawns_and_produces_output() {
 #[test]
 fn vim_help_command_changes_screen() {
     let manager = TuiManager::new();
-    let instance = manager
-        .spawn(
-            "vim".to_string(),
-            vec!["-u".to_string(), "NONE".to_string()],
-            10000,
-        )
-        .expect("vim spawn failed");
+    let instance = spawn(&manager, "vim", &["-u", "NONE"]);
 
-    std::thread::sleep(std::time::Duration::from_secs(1));
+    std::thread::sleep(Duration::from_secs(1));
 
-    let initial_output = manager
-        .read(&instance)
+    let initial_output = instance
+        .read_viewport()
         .expect("vim should have initial screen content");
 
-    manager
-        .write(&instance, ":help\n")
+    instance
+        .write(":help\n")
         .expect("failed to send help command to vim");
 
-    std::thread::sleep(std::time::Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(500));
 
-    let help_output = manager
-        .read(&instance)
+    let help_output = instance
+        .read_viewport()
         .expect("vim should have screen content after help command");
 
     assert_ne!(
@@ -93,32 +88,52 @@ fn vim_help_command_changes_screen() {
 }
 
 #[test]
-fn scrollback_buffer_configured() {
+fn scrollback_limit_is_configurable() {
     let manager = TuiManager::new();
     let instance = manager
-        .spawn("echo".to_string(), vec!["test".to_string()], 5000)
+        .spawn(
+            "echo".to_string(),
+            vec!["test".to_string()],
+            SpawnConfig {
+                scrollback_lines: 5000,
+                ..SpawnConfig::default()
+            },
+        )
         .expect("spawn failed with scrollback");
 
-    assert_eq!(instance.command, "echo");
+    assert_eq!(instance.scrollback_limit, 5000);
+}
+
+#[test]
+fn spawn_config_sets_terminal_size() {
+    let manager = TuiManager::new();
+    let instance = manager
+        .spawn(
+            "cat".to_string(),
+            vec![],
+            SpawnConfig {
+                rows: 40,
+                cols: 120,
+                ..SpawnConfig::default()
+            },
+        )
+        .expect("spawn failed");
+
+    assert_eq!((instance.rows, instance.cols), (40, 120));
 }
 
 #[test]
 fn burst_output_within_viewport() {
     let manager = TuiManager::new();
-    let instance = manager
-        .spawn(
-            "sh".to_string(),
-            vec![
-                "-c".to_string(),
-                "for i in 1 2 3 4 5; do echo line$i; done".to_string(),
-            ],
-            10000,
-        )
-        .expect("spawn failed");
+    let instance = spawn(
+        &manager,
+        "sh",
+        &["-c", "for i in 1 2 3 4 5; do echo line$i; done"],
+    );
 
-    std::thread::sleep(std::time::Duration::from_millis(200));
+    std::thread::sleep(Duration::from_millis(200));
 
-    let output = manager.read(&instance).expect("read failed");
+    let output = instance.read_viewport().expect("read failed");
 
     assert!(
         output.iter().any(|line| line.contains("line1")),
@@ -133,22 +148,12 @@ fn burst_output_within_viewport() {
 #[test]
 fn scrollback_captures_lines_beyond_viewport() {
     let manager = TuiManager::new();
-    let instance = manager
-        .spawn(
-            "sh".to_string(),
-            vec!["-c".to_string(), "seq 0 100".to_string()],
-            10000,
-        )
-        .expect("spawn failed");
+    let instance = spawn(&manager, "sh", &["-c", "seq 0 100"]);
 
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    std::thread::sleep(Duration::from_millis(300));
 
-    let viewport = manager
-        .read_viewport(&instance)
-        .expect("viewport read failed");
-    let scrollback = manager
-        .read_scrollback(&instance)
-        .expect("scrollback read failed");
+    let viewport = instance.read_viewport().expect("viewport read failed");
+    let scrollback = instance.read_scrollback().expect("scrollback read failed");
 
     assert!(
         viewport.iter().any(|line| line.contains("100")),

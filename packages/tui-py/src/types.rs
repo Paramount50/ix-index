@@ -1,73 +1,89 @@
+use pyo3::IntoPyObject;
 use pyo3::prelude::*;
 
-/// A single styled terminal cell: character plus VT100 attributes.
-#[pyclass(frozen, get_all, skip_from_py_object, module = "tui._tui")]
-#[derive(Debug, Clone)]
+use tui::Color;
+
+/// One styled terminal cell exposed to Python.
+///
+/// `fg` and `bg` use the pythonic color encoding: `None` is the terminal
+/// default, an `int` in `0..=255` is a palette index, and an `(r, g, b)` tuple
+/// is 24-bit truecolor.
+#[pyclass(frozen, module = "tui._tui")]
 pub struct StyledCell {
-    pub character: String,
-    pub fgcolor: Option<String>,
-    pub bgcolor: Option<String>,
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub inverse: bool,
+    inner: tui::StyledCell,
+}
+
+impl From<tui::StyledCell> for StyledCell {
+    fn from(inner: tui::StyledCell) -> Self {
+        Self { inner }
+    }
+}
+
+/// Convert a core color into its Python value: `None`, an `int`, or a tuple.
+fn color_to_py(py: Python<'_>, color: Color) -> PyResult<Py<PyAny>> {
+    match color {
+        Color::Default => Ok(py.None()),
+        Color::Indexed(index) => Ok(index.into_pyobject(py)?.into_any().unbind()),
+        Color::Rgb(r, g, b) => Ok((r, g, b).into_pyobject(py)?.into_any().unbind()),
+    }
+}
+
+/// Render a color the way the Python value prints, for use in `__repr__`.
+fn color_repr(color: Color) -> String {
+    match color {
+        Color::Default => "None".to_string(),
+        Color::Indexed(index) => index.to_string(),
+        Color::Rgb(r, g, b) => format!("({r}, {g}, {b})"),
+    }
 }
 
 #[pymethods]
 impl StyledCell {
+    #[getter]
+    fn char(&self) -> String {
+        self.inner.character.to_string()
+    }
+
+    #[getter]
+    fn fg(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        color_to_py(py, self.inner.fg)
+    }
+
+    #[getter]
+    fn bg(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        color_to_py(py, self.inner.bg)
+    }
+
+    #[getter]
+    fn bold(&self) -> bool {
+        self.inner.bold
+    }
+
+    #[getter]
+    fn italic(&self) -> bool {
+        self.inner.italic
+    }
+
+    #[getter]
+    fn underline(&self) -> bool {
+        self.inner.underline
+    }
+
+    #[getter]
+    fn inverse(&self) -> bool {
+        self.inner.inverse
+    }
+
     fn __repr__(&self) -> String {
         format!(
-            "StyledCell(character={:?}, fgcolor={:?}, bgcolor={:?}, bold={}, italic={}, \
-             underline={}, inverse={})",
-            self.character,
-            self.fgcolor,
-            self.bgcolor,
-            self.bold,
-            self.italic,
-            self.underline,
-            self.inverse,
+            "StyledCell(char={:?}, fg={}, bg={}, bold={}, italic={}, underline={}, inverse={})",
+            self.inner.character,
+            color_repr(self.inner.fg),
+            color_repr(self.inner.bg),
+            self.inner.bold,
+            self.inner.italic,
+            self.inner.underline,
+            self.inner.inverse,
         )
-    }
-}
-
-impl From<tui::StyledCell> for StyledCell {
-    fn from(cell: tui::StyledCell) -> Self {
-        Self {
-            character: cell.character.to_string(),
-            fgcolor: cell.fgcolor,
-            bgcolor: cell.bgcolor,
-            bold: cell.bold,
-            italic: cell.italic,
-            underline: cell.underline,
-            inverse: cell.inverse,
-        }
-    }
-}
-
-/// Combined scrollback and viewport snapshot.
-#[pyclass(frozen, get_all, skip_from_py_object, module = "tui._tui")]
-#[derive(Debug, Clone)]
-pub struct FullOutput {
-    pub scrollback: Vec<String>,
-    pub viewport: Vec<String>,
-}
-
-#[pymethods]
-impl FullOutput {
-    fn __repr__(&self) -> String {
-        format!(
-            "FullOutput(scrollback=<{} lines>, viewport=<{} lines>)",
-            self.scrollback.len(),
-            self.viewport.len(),
-        )
-    }
-}
-
-impl From<tui::FullOutput> for FullOutput {
-    fn from(full: tui::FullOutput) -> Self {
-        Self {
-            scrollback: full.scrollback,
-            viewport: full.viewport,
-        }
     }
 }

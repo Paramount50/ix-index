@@ -1,126 +1,115 @@
-# TUI Library
+# tui
 
-A high-performance library for managing multiple pseudo-terminal (PTY) based terminal user interfaces concurrently.
+Spawn and drive multiple PTY-backed terminal programs from one process. Each
+spawned child gets a real pseudo-terminal, so interactive programs (vim, less,
+a shell, a REPL) behave as they would in a normal terminal instead of seeing a
+dumb pipe.
 
-## Overview
-
-This library provides a robust abstraction for spawning and managing terminal applications with proper PTY support. Unlike simple stdin/stdout piping, this library uses real pseudo-terminals, enabling full support for interactive terminal applications like vim, htop, and other TUI programs.
-
-## Architecture
-
-### PTY-Based Design
-
-The library uses **non-blocking PTY masters** on the managing side while providing **blocking PTY slaves** to spawned processes. This architecture allows:
-
-- **Non-blocking I/O**: The master side uses async/await with Tokio for efficient concurrent management of multiple terminals
-- **True Terminal Emulation**: Spawned processes see a real terminal device, not pipes
-- **Proper Signal Handling**: Terminal control signals (SIGINT, SIGTSTP, etc.) work correctly
-- **Terminal Sizing**: Support for terminal resize operations via `ioctl`
-
-### Key Components
-
-- **`TuiManager`**: Main interface for managing multiple TUI instances
-- **`TuiInstance`**: Represents a single running TUI with its PTY master and output buffer
-- **`TuiInfo`**: Metadata about a TUI instance (ID, command, arguments)
-
-## Features
-
-- **Concurrent TUI Management**: Spawn and manage multiple terminal applications simultaneously
-- **Async I/O**: Non-blocking reads and writes using Tokio
-- **VT100 Emulation**: Full terminal emulation via vt100 parser with scrollback support
-- **Configurable Scrollback**: Store terminal history beyond the visible viewport
-- **2D Slicing**: Extract specific rows/columns from terminal output
-- **Timeout Support**: Blocking reads with configurable timeouts
+The output of every child is fed through a [vt100] emulator, so you read back a
+rendered screen (viewport, scrollback, per-cell styling) rather than a raw byte
+stream full of escape sequences.
 
 ## Usage
 
 ```rust
-use tui::TuiManager;
+use std::time::Duration;
+use tui::{SpawnConfig, TuiManager};
 
 let manager = TuiManager::new();
 
-let instance = manager
-    .spawn(
-        "vim".to_string(),
-        vec![],
-        10000  // scrollback buffer: 10000 lines
-    )
-    .unwrap();
+// Spawn on an 80x24 PTY with 10,000 lines of scrollback (the defaults).
+let term = manager.spawn("cat".into(), vec![], SpawnConfig::default())?;
 
-manager.write(&instance, "i").unwrap();
-manager.write(&instance, "Hello, PTY!\n").unwrap();
+term.write("hello\n")?;
 
-let lines = manager.read(&instance).unwrap();
-for line in lines {
-    println!("{}", line);
+// Block until the child paints something, then read the rendered screen.
+for line in term.read_blocking(Duration::from_secs(1))? {
+    println!("{line}");
 }
 
-let viewport = manager.read_viewport(&instance).unwrap();
-
-let scrollback = manager.read_scrollback(&instance).unwrap();
-
-let lines = manager.read_blocking(&instance, 1000).unwrap();
+let snapshot = term.read_full()?;        // scrollback + viewport together
+let cells = term.read_styled_cells()?;   // per-cell char + color + attrs
+# Ok::<(), tui::Error>(())
 ```
 
-## Technical Details
+Every blocking method has an `_async` twin (`write_async`, `read_viewport_async`,
+…) that returns a future instead of driving the runtime itself, for callers that
+already run inside tokio.
 
-### PTY Master (Non-Blocking)
+## Design
 
-The PTY master is held in an `Arc<tokio::sync::Mutex<Pty>>` for safe concurrent access across async tasks. This provides:
+- **`TuiManager`** owns one multi-threaded tokio runtime, spawns processes, and
+  tracks the live ones (`list`, `get`). It shares a clone of its runtime into
+  every handle it hands out.
+- **`TuiInstance`** is the handle for one child. It carries every read/write
+  method and a clone of the runtime, so it keeps working for as long as you hold
+  it. Cloning a handle is cheap and all clones address the same process.
+- A per-child **actor task** owns the PTY master. It is the only thing that
+  touches the PTY and the vt100 parser, so reads and writes from many threads
+  serialize through one mailbox (`tokio::sync::mpsc`) instead of locking.
 
-- Non-blocking reads via Tokio's `AsyncRead`
-- Non-blocking writes via Tokio's `AsyncWrite`
-- Safe sharing across multiple async contexts
+The PTY master is non-blocking and driven with async I/O; the slave handed to
+the child is a real terminal device, so signals, line discipline, and terminal
+sizing all work.
 
-### Output Processing
+## Reading the screen
 
-Terminal output is read asynchronously in a dedicated background task and processed through a VT100 terminal emulator:
+- `read_viewport` returns the visible screen, one `String` per row.
+- `read_scrollback` returns lines that have scrolled above the viewport, oldest
+  first.
+- `read_full` returns both as a [`FullOutput`].
+- `read_blocking(timeout)` polls the viewport until it has content or the
+  timeout elapses; it errors with `NoOutputAvailable` only if nothing arrives.
+- `read_chars` returns a `rows x cols` grid of `char`.
+- `read_styled_cells` returns an `ndarray::Array2<StyledCell>`; each
+  [`StyledCell`] carries its character, typed `fg`/`bg` [`Color`], and the bold,
+  italic, underline, and inverse flags.
 
-1. Raw bytes are read from the PTY master
-2. Bytes are fed to the vt100::Parser which maintains terminal state
-3. ANSI escape sequences are processed (cursor movement, colors, formatting)
-4. Terminal screen is maintained as 24x80 viewport with configurable scrollback
-5. Concurrent reads from multiple threads are supported
+`slice_2d` with `RowRange`/`ColRange` extracts a rectangular sub-region of a
+`Vec<String>` (1-indexed, inclusive) when you only want part of the screen.
 
-### Terminal Configuration
+## Configuration
 
-- Default terminal size: 24 rows × 80 columns
-- Configurable scrollback buffer (default: 10000 lines)
-- Full VT100 terminal emulation with color and formatting support
+Pass a [`SpawnConfig`] to set the terminal size and scrollback depth at spawn:
 
-### Scrollback Buffer
+```rust
+use tui::SpawnConfig;
 
-The scrollback buffer stores lines that have scrolled off the visible viewport:
+let config = SpawnConfig { rows: 40, cols: 120, scrollback_lines: 50_000 };
+```
 
-- `read()`: Returns viewport only (current limitation: scrollback access not yet implemented)
-- `read_viewport()`: Returns only the visible 24x80 screen
-- `read_scrollback()`: Returns historical lines (currently returns empty; future enhancement)
+Size is fixed for the life of the process; there is no runtime resize today.
 
-Note: While the scrollback buffer is configured and the VT100 parser stores scrollback content, accessing historical lines programmatically requires navigating the vt100 API via `set_scrollback()` which will be implemented in a future update.
+## Errors
 
-## Error Handling
+All fallible calls return `Result<T, Error>`, a `snafu`-derived enum:
 
-All operations return `Result<T, Error>` with structured error types defined via `snafu`:
+- `ProcessSpawn` — the child failed to launch.
+- `TuiNotFound` — the handle's actor has exited (the channel is closed).
+- `WriteToTui` / `ReadFromTui` — a PTY I/O call failed.
+- `NoOutputAvailable` — the screen is still empty.
+- `InvalidRowRange` / `InvalidColRange` / `RowIndexOutOfBounds` /
+  `ColIndexOutOfBounds` — bad arguments to `slice_2d`.
+- `ArrayConversion` — building the styled-cell grid failed (carries the
+  underlying `ndarray::ShapeError`).
 
-- `ProcessSpawn`: Failed to spawn process
-- `TuiNotFound`: Invalid TUI ID
-- `WriteToTui`: Write operation failed
-- `NoOutputAvailable`: No buffered output to read
+## Known limitations
+
+- Unix only: depends on PTY devices, so Linux and macOS, not Windows.
+- No runtime resize and no force-kill. A `with`-style caller sends Ctrl+C; a
+  child that ignores it keeps running until it exits on its own.
 
 ## Dependencies
 
-- **pty-process**: PTY creation and management
-- **tokio**: Async runtime and I/O
-- **vt100**: Terminal emulation with ANSI escape sequence parsing
-- **parking_lot**: High-performance synchronization primitives
-- **snafu**: Ergonomic error handling
+[pty-process] for PTY creation, [tokio] for the async runtime, [vt100] for
+terminal emulation, [ndarray] for the cell grid, `parking_lot` for the registry
+lock, and `snafu` for errors.
 
-## Performance Characteristics
-
-- **Memory**: O(n × m) where n = number of TUIs, m = average lines buffered per TUI
-- **Concurrency**: Lock-free reads from output buffer (RwLock)
-- **Latency**: Sub-millisecond write latency, configurable read timeout
-
-## Platform Support
-
-Currently supports Unix-like systems (Linux, macOS) where PTY devices are available.
+[vt100]: https://docs.rs/vt100/
+[pty-process]: https://docs.rs/pty-process/
+[tokio]: https://tokio.rs/
+[ndarray]: https://docs.rs/ndarray/
+[`FullOutput`]: src/types.rs
+[`StyledCell`]: src/types.rs
+[`Color`]: src/types.rs
+[`SpawnConfig`]: src/types.rs
