@@ -99,7 +99,9 @@ impl McpServer {
         self.with_sessions(|sessions| sessions.close(&request.session_id))
     }
 
-    #[tool(description = "Evaluate a Python expression in a persistent session.")]
+    #[tool(
+        description = "Evaluate a Python expression in a persistent session. Top-level await works (e.g. `await client.get(url)`); the session keeps one event loop, so async clients and pools created in one call stay usable in later calls."
+    )]
     fn python_eval(&self, Parameters(request): Parameters<EvalRequest>) -> String {
         self.with_sessions(|sessions| {
             let session = sessions.get_or_create(request.session_id.as_deref())?;
@@ -107,7 +109,9 @@ impl McpServer {
         })
     }
 
-    #[tool(description = "Execute Python statements in a persistent session.")]
+    #[tool(
+        description = "Execute Python statements in a persistent session. Top-level await works (e.g. `await pool.fetch(sql)`); the session keeps one event loop, so async resources created in one call stay usable in later calls."
+    )]
     fn python_exec(&self, Parameters(request): Parameters<ExecRequest>) -> String {
         self.with_sessions(|sessions| {
             let session = sessions.get_or_create(request.session_id.as_deref())?;
@@ -490,6 +494,43 @@ mod tests {
             .recv_timeout(Duration::from_secs(5))
             .context("worker stderr burst blocked the session protocol")??;
         assert_eq!(output, "result:\nok");
+        Ok(())
+    }
+
+    fn python_session(id: &str) -> Result<PythonSession> {
+        // The test derivation puts `python3` on PATH via
+        // `packageTestInputs.ix-mcp` in lib/rust-workspace.nix. A bare command
+        // skips the default venv build, which the worker does not need.
+        PythonSession::start(id.to_string(), Some(vec!["python3".to_string()]), None)
+    }
+
+    #[test]
+    fn top_level_await_persists_async_state_across_calls() -> Result<()> {
+        let mut session = python_session("await-persist")?;
+
+        // An async primitive created with top-level await in one call must stay
+        // usable in the next call. A fresh asyncio.run() loop per call would
+        // close the loop the queue is bound to before the second call runs, so
+        // this guards the persistent-loop design rather than await syntax alone.
+        let put = session.request(
+            "exec",
+            json!({ "source": "import asyncio\nq = asyncio.Queue()\nawait q.put(123)" }),
+        )?;
+        assert_eq!(put, "ok");
+
+        let got = session.request("eval", json!({ "expression": "await q.get()" }))?;
+        assert_eq!(got, "result:\n123");
+
+        Ok(())
+    }
+
+    #[test]
+    fn synchronous_expressions_still_evaluate() -> Result<()> {
+        // Compiling with PyCF_ALLOW_TOP_LEVEL_AWAIT must not change plain code:
+        // snippets without await run eagerly and return their value.
+        let mut session = python_session("await-sync")?;
+        let sum = session.request("eval", json!({ "expression": "1 + 1" }))?;
+        assert_eq!(sum, "result:\n2");
         Ok(())
     }
 
