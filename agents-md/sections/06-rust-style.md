@@ -33,3 +33,14 @@ against a debug-assertion standard library and surfaces some unsafe-precondition
 and stdlib-invariant breakage, but it does not model aliasing, uninitialized
 reads, or data races, so it complements Miri rather than replacing it.
 
+When auditing a crate with deterministic, fast tests, run
+[`cargo-mutants`](https://mutants.rs/) with
+`nix shell nixpkgs#cargo-mutants -c cargo mutants --package <name>` to surface
+behavior that coverage cannot prove protected. Let the default copy-to-`target`
+mode hold; `--in-place` is faster but leaves the source tree dirty on interrupt
+or panic, so reserve it for disposable checkouts. Treat surviving mutants as
+candidates for tighter assertions, equivalent-mutant write-offs, or
+unreachable-by-test code, and keep cargo-mutants a package-owner tool rather
+than a CI gate: equivalent mutants need human judgment, runtime scales with
+mutant count, and a survivor is a prompt to look, not a regression to block.
+
