@@ -1,0 +1,13 @@
+{
+  "minecraftVersion": "26.1.2",
+  "assetIndexId": "30",
+  "assetIndex": {
+    "url": "https://piston-meta.mojang.com/v1/packages/2866ab0411f8507bf88d81513a08956a2474403f/30.json",
+    "hash": "sha1-KGarBBH4UHv4jYFROgiVaiR0QD8="
+  },
+  "excludePrefixes": [
+    "music",
+    "records"
+  ],
+  "packHash": "sha256-Km+bbcgu5+x7PYLHEZlJftq8bym+uYlXNCenQk/Zig8="
+}

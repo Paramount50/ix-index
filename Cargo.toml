@@ -8,6 +8,7 @@ members = [
   "packages/ix-dev-diagnose",
   "packages/mcp",
   "packages/minecraft/nbt",
+  "packages/minecraft/sound",
   "packages/minecraft/sync-managed",
   "packages/nix-cargo-unit",
   "packages/nix-web-monitor/parser",
@@ -48,6 +49,7 @@ chrono = { version = "0.4", default-features = false }
 clap = "4"
 code-tokenizer = { path = "packages/code-tokenizer" }
 color-eyre = "0.6"
+dirs = "5"
 futures = "0.3"
 hegeltest = { version = "0.14", default-features = false }
 ignore = "0.4"
@@ -73,6 +75,7 @@ quartz_nbt = "0.2.9"
 repo-walker = { path = "packages/repo-walker" }
 rmcp = "1.7"
 rmp-serde = "1"
+rodio = { version = "0.19", default-features = false, features = ["vorbis"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 schemars = "1"

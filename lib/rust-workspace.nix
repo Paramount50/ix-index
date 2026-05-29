@@ -62,6 +62,14 @@ let
     ];
     packageTestInputs.tui = [ workspacePkgs.vim ];
     packageTestInputs.ix-mcp = [ workspacePkgs.python3 ];
+    # `rodio` (packages/minecraft/sound) pulls `cpal`/`alsa-sys`, whose build
+    # script needs ALSA's pkg-config metadata to link `libasound` on Linux.
+    # Scoped to the whole workspace because the unit graph compiles every
+    # member on every system; darwin uses CoreAudio and needs nothing extra.
+    nativeBuildInputs = lib.optional workspacePkgs.stdenv.hostPlatform.isLinux workspacePkgs.pkg-config;
+    env = lib.optionalAttrs workspacePkgs.stdenv.hostPlatform.isLinux {
+      PKG_CONFIG_PATH = "${workspacePkgs.alsa-lib.dev}/lib/pkgconfig";
+    };
     # Every policy check runs once across the whole workspace. Selected
     # package outputs expose these as explicit tests instead of making
     # downstream binary builds depend on unrelated workspace policy.

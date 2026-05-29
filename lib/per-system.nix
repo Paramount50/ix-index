@@ -138,6 +138,12 @@ let
     meta.description = "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
   };
 
+  updateSounds = ix.writeNushellApplication pkgs {
+    name = "update-sounds";
+    text = builtins.readFile paths.tools.updateSounds;
+    meta.description = "Refresh the pinned Minecraft sound pack in packages/minecraft/sound";
+  };
+
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };
 
   siteSrc = fs.toSource {
@@ -335,6 +341,7 @@ in
       update-ix-cli = updateIxCli;
       ix-shell-sync-ignored = ixShellSyncIgnored;
       mc-source = mcSource;
+      update-sounds = updateSounds;
     }
     // repoFlakePackages
     // examplePackages
