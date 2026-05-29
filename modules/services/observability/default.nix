@@ -10,6 +10,7 @@ let
     mkEnableOption
     mkIf
     mkOption
+    mkOptionDefault
     types
     ;
 
@@ -158,7 +159,9 @@ in
 
       listenAddress = mkOption {
         type = types.str;
-        default = if cfg.clickhouse.openFirewall then "0.0.0.0" else cfg.clickhouse.host;
+        defaultText = lib.literalExpression ''
+          if config.services.ix-observability.clickhouse.openFirewall then "0.0.0.0" else config.services.ix-observability.clickhouse.host
+        '';
         description = "Address ClickHouse binds for native and HTTP SQL.";
       };
 
@@ -203,7 +206,9 @@ in
 
       listenAddress = mkOption {
         type = types.str;
-        default = if cfg.stack.enable then "0.0.0.0" else "127.0.0.1";
+        defaultText = lib.literalExpression ''
+          if config.services.ix-observability.stack.enable then "0.0.0.0" else "127.0.0.1"
+        '';
         description = "Address where the collector listens for OTLP gRPC and HTTP.";
       };
 
@@ -339,6 +344,16 @@ in
   };
 
   config = lib.mkMerge [
+    {
+      services.ix-observability = {
+        # Seeded with mkOptionDefault (not a literal `default`, which would tie
+        # at priority 1500 and conflict for str) so a downstream mkDefault wins.
+        clickhouse.listenAddress = mkOptionDefault (
+          if cfg.clickhouse.openFirewall then "0.0.0.0" else cfg.clickhouse.host
+        );
+        collector.listenAddress = mkOptionDefault (if cfg.stack.enable then "0.0.0.0" else "127.0.0.1");
+      };
+    }
     (mkIf stackEnabled {
       services.clickhouse = {
         enable = true;
