@@ -8,6 +8,10 @@
   vendorSources ? {},
   extraNativeBuildInputs ? [],
   extraClippyNativeBuildInputs ? [],
+  # The nix-cargo-unit package, used by the optional panic-freedom policy check
+  # to run `scan-panics` over each library unit's rlib. Only required when that
+  # check was rendered (`--deny-panics`); the rendered check asserts non-null.
+  cargoUnit ? null,
   extraEnv ? {},
   testRunPrelude ? "",
   testArgsByPackage ? {},
@@ -144,6 +148,9 @@ let
 
   clippyUnits = rec {
 {{ clippy_unit_entries }}  };
+
+  panicObjectUnits = rec {
+{{ panic_object_unit_entries }}  };
 
   # Every test target in the graph, keyed the same way `tests.<name>` is.
   # The shared manifest derivation depends on every binary listed here.

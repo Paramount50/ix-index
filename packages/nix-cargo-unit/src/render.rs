@@ -17,6 +17,7 @@ pub struct RenderOptions {
     pub content_addressed: bool,
     pub toolchain_id: Option<String>,
     pub deny_unused_crate_dependencies: bool,
+    pub deny_panics: bool,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -266,6 +267,7 @@ struct UnitsNixTemplate {
     source_audit_entries: String,
     unit_entries: String,
     clippy_unit_entries: String,
+    panic_object_unit_entries: String,
     policy_check_entries: String,
     roots: String,
     checked_roots: String,
@@ -290,6 +292,7 @@ pub fn render_units_nix(graph: &UnitGraph, options: &RenderOptions) -> Result<St
         source_audit_entries: render_source_audit_entries(&prepared),
         unit_entries: render_unit_entries(graph, options, &prepared)?,
         clippy_unit_entries: render_clippy_unit_entries(graph, options, &prepared)?,
+        panic_object_unit_entries: render_panic_object_unit_entries(graph, options, &prepared)?,
         policy_check_entries: render_policy_check_entries(graph, options, &prepared)?,
         roots: render_roots(graph, &prepared),
         checked_roots: render_checked_roots(graph, &prepared),
@@ -370,6 +373,29 @@ fn is_clippy_unit_candidate(unit: &Unit) -> bool {
     !unit.is_run_custom_build() && !unit.is_external()
 }
 
+fn render_panic_object_unit_entries(
+    graph: &UnitGraph,
+    options: &RenderOptions,
+    prepared: &PreparedGraph,
+) -> Result<String> {
+    let mut entries = String::new();
+    if !options.deny_panics {
+        return Ok(entries);
+    }
+    for (index, unit) in graph.units.iter().enumerate() {
+        if !is_panic_freedom_candidate(unit) {
+            continue;
+        }
+        write!(
+            entries,
+            "    {} = mkUnit {};\n\n",
+            prepared.unit_attr(index),
+            render_panic_object_unit(graph, options, prepared, index)?
+        )?;
+    }
+    Ok(entries)
+}
+
 fn render_policy_check_entries(
     graph: &UnitGraph,
     options: &RenderOptions,
@@ -383,8 +409,97 @@ fn render_policy_check_entries(
             render_unused_crate_dependencies_check(graph, options, prepared)
         )?;
     }
+    if options.deny_panics
+        && let Some(check) = render_panic_freedom_check(graph, prepared)
+    {
+        writeln!(entries, "    panicFreedom = {check};")?;
+    }
 
     Ok(entries)
+}
+
+// Production units the panic-freedom scan inspects: workspace lib and bin
+// compiles, each contributing a panic-objects derivation whose monomorphized
+// objects the scan reads. Test and bench bodies legitimately panic (`assert!`,
+// `unwrap`, explicit `panic!`), so they are excluded; a library generic that
+// only a test instantiates is consequently not covered, which is correct because
+// it is not on a production code path. Build-script runs have no compile of their
+// own, external crates compile under `--cap-lints warn` and are not the
+// workspace's invariant to hold, and proc-macro / custom-build compile units are
+// host build tooling rather than the shipped surface.
+fn is_panic_freedom_candidate(unit: &Unit) -> bool {
+    !unit.is_external()
+        && !unit.is_proc_macro()
+        && !unit.is_run_custom_build()
+        && !unit.is_custom_build_compile()
+        && !unit.is_test()
+        && !unit.is_benchmark()
+}
+
+// Every workspace crate name that can appear as a mangled symbol prefix, used to
+// scope findings. A library generic monomorphized inside a bin object keeps the
+// library's crate token, so the scan needs the whole set, not just the unit
+// under inspection.
+fn workspace_crate_names(graph: &UnitGraph) -> Vec<String> {
+    let mut names: BTreeSet<String> = BTreeSet::new();
+    for unit in &graph.units {
+        if !unit.is_external() && !unit.is_run_custom_build() {
+            names.insert(unit.target.name.clone());
+        }
+    }
+    names.into_iter().collect()
+}
+
+// Renders one panic-freedom derivation per candidate unit, joined under a single
+// aggregate so a touched unit only re-scans itself. Each scan runs
+// `nix-cargo-unit scan-panics` over the unit's panic-objects derivation, scoped
+// to the whole workspace crate set, and fails if any workspace function
+// references a panic sink. The scanner is the `cargoUnit` package, asserted
+// non-null so enabling the policy without wiring the scanner fails loudly rather
+// than silently passing.
+fn render_panic_freedom_check(graph: &UnitGraph, prepared: &PreparedGraph) -> Option<String> {
+    let mut scans = String::new();
+    for (index, unit) in graph.units.iter().enumerate() {
+        if !is_panic_freedom_candidate(unit) {
+            continue;
+        }
+        let _ = writeln!(
+            scans,
+            "          (scanUnit {} panicObjectUnits.{})",
+            nix_attr(&prepared.names[index]),
+            prepared.unit_attr(index),
+        );
+    }
+
+    if scans.is_empty() {
+        return None;
+    }
+
+    let mut scan_args: Vec<String> = Vec::new();
+    for name in workspace_crate_names(graph) {
+        scan_args.push("--crate-name".to_string());
+        scan_args.push(name);
+    }
+    let scan_args_nix = nix_string_list(&scan_args);
+
+    Some(format!(
+        r#"assert pkgs.lib.assertMsg (cargoUnit != null) "cargo-unit panic-freedom needs the cargoUnit scanner package; pass it through buildWorkspace.";
+      let
+        scanUnit = drvName: objects:
+          pkgs.runCommand "cargo-unit-panic-freedom-${{drvName}}"
+            {{ nativeBuildInputs = [ cargoUnit ]; }}
+            ''
+              set -euo pipefail
+              nix-cargo-unit scan-panics ${{pkgs.lib.escapeShellArgs {scan_args_nix}}} "${{objects}}"
+              mkdir -p "$out"
+            '';
+      in
+      pkgs.symlinkJoin {{
+        name = "cargo-unit-panic-freedom";
+        paths = [
+{scans}        ];
+      }}"#
+    ))
 }
 
 fn render_source_entries(prepared: &PreparedGraph) -> String {
@@ -597,19 +712,23 @@ fn collect_transitive_unit_deps(
 }
 
 // `Rustc` produces the build artifacts (rlib, bin, test binary).
-// `ClippyDriver` runs the same compilation through `clippy-driver` so lints
+// `Clippy` runs the same compilation through `clippy-driver` so lints
 // fire per unit, emitting metadata only — no link step, no binary output.
+// `ObjectEmit` runs `rustc` with the same flags but emits relocatable objects
+// only (`--emit obj`, no link), giving the panic-freedom scan the monomorphized
+// objects a linked binary would otherwise hide behind resolved branches.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Driver {
     Rustc,
-    ClippyDriver,
+    Clippy,
+    ObjectEmit,
 }
 
 impl Driver {
     const fn binary(self) -> &'static str {
         match self {
-            Self::Rustc => "rustc",
-            Self::ClippyDriver => "clippy-driver",
+            Self::Rustc | Self::ObjectEmit => "rustc",
+            Self::Clippy => "clippy-driver",
         }
     }
 }
@@ -626,23 +745,37 @@ fn append_content_addressing(attrs: &mut Attrs, content_addressed: bool) {
     attrs.string("outputHashAlgo", "sha256");
 }
 
-fn render_rustc_unit(
+// The per-unit derivation fields that vary by role; everything else (version,
+// source, dependency rlibs, `dontStrip`, content addressing) is shared.
+struct UnitDerivation<'a> {
+    pname: String,
+    native_build_inputs: &'a str,
+    driver: Driver,
+    install_phase: String,
+}
+
+// Shared scaffold for the build, clippy, and panic-object derivations. They
+// compile the same unit source against the same dependency rlibs and differ only
+// in name, the driver/emit, the extra native inputs, and how the result is
+// installed.
+fn render_unit_derivation(
     graph: &UnitGraph,
     options: &RenderOptions,
     prepared: &PreparedGraph,
     index: usize,
+    spec: UnitDerivation<'_>,
 ) -> Result<String> {
-    let unit = &graph.units[index];
+    let UnitDerivation {
+        pname,
+        native_build_inputs,
+        driver,
+        install_phase,
+    } = spec;
     let mut attrs = Attrs::new();
 
-    attrs.string("pname", &unit.target.name);
-    attrs.string("version", unit.package_version());
+    attrs.string("pname", &pname);
+    attrs.string("version", graph.units[index].package_version());
     attrs.expr("src", &prepared.source_ref(index));
-    let native_build_inputs = if collects_unused_crate_dependencies(unit, options) {
-        "[ rustToolchain pkgs.jq ] ++ extraNativeBuildInputs"
-    } else {
-        "[ rustToolchain ] ++ extraNativeBuildInputs"
-    };
     attrs.expr("nativeBuildInputs", native_build_inputs);
     attrs.expr(
         "buildInputs",
@@ -652,14 +785,37 @@ fn render_rustc_unit(
     append_content_addressing(&mut attrs, options.content_addressed);
     attrs.multiline(
         "buildPhase",
-        &render_driver_build_phase(graph, options, prepared, index, Driver::Rustc)?,
+        &render_driver_build_phase(graph, options, prepared, index, driver)?,
     );
-    attrs.multiline(
-        "installPhase",
-        &render_install_phase(unit, options, &prepared.hashes[index]),
-    );
+    attrs.multiline("installPhase", &install_phase);
 
     Ok(attrs.render())
+}
+
+fn render_rustc_unit(
+    graph: &UnitGraph,
+    options: &RenderOptions,
+    prepared: &PreparedGraph,
+    index: usize,
+) -> Result<String> {
+    let unit = &graph.units[index];
+    let native_build_inputs = if collects_unused_crate_dependencies(unit, options) {
+        "[ rustToolchain pkgs.jq ] ++ extraNativeBuildInputs"
+    } else {
+        "[ rustToolchain ] ++ extraNativeBuildInputs"
+    };
+    render_unit_derivation(
+        graph,
+        options,
+        prepared,
+        index,
+        UnitDerivation {
+            pname: unit.target.name.clone(),
+            native_build_inputs,
+            driver: Driver::Rustc,
+            install_phase: render_install_phase(unit, options, &prepared.hashes[index]),
+        },
+    )
 }
 
 fn render_clippy_unit(
@@ -668,36 +824,48 @@ fn render_clippy_unit(
     prepared: &PreparedGraph,
     index: usize,
 ) -> Result<String> {
-    let unit = &graph.units[index];
-    let mut attrs = Attrs::new();
-
-    attrs.string("pname", &format!("{}-clippy", unit.target.name));
-    attrs.string("version", unit.package_version());
-    attrs.expr("src", &prepared.source_ref(index));
     // `clippy-driver` rides the rustToolchain (which carries the matching
     // rustc); the clippy package only needs to be on PATH for the driver
-    // binary. Callers append it via `extraClippyNativeBuildInputs`.
-    attrs.expr(
-        "nativeBuildInputs",
-        "[ rustToolchain ] ++ extraNativeBuildInputs ++ extraClippyNativeBuildInputs",
-    );
-    // Clippy units link metadata-only against the build units' rlibs, just
-    // like the build units do. They never depend on other clippy units, so a
-    // touched source file only invalidates that unit's clippy plus everything
-    // downstream that links its rlib.
-    attrs.expr(
-        "buildInputs",
-        &render_build_inputs(graph, prepared, index, unit_build_script_run(graph, index)),
-    );
-    attrs.bool("dontStrip", true);
-    append_content_addressing(&mut attrs, options.content_addressed);
-    attrs.multiline(
-        "buildPhase",
-        &render_driver_build_phase(graph, options, prepared, index, Driver::ClippyDriver)?,
-    );
-    attrs.multiline("installPhase", "mkdir -p $out\n");
+    // binary. Callers append it via `extraClippyNativeBuildInputs`. Clippy units
+    // link metadata-only against the build units' rlibs, so a touched source
+    // file only invalidates that unit's clippy plus its downstream.
+    render_unit_derivation(
+        graph,
+        options,
+        prepared,
+        index,
+        UnitDerivation {
+            pname: format!("{}-clippy", graph.units[index].target.name),
+            native_build_inputs: "[ rustToolchain ] ++ extraNativeBuildInputs ++ extraClippyNativeBuildInputs",
+            driver: Driver::Clippy,
+            install_phase: "mkdir -p $out\n".to_string(),
+        },
+    )
+}
 
-    Ok(attrs.render())
+// Recompiles the unit with `--emit obj` so the panic-freedom scan has the
+// relocatable objects (including monomorphized generics) that the linked build
+// unit hides.
+fn render_panic_object_unit(
+    graph: &UnitGraph,
+    options: &RenderOptions,
+    prepared: &PreparedGraph,
+    index: usize,
+) -> Result<String> {
+    render_unit_derivation(
+        graph,
+        options,
+        prepared,
+        index,
+        UnitDerivation {
+            pname: format!("{}-panic-objects", graph.units[index].target.name),
+            native_build_inputs: "[ rustToolchain ] ++ extraNativeBuildInputs",
+            driver: Driver::ObjectEmit,
+            install_phase:
+                "mkdir -p $out\nfind build -maxdepth 1 -name '*.o' -exec cp {} \"$out/\" ';'\n"
+                    .to_string(),
+        },
+    )
 }
 
 fn unit_build_script_run(graph: &UnitGraph, index: usize) -> Option<usize> {
@@ -867,15 +1035,22 @@ fn render_driver_build_phase(
                 }
             }
         }
-        Driver::ClippyDriver => {
+        Driver::Clippy => {
             // Clippy only needs MIR. Skip codegen and linking entirely.
             script.push_str("rustc_args+=( --out-dir build )\n");
             script.push_str("rustc_args+=( --emit dep-info,metadata )\n");
         }
+        Driver::ObjectEmit => {
+            // Emit relocatable objects only, no link. `--out-dir` keeps every
+            // codegen unit's object; a single `obj=<file>` path is rejected for
+            // codegen-units > 1, so the directory form is the portable one.
+            script.push_str("rustc_args+=( --out-dir build )\n");
+            script.push_str("rustc_args+=( --emit obj )\n");
+        }
     }
 
     script.push_str("rustc_args+=( \"''${build_script_flags[@]}\" )\n");
-    if driver == Driver::ClippyDriver {
+    if driver == Driver::Clippy {
         // Inject the workspace's clippy lint policy (-D/-W/-A clippy::...)
         // at the rustc-args end so they override any earlier defaults.
         script.push_str("rustc_args+=( ${pkgs.lib.escapeShellArgs extraClippyLintArgs} )\n");
@@ -2887,6 +3062,7 @@ mod tests {
                 content_addressed: false,
                 toolchain_id: Some("rustc-test".to_string()),
                 deny_unused_crate_dependencies: true,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -2912,6 +3088,148 @@ mod tests {
         assert!(rendered.contains("extraClippyLintArgs"));
         assert!(rendered.contains("clippy = clippyPolicyAggregate;"));
         assert!(rendered.contains("clippyPolicyAggregate ="));
+    }
+
+    #[test]
+    fn deny_panics_scans_local_units_and_skips_externals() {
+        // One workspace library plus one external dependency. The panic-freedom
+        // check must scan the local unit's compiled artifact and leave the
+        // vendored crate alone, mirroring how clippy and unused-dependency
+        // policy stay scoped to workspace-owned code.
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "hello",
+                    "src_path": "/workspace/src/lib.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "features": [],
+                  "mode": "build",
+                  "dependencies": [{ "index": 1, "extern_crate_name": "serde" }]
+                },
+                {
+                  "pkg_id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "serde",
+                    "src_path": "/vendor/serde/src/lib.rs",
+                    "edition": "2021"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "mode": "build",
+                  "dependencies": []
+                }
+              ],
+              "roots": [0]
+            }"#,
+        )
+        .unwrap();
+
+        let options = |deny_panics| RenderOptions {
+            workspace_root: PathBuf::from("/workspace"),
+            vendor_root: Some(PathBuf::from("/vendor")),
+            cargo_lock_sources: cargo_lock_sources(&[(
+                "serde",
+                "1.0.0",
+                "registry+https://github.com/rust-lang/crates.io-index",
+            )]),
+            content_addressed: false,
+            toolchain_id: None,
+            deny_unused_crate_dependencies: false,
+            deny_panics,
+        };
+
+        let rendered = render_units_nix(&graph, &options(true)).unwrap();
+        assert!(rendered.contains("panicFreedom ="));
+        assert!(rendered.contains("name = \"cargo-unit-panic-freedom\";"));
+        assert!(rendered.contains("nix-cargo-unit scan-panics ${pkgs.lib.escapeShellArgs"));
+        // The workspace crate set is baked into the scan args.
+        assert!(rendered.contains("\"--crate-name\" \"hello\""));
+        // Fail closed when the scanner package is not wired through.
+        assert!(rendered.contains("assertMsg (cargoUnit != null)"));
+        // The local library gets a panic-objects derivation and is scanned; the
+        // vendored crate gets neither.
+        assert!(rendered.contains("pname = \"hello-panic-objects\""));
+        assert!(rendered.contains("(scanUnit \"hello-0.1.0-"));
+        assert!(rendered.contains("panicObjectUnits.\"hello-0.1.0-"));
+        assert!(!rendered.contains("serde-panic-objects"));
+        assert!(!rendered.contains("(scanUnit \"serde-1.0.0-"));
+
+        // Off by default: no flag, no panic-freedom policy entry and no
+        // panic-objects derivations.
+        let unchecked = render_units_nix(&graph, &options(false)).unwrap();
+        assert!(!unchecked.contains("panicFreedom"));
+        assert!(!unchecked.contains("panic-objects"));
+    }
+
+    #[test]
+    fn deny_panics_skips_test_units() {
+        // Test bodies legitimately panic, so a test target must not become a
+        // panic-objects candidate even though it is workspace-owned.
+        let graph: UnitGraph = serde_json::from_str(
+            r#"{
+              "version": 1,
+              "units": [
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["lib"],
+                    "crate_types": ["lib"],
+                    "name": "hello",
+                    "src_path": "/workspace/src/lib.rs",
+                    "edition": "2024"
+                  },
+                  "profile": { "name": "release", "opt_level": "3" },
+                  "features": [],
+                  "mode": "build",
+                  "dependencies": []
+                },
+                {
+                  "pkg_id": "path+file:///workspace#hello@0.1.0",
+                  "target": {
+                    "kind": ["test"],
+                    "crate_types": ["bin"],
+                    "name": "helloit",
+                    "src_path": "/workspace/tests/it.rs",
+                    "edition": "2024",
+                    "test": true
+                  },
+                  "profile": { "name": "test", "opt_level": "0" },
+                  "features": [],
+                  "mode": "test",
+                  "dependencies": []
+                }
+              ],
+              "roots": [0, 1]
+            }"#,
+        )
+        .unwrap();
+
+        let rendered = render_units_nix(
+            &graph,
+            &RenderOptions {
+                workspace_root: PathBuf::from("/workspace"),
+                vendor_root: None,
+                cargo_lock_sources: CargoLockSources::default(),
+                content_addressed: false,
+                toolchain_id: None,
+                deny_unused_crate_dependencies: false,
+                deny_panics: true,
+            },
+        )
+        .unwrap();
+
+        assert!(rendered.contains("pname = \"hello-panic-objects\""));
+        assert!(!rendered.contains("helloit-panic-objects"));
+        assert!(!rendered.contains("(scanUnit \"helloit-"));
     }
 
     #[test]
@@ -2956,6 +3274,7 @@ mod tests {
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3006,6 +3325,7 @@ mod tests {
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3140,6 +3460,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3209,6 +3530,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3280,6 +3602,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3339,6 +3662,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3432,6 +3756,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3559,6 +3884,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: true,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3640,6 +3966,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3714,6 +4041,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3763,6 +4091,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3810,6 +4139,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3875,6 +4205,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -3959,6 +4290,7 @@ const CRLF: &str = include_str!("../../testdata/crlf.toml");
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4042,6 +4374,7 @@ version = "4.6.1"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4115,6 +4448,7 @@ version = "4.6.1"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap_err()
@@ -4157,6 +4491,7 @@ version = "4.6.1"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap_err()
@@ -4199,6 +4534,7 @@ version = "4.6.1"
                 content_addressed: true,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4242,6 +4578,7 @@ version = "4.6.1"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4307,6 +4644,7 @@ version = "4.6.1"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4435,6 +4773,7 @@ links = "native_ffi"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4528,6 +4867,7 @@ links = "nested_native"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4650,6 +4990,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
@@ -4719,6 +5060,7 @@ version = "0.1.0"
                 content_addressed: false,
                 toolchain_id: None,
                 deny_unused_crate_dependencies: false,
+                deny_panics: false,
             },
         )
         .unwrap();
