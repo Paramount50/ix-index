@@ -3,6 +3,9 @@
   callPackage,
   symlinkJoin,
   makeWrapper,
+  # buildIxRustTool (the overlay build path) passes explicit `pkgs`/`ix`; absorb
+  # the extras it injects so callPackage in both contexts is happy.
+  ...
 }:
 let
   bin = ix.cargoUnit.selectBinaryWithTests ix.rustWorkspace.units {
