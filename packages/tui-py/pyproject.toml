@@ -1,6 +1,9 @@
-[build-system]
-requires = ["maturin>=1.7,<2"]
-build-backend = "maturin"
+# The wheel is built by Nix, not a PEP 517 backend: packages/tui-py/default.nix
+# compiles the PyO3 cdylib through the shared cargo-unit workspace graph and
+# packages it with wheel/mkwheel.py. This file stays as project metadata (the
+# version is read by the Nix build) plus the pyright config. There is no
+# `[build-system]`; `pip install .` is not a supported path. Build with
+# `nix build .#tui-py`.
 
 [project]
 name = "ix-tui"
@@ -18,12 +21,6 @@ classifiers = [
   "Operating System :: POSIX",
 ]
 dependencies = ["numpy>=1.26"]
-
-[tool.maturin]
-module-name = "tui._tui"
-python-source = "python"
-manifest-path = "Cargo.toml"
-features = ["pyo3/extension-module"]
 
 [tool.pyright]
 include = ["python"]

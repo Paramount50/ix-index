@@ -14,22 +14,23 @@ PyPI distribution name: `ix-tui`. Import name: `tui`.
 
 ## Build
 
-For now the wheel is built with [maturin]. From this directory:
+The wheel is built by Nix, not maturin. The PyO3 cdylib comes out of the shared
+`cargo-unit` workspace graph (the same one the rest of the repo's Rust builds
+from) and [`wheel/mkwheel.py`](wheel/mkwheel.py) packages it with the Python
+source into a PEP 427 wheel. There is no PEP 517 backend; `pip install .` is not
+a supported path.
 
 ```sh
-pip install maturin
-maturin develop --release
+nix build .#tui-py     # writes ix_tui-<version>-cp311-abi3-manylinux_2_34_<arch>.whl
 ```
 
-Or to produce a wheel:
-
-```sh
-maturin build --release
-```
-
-The long-term path is to assemble the wheel through Nix + `cargo-unit`
-instead of maturin; tracked by
-[indexable-inc/index#262](https://github.com/indexable-inc/index/issues/262).
+The wheel is Linux-only, like ix's native SDK wheels: a PyO3 extension cdylib
+links cleanly only where a shared object may carry undefined symbols (Linux);
+macOS needs `-undefined dynamic_lookup`, which the shared cargo-unit graph does
+not thread through. From a macOS checkout, build it on a Linux builder with
+`nix build .#packages.x86_64-linux.tui-py`. The extension is abi3
+(`pyo3/abi3-py311`), so one wheel loads on CPython 3.11+; `pip install` it from
+`result/`.
 
 ## Quick start
 
@@ -237,5 +238,4 @@ to tune the viewport sampling interval in seconds.
 | `serve`        | Start the web dashboard for every live `Tui`.          |
 | `Dashboard`    | Handle to a running dashboard: `url`, `open`, `stop`.   |
 
-[maturin]: https://www.maturin.rs/
 [pyo3-async-runtimes]: https://docs.rs/pyo3-async-runtimes/
