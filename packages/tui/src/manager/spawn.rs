@@ -2,12 +2,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use tokio::runtime::Runtime;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{RwLock, mpsc, watch};
 use uuid::Uuid;
 
 use crate::actor::{PtyCommand, pty_actor};
 use crate::manager::TuiInstance;
-use crate::types::SpawnConfig;
+use crate::types::{ExitState, SpawnConfig};
 use crate::{Error, Result};
 
 const CHANNEL_BUFFER_SIZE: usize = 100;
@@ -29,7 +29,10 @@ fn wait_for_initial_output(runtime: &Runtime, parser: &Arc<RwLock<vt100::Parser>
     });
 }
 
-fn process_spawn_error(command: &str, error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Error {
+fn process_spawn_error(
+    command: &str,
+    error: impl Into<Box<dyn std::error::Error + Send + Sync>>,
+) -> Error {
     Error::ProcessSpawn {
         command: command.to_string(),
         source: std::io::Error::other(error),
@@ -53,7 +56,9 @@ pub(super) fn spawn_tui(
     let (pty, child) = runtime.block_on(async {
         let pty = pty_process::Pty::new().map_err(|e| process_spawn_error(&display, e))?;
 
-        let pty_slave = pty.pts().map_err(|e| process_spawn_error("get PTY slave", e))?;
+        let pty_slave = pty
+            .pts()
+            .map_err(|e| process_spawn_error("get PTY slave", e))?;
 
         pty.resize(pty_process::Size::new(rows, cols))
             .map_err(|e| process_spawn_error("resize PTY", e))?;
@@ -68,21 +73,21 @@ pub(super) fn spawn_tui(
         Ok::<_, Error>((pty, child))
     })?;
 
-    let parser = Arc::new(RwLock::new(vt100::Parser::new(rows, cols, scrollback_lines)));
+    let parser = Arc::new(RwLock::new(vt100::Parser::new(
+        rows,
+        cols,
+        scrollback_lines,
+    )));
 
     let (command_tx, command_rx) = mpsc::channel::<PtyCommand>(CHANNEL_BUFFER_SIZE);
+    let (exit_tx, exit_rx) = watch::channel(ExitState::Running);
 
+    // The actor owns the child: it reaps it (so short-lived commands leave no
+    // zombie), publishes the exit code through `exit_tx`, and can signal it on
+    // a kill request.
     let actor_parser = Arc::clone(&parser);
     runtime.spawn(async move {
-        pty_actor(id, pty, command_rx, actor_parser).await;
-    });
-
-    // Own the child entirely in a reaper task. Calling wait() drives the
-    // SIGCHLD reap so short-lived commands (echo, seq, ...) do not leave
-    // zombies even though we never expose a kill path on TuiInstance.
-    runtime.spawn(async move {
-        let mut child = child;
-        let _ = child.wait().await;
+        pty_actor(id, pty, child, command_rx, actor_parser, exit_tx).await;
     });
 
     let instance = TuiInstance {
@@ -90,10 +95,10 @@ pub(super) fn spawn_tui(
         command,
         args,
         spawned_at: SystemTime::now(),
-        rows,
-        cols,
         scrollback_limit: scrollback_lines,
+        size: Arc::new(parking_lot::RwLock::new((rows, cols))),
         command_tx,
+        exit_rx,
         runtime: Arc::clone(runtime),
     };
 

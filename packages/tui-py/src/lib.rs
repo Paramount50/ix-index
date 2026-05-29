@@ -10,6 +10,7 @@
     reason = "pyo3 getter methods cannot be const because they are dispatched through the pymethod vtable"
 )]
 
+mod dashboard;
 mod manager;
 mod types;
 
@@ -19,6 +20,8 @@ use pyo3::prelude::*;
 fn _tui(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<manager::TuiInstance>()?;
     module.add_class::<types::StyledCell>()?;
+    module.add_class::<dashboard::Dashboard>()?;
+    module.add_function(wrap_pyfunction!(dashboard::serve, module)?)?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;
     Ok(())
 }

@@ -52,6 +52,7 @@ hegeltest = { version = "0.14", default-features = false }
 ignore = "0.4"
 indicatif = "0.18"
 libc = "0.2"
+loro = "1.12"
 ndarray = "0.16"
 nix-web-monitor-parser = { path = "packages/nix-web-monitor/parser" }
 numpy = "0.28"

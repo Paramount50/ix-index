@@ -24,6 +24,12 @@ pub enum Error {
     #[snafu(display("Failed to read from TUI {id}: {source}"))]
     ReadFromTui { id: Uuid, source: std::io::Error },
 
+    #[snafu(display("Failed to signal TUI {id}: {source}"), visibility(pub(crate)))]
+    SignalTui { id: Uuid, source: std::io::Error },
+
+    #[snafu(display("Failed to resize TUI {id}: {source}"), visibility(pub(crate)))]
+    ResizeTui { id: Uuid, source: std::io::Error },
+
     #[snafu(display("TUI {id} has no buffered output available"))]
     NoOutputAvailable { id: Uuid },
 
@@ -45,6 +51,12 @@ pub enum Error {
         cols: usize,
         source: ndarray::ShapeError,
     },
+
+    /// Collapses the dashboard's foreign-boundary failures (TCP bind, Loro
+    /// encode) into one observable message. Only constructed under the
+    /// `dashboard` feature.
+    #[snafu(display("dashboard error: {message}"), visibility(pub(crate)))]
+    Dashboard { message: String },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -55,17 +67,17 @@ impl From<Error> for pyo3::PyErr {
         use pyo3::exceptions::{PyIOError, PyKeyError, PyRuntimeError, PyValueError};
         let msg = err.to_string();
         match err {
-            Error::TuiNotFound { .. } | Error::NoOutputAvailable { .. } => {
-                PyKeyError::new_err(msg)
-            }
+            Error::TuiNotFound { .. } | Error::NoOutputAvailable { .. } => PyKeyError::new_err(msg),
             Error::InvalidRowRange { .. }
             | Error::InvalidColRange { .. }
             | Error::RowIndexOutOfBounds { .. }
             | Error::ColIndexOutOfBounds { .. } => PyValueError::new_err(msg),
             Error::ProcessSpawn { .. }
             | Error::WriteToTui { .. }
-            | Error::ReadFromTui { .. } => PyIOError::new_err(msg),
-            Error::ArrayConversion { .. } => PyRuntimeError::new_err(msg),
+            | Error::ReadFromTui { .. }
+            | Error::SignalTui { .. }
+            | Error::ResizeTui { .. } => PyIOError::new_err(msg),
+            Error::ArrayConversion { .. } | Error::Dashboard { .. } => PyRuntimeError::new_err(msg),
         }
     }
 }

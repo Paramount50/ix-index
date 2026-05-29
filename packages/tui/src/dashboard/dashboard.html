@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>tui dashboard</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px;
+    background: #0b0e14; color: #c9d1d9;
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+  header .status { color: #8b949e; }
+  header .status.live { color: #3fb950; }
+  #grid {
+    display: grid; gap: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(440px, 1fr));
+  }
+  .card {
+    border: 1px solid #21262d; border-radius: 8px; overflow: hidden;
+    background: #010409; display: flex; flex-direction: column;
+  }
+  .card .bar {
+    display: flex; justify-content: space-between; gap: 8px;
+    padding: 6px 10px; background: #161b22; border-bottom: 1px solid #21262d;
+  }
+  .card .bar .cmd { color: #58a6ff; font-weight: 600; }
+  .card .bar .meta { color: #6e7681; display: flex; gap: 8px; }
+  .card .bar .exited { color: #f85149; }
+  .card.dead { opacity: 0.55; }
+  .card pre {
+    margin: 0; padding: 10px; white-space: pre; overflow: auto;
+    max-height: 60vh; tab-size: 8;
+  }
+  .empty { color: #6e7681; padding: 40px; text-align: center; }
+</style>
+</head>
+<body>
+<header>
+  <h1>tui dashboard</h1>
+  <span class="status" id="status">connecting…</span>
+</header>
+<div id="grid"><div class="empty">waiting for terminals…</div></div>
+<script type="module">
+import { LoroDoc } from "https://esm.sh/loro-crdt@1";
+
+const doc = new LoroDoc();
+const grid = document.getElementById("grid");
+const status = document.getElementById("status");
+
+function b64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function render() {
+  const value = doc.toJSON();
+  const terminals = value.terminals ?? {};
+  const ids = Object.keys(terminals).sort();
+  if (ids.length === 0) {
+    grid.innerHTML = '<div class="empty">no terminals in this process yet</div>';
+    return;
+  }
+  grid.innerHTML = "";
+  for (const id of ids) {
+    const t = terminals[id];
+    const alive = t.alive !== false;
+    const card = document.createElement("div");
+    card.className = alive ? "card" : "card dead";
+    const bar = document.createElement("div");
+    bar.className = "bar";
+    const cmd = document.createElement("span");
+    cmd.className = "cmd";
+    cmd.textContent = [t.command, t.args].filter(Boolean).join(" ");
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    if (!alive) {
+      const exited = document.createElement("span");
+      exited.className = "exited";
+      exited.textContent = "exited";
+      meta.append(exited);
+    }
+    const size = document.createElement("span");
+    size.textContent = `${t.rows}×${t.cols}`;
+    meta.append(size);
+    bar.append(cmd, meta);
+    const pre = document.createElement("pre");
+    pre.textContent = t.screen ?? "";
+    card.append(bar, pre);
+    grid.append(card);
+  }
+}
+
+const es = new EventSource("/events");
+es.addEventListener("open", () => {
+  status.textContent = "live";
+  status.classList.add("live");
+});
+es.addEventListener("error", () => {
+  status.textContent = "reconnecting…";
+  status.classList.remove("live");
+});
+function ingest(event) {
+  doc.import(b64ToBytes(event.data));
+  render();
+}
+es.addEventListener("snapshot", ingest);
+es.addEventListener("update", ingest);
+</script>
+</body>
+</html>

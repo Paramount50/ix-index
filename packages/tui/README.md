@@ -68,6 +68,35 @@ sizing all work.
 `slice_2d` with `RowRange`/`ColRange` extracts a rectangular sub-region of a
 `Vec<String>` (1-indexed, inclusive) when you only want part of the screen.
 
+An empty screen reads back as an empty `Vec`, not an error; `read_blocking`
+keeps the wait-for-first-paint behavior by polling until content appears.
+
+## Process lifecycle
+
+The actor owns the child, so a handle can observe and control it:
+
+- `is_alive` / `exit_state` report whether the child is running or its exit
+  code (`ExitState::Exited(Some(code))`, or `Exited(None)` when a signal killed
+  it).
+- `wait(timeout)` blocks until exit, returning `None` on timeout; `wait_async`
+  is the future form.
+- `kill` sends `SIGKILL`, which (unlike a cooperative Ctrl+C) a program cannot
+  ignore. `TuiManager::remove` drops a handle from `list`.
+
+A child that has exited keeps its final screen readable; writes return
+`TuiNotFound`.
+
+## Web dashboard
+
+With the `dashboard` feature, `tui::serve(&manager, addr, poll)` starts a
+read-only web grid of every live terminal. It runs on the manager's runtime,
+mirrors each viewport into a single [Loro] CRDT document, and streams updates to
+browsers over Server-Sent Events; the page imports them with `loro-crdt`. The
+returned `Dashboard` exposes `url()` and stops on `stop()` or drop. This is the
+engine behind the Python package's `serve()`.
+
+[Loro]: https://loro.dev/
+
 ## Configuration
 
 Pass a [`SpawnConfig`] to set the terminal size and scrollback depth at spawn:
@@ -96,8 +125,7 @@ All fallible calls return `Result<T, Error>`, a `snafu`-derived enum:
 ## Known limitations
 
 - Unix only: depends on PTY devices, so Linux and macOS, not Windows.
-- No runtime resize and no force-kill. A `with`-style caller sends Ctrl+C; a
-  child that ignores it keeps running until it exits on its own.
+- No runtime resize. Size is fixed for the life of the process.
 
 ## Dependencies
 

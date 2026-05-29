@@ -5,19 +5,17 @@ use crate::{Error, error::Result};
 
 const SCROLLBACK_OFFSET_MAX: usize = usize::MAX;
 
-pub fn extract_viewport_lines(id: Uuid, parser: &vt100::Parser) -> Result<Vec<String>> {
-    let screen = parser.screen();
-    let contents = screen.contents();
-
-    if contents.is_empty() {
-        return Err(Error::NoOutputAvailable { id });
-    }
-
-    let lines: Vec<String> = contents
+/// The viewport's non-blank lines, top first. An empty screen is a valid state
+/// and yields an empty `Vec`; callers that need to wait for first paint use
+/// [`super::super::manager`]'s `read_blocking`, which polls on emptiness. This
+/// keeps `snapshot`-style reads total instead of erroring on a blank screen.
+pub fn extract_viewport_lines(parser: &vt100::Parser) -> Vec<String> {
+    parser
+        .screen()
+        .contents()
         .lines()
         .map(std::string::ToString::to_string)
-        .collect();
-    Ok(lines)
+        .collect()
 }
 
 pub fn extract_scrollback_lines(parser: &mut vt100::Parser) -> Vec<String> {

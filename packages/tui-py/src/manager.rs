@@ -12,7 +12,7 @@ use crate::types::StyledCell;
 /// spawned PTY actor, and is held alive for the lifetime of the process.
 static MANAGER: OnceLock<Arc<tui::TuiManager>> = OnceLock::new();
 
-fn global_manager() -> Arc<tui::TuiManager> {
+pub fn global_manager() -> Arc<tui::TuiManager> {
     MANAGER
         .get_or_init(|| Arc::new(tui::TuiManager::new()))
         .clone()
@@ -88,12 +88,12 @@ impl TuiInstance {
 
     #[getter]
     fn cols(&self) -> u16 {
-        self.inner.cols
+        self.inner.cols()
     }
 
     #[getter]
     fn rows(&self) -> u16 {
-        self.inner.rows
+        self.inner.rows()
     }
 
     #[getter]
@@ -213,10 +213,93 @@ impl TuiInstance {
         })
     }
 
+    // -- lifecycle --------------------------------------------------------
+
+    /// Whether the child process is still running.
+    fn is_alive(&self) -> bool {
+        self.inner.is_alive()
+    }
+
+    /// The exit code, or `None` while running or if terminated by a signal.
+    fn exit_code(&self) -> Option<i32> {
+        match self.inner.exit_state() {
+            tui::ExitState::Exited(code) => code,
+            tui::ExitState::Running => None,
+        }
+    }
+
+    /// Block until the child exits, returning `True`, or `False` on timeout.
+    #[pyo3(signature = (timeout_ms=None))]
+    fn wait(&self, py: Python<'_>, timeout_ms: Option<u64>) -> bool {
+        let inner = self.inner.clone();
+        py.detach(move || inner.wait(timeout_ms.map(Duration::from_millis)).is_some())
+    }
+
+    /// Force-terminate the child with `SIGKILL`. A no-op if already exited.
+    fn kill(&self, py: Python<'_>) -> PyResult<()> {
+        let inner = self.inner.clone();
+        py.detach(move || inner.kill())?;
+        Ok(())
+    }
+
+    /// Force-kill the child and stop tracking it, dropping it from `list_all`
+    /// and the dashboard. Tolerates an already-exited child.
+    fn close(&self, py: Python<'_>) {
+        let inner = self.inner.clone();
+        let id = self.inner.id;
+        py.detach(move || {
+            let _ = inner.kill();
+            let _ = global_manager().remove(&id);
+        });
+    }
+
+    fn kill_async<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            inner.kill_async().await?;
+            Ok(())
+        })
+    }
+
+    fn wait_async<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            let code = match inner.wait_async().await {
+                tui::ExitState::Exited(code) => code,
+                tui::ExitState::Running => None,
+            };
+            Ok(code)
+        })
+    }
+
+    /// Resize the terminal to `rows` x `cols` (delivers SIGWINCH to the child).
+    fn resize(&self, py: Python<'_>, rows: u16, cols: u16) -> PyResult<()> {
+        let inner = self.inner.clone();
+        py.detach(move || inner.resize(rows, cols))?;
+        Ok(())
+    }
+
+    fn resize_async<'py>(
+        &self,
+        py: Python<'py>,
+        rows: u16,
+        cols: u16,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = self.inner.clone();
+        future_into_py(py, async move {
+            inner.resize_async(rows, cols).await?;
+            Ok(())
+        })
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "_TuiInstance(id={}, command={:?}, args={:?}, rows={}, cols={})",
-            self.inner.id, self.inner.command, self.inner.args, self.inner.rows, self.inner.cols,
+            self.inner.id,
+            self.inner.command,
+            self.inner.args,
+            self.inner.rows(),
+            self.inner.cols(),
         )
     }
 }

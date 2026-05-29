@@ -119,7 +119,32 @@ fn spawn_config_sets_terminal_size() {
         )
         .expect("spawn failed");
 
-    assert_eq!((instance.rows, instance.cols), (40, 120));
+    assert_eq!((instance.rows(), instance.cols()), (40, 120));
+}
+
+#[test]
+fn resize_changes_reported_size_and_emulator_width() {
+    let manager = TuiManager::new();
+    let instance = spawn(&manager, "cat", &[]);
+
+    instance.resize(30, 100).expect("resize failed");
+    assert_eq!((instance.rows(), instance.cols()), (30, 100));
+
+    // The clone shares the size, and a wide line round-trips at the new width.
+    let same = manager.get(&instance.id).expect("instance present");
+    assert_eq!((same.rows(), same.cols()), (30, 100));
+
+    instance
+        .write(&format!("{}\n", "x".repeat(90)))
+        .expect("write failed");
+    std::thread::sleep(Duration::from_millis(100));
+    let output = instance
+        .read_blocking(Duration::from_secs(1))
+        .expect("read failed");
+    assert!(
+        output.iter().any(|line| line.contains(&"x".repeat(90))),
+        "a 90-wide line should fit on a 100-column screen without wrapping"
+    );
 }
 
 #[test]

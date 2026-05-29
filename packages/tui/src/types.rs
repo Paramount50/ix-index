@@ -56,6 +56,16 @@ impl Default for StyledCell {
     }
 }
 
+/// The lifecycle state of a spawned process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExitState {
+    /// The process is still running.
+    Running,
+    /// The process has exited. `Some(code)` carries its exit code; `None` means
+    /// it was terminated by a signal and so has no exit code.
+    Exited(Option<i32>),
+}
+
 /// Spawn-time terminal configuration.
 ///
 /// [`SpawnConfig::default`] is the single source of truth for the defaults:

@@ -163,7 +163,7 @@ with Tui("bash", "--norc", "-i") as t:
 
 ### List live instances
 
-`Tui.list_all()` returns every `Tui` still alive in this process — handy in
+`Tui.list_all()` returns every `Tui` still tracked in this process — handy in
 tests or REPLs:
 
 ```python
@@ -172,6 +172,56 @@ Tui("bash", "--norc", "-i")
 Tui("python", "-q")
 print(len(Tui.list_all()))   # 2
 ```
+
+### Process lifecycle
+
+A spawned process is more than a screen: you can wait on it, read its exit
+code, and stop it for real.
+
+```python
+from tui import Tui
+
+t = Tui("bash", "-c", "echo hi; exit 7")
+code = t.wait(timeout=3)        # blocks until exit; raises WaitTimeout on deadline
+print(code, t.is_alive())       # 7 False
+print(t.exit_code)              # 7 (None while running or if killed by a signal)
+```
+
+`interrupt()` sends a cooperative Ctrl+C. `kill()` sends `SIGKILL`, which a
+program that traps interrupts (an editor in normal mode, a stuck REPL) cannot
+ignore. `close()` force-kills and drops the terminal from `list_all()` and the
+dashboard; `with`/`async with` blocks call it on exit, so an editor left open
+still goes away. The async twins are `akill()` and `await_exit()`.
+
+A terminal whose child has exited keeps its final screen readable, so you can
+inspect output after the fact; writing to it raises instead.
+
+### Web dashboard
+
+`serve()` starts a read-only web dashboard that shows a live grid of every
+`Tui` in this process. The server, the [Loro][loro] CRDT document, and the
+Server-Sent-Events stream all live in Rust; the browser holds its own
+`loro-crdt` document and paints each terminal's viewport. Exited terminals stay
+on the grid, dimmed and marked `exited`.
+
+```python
+from tui import Tui, serve
+
+Tui("bash", "--norc", "-i")
+Tui("python", "-q")
+
+dash = serve(port=8080)        # non-blocking; returns immediately
+print(dash.url)                # http://127.0.0.1:8080/
+# dash.open()                  # open in the default browser
+...
+dash.stop()                    # or use `with serve() as dash:`
+```
+
+Pass `host="0.0.0.0"` to expose it on the network (the host must be an IP
+literal), `port=0` for an ephemeral port read back from `dash.url`, and `poll`
+to tune the viewport sampling interval in seconds.
+
+[loro]: https://loro.dev/
 
 ## Public surface
 
@@ -184,6 +234,8 @@ print(len(Tui.list_all()))   # 2
 | `StyledCell`   | One cell: `char`, `fg`/`bg`, and VT100 attributes.     |
 | `Color`        | `None` (default), `int` (palette), or `(r, g, b)`.     |
 | `WaitTimeout`  | Raised by `wait_for` / `await_for` on deadline expiry. |
+| `serve`        | Start the web dashboard for every live `Tui`.          |
+| `Dashboard`    | Handle to a running dashboard: `url`, `open`, `stop`.   |
 
 [maturin]: https://www.maturin.rs/
 [pyo3-async-runtimes]: https://docs.rs/pyo3-async-runtimes/

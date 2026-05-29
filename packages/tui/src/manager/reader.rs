@@ -37,35 +37,69 @@ pub(super) async fn write(
     command_tx: &mpsc::Sender<PtyCommand>,
     data: Vec<u8>,
 ) -> Result<()> {
-    request(id, command_tx, |response| PtyCommand::Write { data, response }).await
+    request(id, command_tx, |response| PtyCommand::Write {
+        data,
+        response,
+    })
+    .await
+}
+
+pub(super) async fn kill(id: Uuid, command_tx: &mpsc::Sender<PtyCommand>) -> Result<()> {
+    request(id, command_tx, |response| PtyCommand::Kill { response }).await
+}
+
+pub(super) async fn resize(
+    id: Uuid,
+    command_tx: &mpsc::Sender<PtyCommand>,
+    rows: u16,
+    cols: u16,
+) -> Result<()> {
+    request(id, command_tx, |response| PtyCommand::Resize {
+        rows,
+        cols,
+        response,
+    })
+    .await
 }
 
 pub(super) async fn read_viewport(
     id: Uuid,
     command_tx: &mpsc::Sender<PtyCommand>,
 ) -> Result<Vec<String>> {
-    request(id, command_tx, |response| PtyCommand::ReadViewport { response }).await
+    request(id, command_tx, |response| PtyCommand::ReadViewport {
+        response,
+    })
+    .await
 }
 
 pub(super) async fn read_scrollback(
     id: Uuid,
     command_tx: &mpsc::Sender<PtyCommand>,
 ) -> Result<Vec<String>> {
-    request(id, command_tx, |response| PtyCommand::ReadScrollback { response }).await
+    request(id, command_tx, |response| PtyCommand::ReadScrollback {
+        response,
+    })
+    .await
 }
 
 pub(super) async fn read_chars(
     id: Uuid,
     command_tx: &mpsc::Sender<PtyCommand>,
 ) -> Result<Vec<Vec<char>>> {
-    request(id, command_tx, |response| PtyCommand::ReadChars { response }).await
+    request(id, command_tx, |response| PtyCommand::ReadChars {
+        response,
+    })
+    .await
 }
 
 pub(super) async fn read_styled_cells(
     id: Uuid,
     command_tx: &mpsc::Sender<PtyCommand>,
 ) -> Result<Array2<StyledCell>> {
-    request(id, command_tx, |response| PtyCommand::ReadStyledCells { response }).await
+    request(id, command_tx, |response| PtyCommand::ReadStyledCells {
+        response,
+    })
+    .await
 }
 
 pub(super) async fn read_full(
@@ -88,12 +122,13 @@ pub(super) async fn read_blocking(
     let deadline = tokio::time::Instant::now() + timeout;
 
     loop {
-        match read_viewport(id, command_tx).await {
-            Ok(lines) => return Ok(lines),
-            Err(Error::NoOutputAvailable { .. }) if tokio::time::Instant::now() < deadline => {
-                tokio::time::sleep(POLL_INTERVAL).await;
-            }
-            Err(err) => return Err(err),
+        let lines = read_viewport(id, command_tx).await?;
+        if lines.iter().any(|line| !line.trim().is_empty()) {
+            return Ok(lines);
         }
+        if tokio::time::Instant::now() >= deadline {
+            return Err(Error::NoOutputAvailable { id });
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
     }
 }

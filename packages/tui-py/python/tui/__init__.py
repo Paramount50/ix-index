@@ -32,13 +32,16 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._tui import (
+    Dashboard as _RawDashboard,
     StyledCell as StyledCell,
     TuiInstance as _RawTuiInstance,
     __version__,
+    serve as _raw_serve,
 )
 
 __all__ = [
     "Color",
+    "Dashboard",
     "Key",
     "Pattern",
     "Size",
@@ -47,6 +50,7 @@ __all__ = [
     "Tui",
     "WaitTimeout",
     "__version__",
+    "serve",
 ]
 
 
@@ -253,6 +257,14 @@ class Tui:
     def scrollback_limit(self) -> int:
         return self._raw.scrollback_limit
 
+    def resize(self, rows: int, cols: int) -> Self:
+        """Resize the terminal, delivering SIGWINCH to the child.
+
+        Visible from every handle to the same process. Returns `self`.
+        """
+        self._raw.resize(rows, cols)
+        return self
+
     # -- writing ------------------------------------------------------------
 
     def write(self, data: str) -> Self:
@@ -272,8 +284,45 @@ class Tui:
         return self
 
     def interrupt(self) -> Self:
-        """Send Ctrl+C."""
+        """Send Ctrl+C. Cooperative: a program that traps SIGINT ignores it."""
         self._raw.write(Key.CTRL_C)
+        return self
+
+    # -- lifecycle ----------------------------------------------------------
+
+    def is_alive(self) -> bool:
+        """Whether the child process is still running."""
+        return self._raw.is_alive()
+
+    @property
+    def exit_code(self) -> int | None:
+        """The exit code, or `None` while running or if killed by a signal."""
+        return self._raw.exit_code()
+
+    def wait(self, timeout: float | None = None) -> int | None:
+        """Block until the child exits; return its exit code.
+
+        `None` means the process was terminated by a signal (it has no exit
+        code). Raises `WaitTimeout` if `timeout` seconds pass first.
+        """
+        timeout_ms = None if timeout is None else max(1, int(timeout * 1000))
+        if not self._raw.wait(timeout_ms):
+            raise WaitTimeout(f"{self.command!r} still running after {timeout}s")
+        return self._raw.exit_code()
+
+    def kill(self) -> Self:
+        """Force-terminate the child with SIGKILL. A no-op if already exited."""
+        self._raw.kill()
+        return self
+
+    def close(self) -> Self:
+        """Force-kill the child and stop tracking it.
+
+        Drops the terminal from `Tui.list_all()` and the dashboard. This is
+        what `with` blocks call on exit, so an editor or REPL that ignores
+        Ctrl+C still goes away.
+        """
+        self._raw.close()
         return self
 
     # -- reading ------------------------------------------------------------
@@ -378,6 +427,18 @@ class Tui:
     async def astyled_cells(self) -> list[list[StyledCell]]:
         return await self._raw.read_styled_cells_async()
 
+    async def aresize(self, rows: int, cols: int) -> None:
+        """Native asyncio-awaitable resize."""
+        await self._raw.resize_async(rows, cols)
+
+    async def akill(self) -> None:
+        """Native asyncio-awaitable force-kill (SIGKILL)."""
+        await self._raw.kill_async()
+
+    async def await_exit(self) -> int | None:
+        """Await the child's exit, returning its exit code (`None` if signaled)."""
+        return await self._raw.wait_async()
+
     async def await_for(
         self,
         pattern: Pattern,
@@ -419,9 +480,9 @@ class Tui:
         tb: TracebackType | None,
     ) -> None:
         try:
-            self.interrupt()
+            self.close()
         except Exception:
-            # Best-effort: the channel may already be gone.
+            # Best-effort: the child may already be gone.
             pass
 
     async def __aenter__(self) -> Self:
@@ -434,6 +495,87 @@ class Tui:
         tb: TracebackType | None,
     ) -> None:
         try:
-            await self._raw.write_async(Key.CTRL_C)
+            self._raw.close()
         except Exception:
             pass
+
+
+# --------------------------------------------------------------------------- #
+# Web dashboard
+# --------------------------------------------------------------------------- #
+
+
+class Dashboard:
+    """A running web dashboard that mirrors every live `Tui` in this process.
+
+    The server, the Loro CRDT document, and the SSE stream all live in Rust; a
+    background poll loop samples each terminal's viewport into the document and
+    streams updates to connected browsers. Open `url` to watch the grid. Stop
+    with `stop()`, or use the instance as a context manager.
+
+        with serve() as dash:
+            webbrowser.open(dash.url)
+            ...
+    """
+
+    __slots__ = ("_raw",)
+
+    def __init__(self, raw: _RawDashboard) -> None:
+        self._raw = raw
+
+    @property
+    def url(self) -> str:
+        """The URL to open in a browser."""
+        return self._raw.url
+
+    @property
+    def addr(self) -> str:
+        """The bound `host:port`, with the resolved port when `port=0`."""
+        return self._raw.addr
+
+    def open(self) -> Self:
+        """Open the dashboard in the default browser."""
+        import webbrowser
+
+        webbrowser.open(self.url)
+        return self
+
+    def stop(self) -> None:
+        """Stop the server and its poll loop. Idempotent."""
+        self._raw.stop()
+
+    def __repr__(self) -> str:
+        return f"Dashboard(url={self.url!r})"
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        self.stop()
+
+
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8080,
+    *,
+    poll: float = 0.1,
+    open_browser: bool = False,
+) -> Dashboard:
+    """Start the web dashboard for every `Tui` alive in this process.
+
+    `host` must be an IP literal (`127.0.0.1` for local only, `0.0.0.0` to
+    expose on the network); a hostname is not resolved. Pass `port=0` to bind an
+    ephemeral port and read it back from `Dashboard.url`. `poll` is the viewport
+    sampling interval in seconds. Returns immediately; the server runs in
+    background threads owned by Rust.
+    """
+    raw = _raw_serve(host, port, max(1, int(poll * 1000)))
+    dashboard = Dashboard(raw)
+    if open_browser:
+        dashboard.open()
+    return dashboard

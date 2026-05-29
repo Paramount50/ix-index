@@ -8,11 +8,11 @@ use std::time::{Duration, SystemTime};
 use ndarray::Array2;
 use parking_lot::RwLock;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
 use crate::actor::PtyCommand;
-use crate::types::{FullOutput, SpawnConfig, StyledCell};
+use crate::types::{ExitState, FullOutput, SpawnConfig, StyledCell};
 use crate::{Error, Result};
 
 /// A handle to one spawned PTY-backed process.
@@ -32,21 +32,55 @@ pub struct TuiInstance {
     pub args: Vec<String>,
     /// When the process was spawned.
     pub spawned_at: SystemTime,
-    /// Terminal height in rows.
-    pub rows: u16,
-    /// Terminal width in columns.
-    pub cols: u16,
     /// Configured scrollback depth.
     pub scrollback_limit: usize,
+    /// Live terminal size, shared across clones so a [`resize`](Self::resize)
+    /// on one handle is visible from every handle to the same process.
+    pub(crate) size: Arc<RwLock<(u16, u16)>>,
     pub(crate) command_tx: mpsc::Sender<PtyCommand>,
+    pub(crate) exit_rx: watch::Receiver<ExitState>,
     pub(crate) runtime: Arc<Runtime>,
 }
 
 impl TuiInstance {
+    /// Current terminal height in rows.
+    #[must_use]
+    pub fn rows(&self) -> u16 {
+        self.size.read().0
+    }
+
+    /// Current terminal width in columns.
+    #[must_use]
+    pub fn cols(&self) -> u16 {
+        self.size.read().1
+    }
+
+    /// Resize the terminal to `rows` x `cols`.
+    ///
+    /// Resizes the kernel PTY window (which delivers `SIGWINCH` to the child)
+    /// and the VT100 emulator together, so subsequent reads see the new
+    /// geometry. Visible from every handle to this process.
+    pub fn resize(&self, rows: u16, cols: u16) -> Result<()> {
+        self.runtime
+            .block_on(reader::resize(self.id, &self.command_tx, rows, cols))?;
+        *self.size.write() = (rows, cols);
+        Ok(())
+    }
+
+    /// [`TuiInstance::resize`] as a future.
+    pub async fn resize_async(&self, rows: u16, cols: u16) -> Result<()> {
+        reader::resize(self.id, &self.command_tx, rows, cols).await?;
+        *self.size.write() = (rows, cols);
+        Ok(())
+    }
+
     /// Send `data` to the PTY exactly as given.
     pub fn write(&self, data: &str) -> Result<()> {
-        self.runtime
-            .block_on(reader::write(self.id, &self.command_tx, data.as_bytes().to_vec()))
+        self.runtime.block_on(reader::write(
+            self.id,
+            &self.command_tx,
+            data.as_bytes().to_vec(),
+        ))
     }
 
     /// The current viewport as one string per visible row.
@@ -85,6 +119,51 @@ impl TuiInstance {
             .block_on(reader::read_styled_cells(self.id, &self.command_tx))
     }
 
+    // -- lifecycle --------------------------------------------------------
+
+    /// The current lifecycle state: running, or exited with a code.
+    #[must_use]
+    pub fn exit_state(&self) -> ExitState {
+        *self.exit_rx.borrow()
+    }
+
+    /// Whether the child process is still running.
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        matches!(*self.exit_rx.borrow(), ExitState::Running)
+    }
+
+    /// Block until the child exits, or until `timeout` elapses if given.
+    ///
+    /// Returns the exit state once it has exited, or `None` on timeout. A
+    /// dropped actor (its sender gone) counts as exited.
+    #[must_use]
+    pub fn wait(&self, timeout: Option<Duration>) -> Option<ExitState> {
+        let mut rx = self.exit_rx.clone();
+        self.runtime.block_on(async move {
+            let settle = rx.wait_for(|state| matches!(state, ExitState::Exited(_)));
+            match timeout {
+                Some(timeout) => match tokio::time::timeout(timeout, settle).await {
+                    // Resolved (exited) or the sender dropped: either way, done.
+                    Ok(Ok(state)) => Some(*state),
+                    Ok(Err(_)) => Some(ExitState::Exited(None)),
+                    Err(_) => None,
+                },
+                None => Some(settle.await.map_or(ExitState::Exited(None), |state| *state)),
+            }
+        })
+    }
+
+    /// Force-terminate the child with `SIGKILL`.
+    ///
+    /// A no-op if the child already exited. Unlike a cooperative Ctrl+C this
+    /// cannot be ignored, so it is the reliable way to stop a program that
+    /// traps interrupts (an editor in normal mode, a stuck REPL).
+    pub fn kill(&self) -> Result<()> {
+        self.runtime
+            .block_on(reader::kill(self.id, &self.command_tx))
+    }
+
     /// [`TuiInstance::write`] as a future.
     pub async fn write_async(&self, data: &str) -> Result<()> {
         reader::write(self.id, &self.command_tx, data.as_bytes().to_vec()).await
@@ -118,6 +197,19 @@ impl TuiInstance {
     /// [`TuiInstance::read_styled_cells`] as a future.
     pub async fn read_styled_cells_async(&self) -> Result<Array2<StyledCell>> {
         reader::read_styled_cells(self.id, &self.command_tx).await
+    }
+
+    /// [`TuiInstance::kill`] as a future.
+    pub async fn kill_async(&self) -> Result<()> {
+        reader::kill(self.id, &self.command_tx).await
+    }
+
+    /// [`TuiInstance::wait`] as a future, without the timeout branch.
+    pub async fn wait_async(&self) -> ExitState {
+        let mut rx = self.exit_rx.clone();
+        rx.wait_for(|state| matches!(state, ExitState::Exited(_)))
+            .await
+            .map_or(ExitState::Exited(None), |state| *state)
     }
 }
 
@@ -171,6 +263,17 @@ impl TuiManager {
         self.instances.read().values().cloned().collect()
     }
 
+    /// Stop tracking the instance with `id`, returning it if it was present.
+    ///
+    /// The actor keeps running until every handle is dropped, so a caller that
+    /// wants the process gone should [`TuiInstance::kill`] it first. Removal is
+    /// what drops an exited terminal out of [`list`](Self::list) and the
+    /// dashboard.
+    #[must_use]
+    pub fn remove(&self, id: &Uuid) -> Option<TuiInstance> {
+        self.instances.write().remove(id)
+    }
+
     /// Look up a tracked instance by id.
     pub fn get(&self, id: &Uuid) -> Result<TuiInstance> {
         self.instances
@@ -178,5 +281,14 @@ impl TuiManager {
             .get(id)
             .cloned()
             .ok_or(Error::TuiNotFound { id: *id })
+    }
+
+    /// The shared runtime that drives every spawned actor.
+    ///
+    /// The dashboard runs its HTTP server and poll loop on this same runtime so
+    /// it never starts a second one.
+    #[cfg(feature = "dashboard")]
+    pub(crate) fn runtime(&self) -> Arc<Runtime> {
+        self.runtime.clone()
     }
 }

@@ -36,15 +36,19 @@
 )]
 
 mod actor;
+#[cfg(feature = "dashboard")]
+pub mod dashboard;
 mod error;
 mod manager;
 mod slice;
 mod types;
 
+#[cfg(feature = "dashboard")]
+pub use dashboard::{Dashboard, serve};
 pub use error::{Error, Result};
 pub use manager::{TuiInstance, TuiManager};
 pub use slice::{ColRange, RowRange, slice_2d};
-pub use types::{Color, FullOutput, SpawnConfig, StyledCell};
+pub use types::{Color, ExitState, FullOutput, SpawnConfig, StyledCell};
 
 #[cfg(test)]
 mod tests;

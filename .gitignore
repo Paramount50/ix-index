@@ -28,6 +28,9 @@ __pycache__/
 *$py.class
 .venv/
 *.egg-info/
+# Compiled PyO3 extension modules dropped in-tree by `maturin develop`
+*.abi3.so
+*.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
