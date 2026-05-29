@@ -27,5 +27,9 @@ symlinkJoin {
       --set-default MCSOUND_ASSETS ${sounds}/sounds
   '';
 
-  inherit (bin) meta passthru;
+  inherit (bin) meta;
+  # Drop `unchecked` so the overlay build path (`buildIxRustTool`, which returns
+  # `passthru.unchecked` when present) yields this wrapped derivation rather than
+  # unwrapping back to the bare, sound-pack-less binary.
+  passthru = builtins.removeAttrs bin.passthru [ "unchecked" ];
 }
