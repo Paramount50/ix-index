@@ -283,12 +283,14 @@ impl TuiManager {
             .ok_or(Error::TuiNotFound { id: *id })
     }
 
-    /// The shared runtime that drives every spawned actor.
+    /// A handle to the manager's long-lived runtime.
     ///
-    /// The dashboard runs its HTTP server and poll loop on this same runtime so
-    /// it never starts a second one.
-    #[cfg(feature = "dashboard")]
-    pub(crate) fn runtime(&self) -> Arc<Runtime> {
-        self.runtime.clone()
+    /// The dashboard and producer spawn their server, poll, and accept loops on
+    /// this runtime rather than the ambient one, so a sync caller's
+    /// `Runtime::new().block_on(serve(..))` returns a dashboard that keeps
+    /// running after that temporary runtime is dropped.
+    #[cfg(any(feature = "dashboard", feature = "publish"))]
+    pub(crate) fn runtime_handle(&self) -> tokio::runtime::Handle {
+        self.runtime.handle().clone()
     }
 }
