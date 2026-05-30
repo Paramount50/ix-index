@@ -6,12 +6,14 @@
 //! and embedded automatically at search time. `--no-sync` skips that for a pure
 //! offline search. Results are scoped to the current checkout via the manifest.
 
+use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clap::Parser;
+use indicatif::{ProgressBar, ProgressStyle};
 use semantic_search::{
-    Config, DEFAULT_STORE, Db, DisplayHit, Manifest, MixedbreadStore, SearchOptions,
+    Config, DEFAULT_STORE, Db, DisplayHit, Manifest, MixedbreadStore, SearchOptions, StoreStatus,
 };
 
 /// How long to wait for freshly uploaded files to finish embedding.
@@ -93,19 +95,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let store = MixedbreadStore::from_login(base_url).await?;
 
     if !cli.no_sync {
-        let report =
-            semantic_search::sync(&store, &store_name, &root, &manifest, config.max_files).await?;
-        if report.uploaded > 0 {
-            eprintln!("indexing {} new file(s)...", report.uploaded);
-            let indexed =
-                semantic_search::wait_until_indexed(&store, &store_name, INDEX_TIMEOUT).await?;
-            if !indexed {
-                eprintln!(
-                    "warning: indexing still in progress after {}s; results may be incomplete",
-                    INDEX_TIMEOUT.as_secs()
-                );
-            }
-        }
+        index(&store, &store_name, &root, &manifest, config.max_files).await?;
     }
 
     let options = SearchOptions {
@@ -149,6 +139,84 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Detect new files, upload them, and wait for embedding, rendering an
+/// `indicatif` progress bar when stderr is a terminal and staying quiet (a
+/// single line) when it is piped to an agent or file.
+async fn index(
+    store: &MixedbreadStore,
+    store_name: &str,
+    root: &Path,
+    manifest: &Manifest,
+    max_files: usize,
+) -> anyhow::Result<()> {
+    let bar = std::io::stderr()
+        .is_terminal()
+        .then(ProgressBar::new_spinner);
+    if let Some(bar) = &bar {
+        bar.set_style(upload_style());
+    }
+
+    let on_progress = |done: usize, total: usize| {
+        if let (Some(bar), true) = (&bar, total > 0) {
+            bar.set_length(u64::try_from(total).unwrap_or(u64::MAX));
+            bar.set_position(u64::try_from(done).unwrap_or(u64::MAX));
+        }
+    };
+    let report =
+        semantic_search::sync(store, store_name, root, manifest, max_files, on_progress).await?;
+
+    if report.uploaded == 0 {
+        if let Some(bar) = bar {
+            bar.finish_and_clear();
+        }
+        return Ok(());
+    }
+
+    match &bar {
+        Some(bar) => {
+            bar.set_style(embed_style());
+            bar.enable_steady_tick(Duration::from_millis(120));
+            bar.set_message("embedding…");
+        }
+        None => eprintln!("indexing {} new file(s)...", report.uploaded),
+    }
+
+    let on_poll = |status: StoreStatus| {
+        if let Some(bar) = &bar {
+            bar.set_message(format!(
+                "embedding {} file(s)…",
+                status.pending + status.in_progress
+            ));
+        }
+    };
+    let indexed =
+        semantic_search::wait_until_indexed(store, store_name, INDEX_TIMEOUT, on_poll).await?;
+
+    if let Some(bar) = bar {
+        bar.finish_and_clear();
+    }
+    if !indexed {
+        eprintln!(
+            "warning: indexing still in progress after {}s; results may be incomplete",
+            INDEX_TIMEOUT.as_secs()
+        );
+    }
+    Ok(())
+}
+
+fn upload_style() -> ProgressStyle {
+    ProgressStyle::with_template(
+        "{spinner:.green} indexing {pos}/{len} files {wide_bar:.cyan/blue} {elapsed}",
+    )
+    .expect("valid progress template")
+    .progress_chars("=>-")
+}
+
+fn embed_style() -> ProgressStyle {
+    ProgressStyle::with_template("{spinner:.green} {msg} {elapsed}")
+        .expect("valid progress template")
 }
 
 fn resolve_root(path: Option<&str>) -> anyhow::Result<PathBuf> {

@@ -15,13 +15,14 @@
 
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures::stream::{self, StreamExt as _};
 use snafu::ResultExt as _;
 use tokio::time::sleep;
 
-use crate::backend::{Store, UploadMeta};
+use crate::backend::{Store, StoreStatus, UploadMeta};
 use crate::error::{ReadFileSnafu, Result, TooManyFilesSnafu};
 use crate::manifest::{FileEntry, Manifest};
 
@@ -44,6 +45,10 @@ pub struct SyncReport {
 
 /// Upload every file in `manifest` whose content is not already in `store`.
 ///
+/// `on_progress(uploaded_so_far, total_to_upload)` is called once with the
+/// total before uploading and again after each successful upload, so a caller
+/// can render a progress bar. It may run from several concurrent upload tasks.
+///
 /// Returns once the uploads are accepted; call [`wait_until_indexed`] to block
 /// until the new content is embedded and searchable.
 ///
@@ -56,6 +61,7 @@ pub async fn sync(
     root: &Path,
     manifest: &Manifest,
     max_files: usize,
+    on_progress: impl Fn(usize, usize) + Send + Sync,
 ) -> Result<SyncReport> {
     store.ensure_store(store_name).await?;
     let remote = store.list_external_ids(store_name).await?;
@@ -82,20 +88,29 @@ pub async fn sync(
         .fail();
     }
 
+    on_progress(0, upload_target);
+    let done = AtomicUsize::new(0);
+
     let results: Vec<Result<()>> = stream::iter(to_upload)
-        .map(|entry| async move {
-            let abs = root.join(&entry.rel_path);
-            let content = tokio::fs::read(&abs)
-                .await
-                .context(ReadFileSnafu { path: abs })?;
-            let file_name = file_name_of(&entry.rel_path);
-            let meta = UploadMeta {
-                path: entry.rel_path.clone(),
-                hash: entry.hash.as_str().to_owned(),
-            };
-            store
-                .upload(store_name, content, file_name, entry.hash.as_str(), meta)
-                .await
+        .map(|entry| {
+            let on_progress = &on_progress;
+            let done = &done;
+            async move {
+                let abs = root.join(&entry.rel_path);
+                let content = tokio::fs::read(&abs)
+                    .await
+                    .context(ReadFileSnafu { path: abs })?;
+                let file_name = file_name_of(&entry.rel_path);
+                let meta = UploadMeta {
+                    path: entry.rel_path.clone(),
+                    hash: entry.hash.as_str().to_owned(),
+                };
+                store
+                    .upload(store_name, content, file_name, entry.hash.as_str(), meta)
+                    .await?;
+                on_progress(done.fetch_add(1, Ordering::Relaxed) + 1, upload_target);
+                Ok(())
+            }
         })
         .buffer_unordered(UPLOAD_CONCURRENCY)
         .collect()
@@ -116,9 +131,10 @@ pub async fn sync(
 
 /// Poll the store until newly uploaded files finish embedding.
 ///
-/// Returns `true` when the store reports nothing pending or in progress, or
-/// `false` if `timeout` elapses first (the caller can search anyway, accepting
-/// possibly-incomplete results).
+/// `on_poll(status)` is called with each observed status so a caller can show
+/// progress. Returns `true` when the store reports nothing pending or in
+/// progress, or `false` if `timeout` elapses first (the caller can search
+/// anyway, accepting possibly-incomplete results).
 ///
 /// # Errors
 /// Returns an error if a status request fails.
@@ -126,10 +142,12 @@ pub async fn wait_until_indexed(
     store: &(impl Store + Sync),
     store_name: &str,
     timeout: Duration,
+    on_poll: impl Fn(StoreStatus) + Send + Sync,
 ) -> Result<bool> {
     let start = Instant::now();
     loop {
         let status = store.store_status(store_name).await?;
+        on_poll(status);
         if status.pending == 0 && status.in_progress == 0 {
             return Ok(true);
         }
@@ -163,7 +181,7 @@ mod tests {
         let store = MemoryStore::new();
         let manifest = Manifest::build(dir.path(), None, 1024 * 1024).expect("manifest");
 
-        let first = sync(&store, "s", dir.path(), &manifest, 1000)
+        let first = sync(&store, "s", dir.path(), &manifest, 1000, |_, _| {})
             .await
             .expect("first sync");
         assert_eq!(first.uploaded, 2);
@@ -171,7 +189,7 @@ mod tests {
 
         // Re-syncing the same content must not re-upload: this is the
         // cross-worktree / re-run win that mgrep lacks.
-        let second = sync(&store, "s", dir.path(), &manifest, 1000)
+        let second = sync(&store, "s", dir.path(), &manifest, 1000, |_, _| {})
             .await
             .expect("second sync");
         assert_eq!(second.uploaded, 0);
@@ -186,13 +204,13 @@ mod tests {
         let store = MemoryStore::new();
 
         let manifest_a = Manifest::build(dir_a.path(), None, 1024 * 1024).expect("a");
-        sync(&store, "s", dir_a.path(), &manifest_a, 1000)
+        sync(&store, "s", dir_a.path(), &manifest_a, 1000, |_, _| {})
             .await
             .expect("sync a");
         assert_eq!(store.upload_count(), 2);
 
         let manifest_b = Manifest::build(dir_b.path(), None, 1024 * 1024).expect("b");
-        let report_b = sync(&store, "s", dir_b.path(), &manifest_b, 1000)
+        let report_b = sync(&store, "s", dir_b.path(), &manifest_b, 1000, |_, _| {})
             .await
             .expect("sync b");
 
@@ -207,7 +225,7 @@ mod tests {
         let store = MemoryStore::new();
         let manifest = Manifest::build(dir.path(), None, 1024 * 1024).expect("manifest");
 
-        let err = sync(&store, "s", dir.path(), &manifest, 1)
+        let err = sync(&store, "s", dir.path(), &manifest, 1, |_, _| {})
             .await
             .expect_err("should refuse");
         assert!(matches!(err, crate::error::Error::TooManyFiles { .. }));
