@@ -88,6 +88,15 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     // TTY detection, `NO_COLOR`, and `CLICOLOR_FORCE`, so piped output and
     // `NO_COLOR=1` both yield a plain palette that emits no escape codes.
     let palette = Palette::for_stdout();
+    // Pick the islands variant from the terminal background, but only when we
+    // will actually render highlighted snippets (`-c` on a color TTY):
+    // detection writes an OSC background query to the terminal, so there is no
+    // reason to probe it for a plain result list or machine-readable output.
+    let theme = if cli.content {
+        detect_theme(palette.color)
+    } else {
+        code_highlight::Theme::default()
+    };
 
     let config = Config::default();
     let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
@@ -161,7 +170,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         if !view.sources.is_empty() {
             println!();
             for (index, hit) in view.sources.iter().enumerate() {
-                println!("{index}: {}", render(hit, cli.content, &palette, &root));
+                println!("{index}: {}", render(hit, cli.content, &palette, &root, theme));
             }
         }
     } else {
@@ -172,7 +181,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             bar.finish_and_clear();
         }
         for hit in &hits {
-            println!("{}", render(hit, cli.content, &palette, &root));
+            println!("{}", render(hit, cli.content, &palette, &root, theme));
         }
     }
 
@@ -269,7 +278,31 @@ fn paint(style: Style, text: &str) -> String {
     format!("{}{text}{}", style.render(), style.render_reset())
 }
 
-fn render(hit: &DisplayHit, show_content: bool, palette: &Palette, root: &Path) -> String {
+/// Resolve the islands theme variant from the terminal background.
+///
+/// Queries the background luminance once (OSC 11, via `terminal-light`) and
+/// picks the light palette above 0.5 luma, the dark palette below. Returns the
+/// dark default when color is off, stdout is not a TTY, or the terminal does not
+/// answer, so a piped or unsupported terminal never blocks on a reply that will
+/// not come.
+fn detect_theme(color: bool) -> code_highlight::Theme {
+    use code_highlight::Theme;
+    if !color || !std::io::stdout().is_terminal() {
+        return Theme::Dark;
+    }
+    match terminal_light::luma() {
+        Ok(luma) if luma > 0.5 => Theme::Light,
+        _ => Theme::Dark,
+    }
+}
+
+fn render(
+    hit: &DisplayHit,
+    show_content: bool,
+    palette: &Palette,
+    root: &Path,
+    theme: code_highlight::Theme,
+) -> String {
     let prefix = if hit.is_web { "" } else { "./" };
     let path = paint(palette.path, &format!("{prefix}{}", hit.label));
 
@@ -290,7 +323,7 @@ fn render(hit: &DisplayHit, show_content: bool, palette: &Palette, root: &Path) 
     let head = format!("{path}{location} {score}");
 
     match show_content
-        .then(|| render_snippet(hit, palette, root))
+        .then(|| render_snippet(hit, palette, root, theme))
         .flatten()
     {
         Some(body) => format!("{head}\n{body}"),
@@ -308,7 +341,12 @@ fn render(hit: &DisplayHit, show_content: bool, palette: &Palette, root: &Path) 
 /// box-drawing gutter and drops highlighting that is noise without color. Web
 /// hits with no start line print as-is. Trailing whitespace is trimmed and an
 /// empty snippet returns `None`, so nothing is printed.
-fn render_snippet(hit: &DisplayHit, palette: &Palette, root: &Path) -> Option<String> {
+fn render_snippet(
+    hit: &DisplayHit,
+    palette: &Palette,
+    root: &Path,
+    theme: code_highlight::Theme,
+) -> Option<String> {
     let body = hit.text.trim_end();
     if body.is_empty() {
         return None;
@@ -338,6 +376,7 @@ fn render_snippet(hit: &DisplayHit, palette: &Palette, root: &Path) -> Option<St
             &source,
             usize::try_from(start).unwrap_or(0) + 1,
             usize::try_from(num).unwrap_or(0),
+            theme,
             palette.color,
         );
         let snippet = snippet.trim_end();
@@ -401,16 +440,26 @@ mod tests {
 
     #[test]
     fn piped_content_is_cat_n_style() {
-        let out = render_snippet(&hit("alpha\nbeta"), &Palette::plain(), Path::new("."))
-            .expect("snippet");
+        let out = render_snippet(
+            &hit("alpha\nbeta"),
+            &Palette::plain(),
+            Path::new("."),
+            code_highlight::Theme::Dark,
+        )
+        .expect("snippet");
         assert_eq!(out, "5\talpha\n6\tbeta");
         assert!(!out.contains('│'), "machine output must drop the gutter glyph");
     }
 
     #[test]
     fn terminal_content_keeps_the_gutter() {
-        let out = render_snippet(&hit("alpha\nbeta"), &Palette::colored(), Path::new("."))
-            .expect("snippet");
+        let out = render_snippet(
+            &hit("alpha\nbeta"),
+            &Palette::colored(),
+            Path::new("."),
+            code_highlight::Theme::Dark,
+        )
+        .expect("snippet");
         assert!(out.contains('│'), "interactive output keeps the aligned gutter");
         assert!(!out.contains('\t'), "interactive output is not tab-numbered");
     }
