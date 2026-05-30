@@ -12,14 +12,25 @@
 //! never produces a wrong answer.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use rayon::prelude::*;
 use repo_walker::{FileScanner, WalkOptions};
 use snafu::ResultExt as _;
 
 use crate::content::ContentHash;
 use crate::error::{ReadFileSnafu, Result, StatSnafu, WalkSnafu};
+
+/// A file selected by the walk, awaiting a hash. Enumerating these is cheap and
+/// sequential; computing their hashes is the expensive part and runs in
+/// parallel.
+struct Candidate {
+    path: PathBuf,
+    rel_path: String,
+    mtime_ms: u64,
+    size: u64,
+}
 
 /// One indexed file's identity and change-detection metadata.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -57,7 +68,9 @@ impl Manifest {
             .map(|m| m.entries.iter().map(|e| (e.rel_path.as_str(), e)).collect())
             .unwrap_or_default();
 
-        let mut entries = Vec::new();
+        // Walk sequentially to enumerate candidates (cheap), then hash them in
+        // parallel (the expensive read + sha256 work) across rayon's pool.
+        let mut candidates = Vec::new();
         for item in FileScanner::new(root, WalkOptions::default()) {
             let path = item.context(WalkSnafu {
                 root: root.to_path_buf(),
@@ -69,23 +82,37 @@ impl Manifest {
             }
             let mtime_ms = mtime_ms(&metadata);
             let rel_path = relative_path(root, &path);
-
-            let hash = match prior.get(rel_path.as_str()) {
-                Some(prev) if prev.mtime_ms == mtime_ms && prev.size == size => prev.hash.clone(),
-                _ => {
-                    let bytes =
-                        std::fs::read(&path).context(ReadFileSnafu { path: path.clone() })?;
-                    ContentHash::of_bytes(&bytes)
-                }
-            };
-
-            entries.push(FileEntry {
+            candidates.push(Candidate {
+                path,
                 rel_path,
-                hash,
                 mtime_ms,
                 size,
             });
         }
+
+        let mut entries: Vec<FileEntry> = candidates
+            .par_iter()
+            .map(|candidate| -> Result<FileEntry> {
+                let reuse = prior.get(candidate.rel_path.as_str()).filter(|prev| {
+                    prev.mtime_ms == candidate.mtime_ms && prev.size == candidate.size
+                });
+                // Unchanged file: reuse its hash without reading from disk.
+                let hash = if let Some(prev) = reuse {
+                    prev.hash.clone()
+                } else {
+                    let bytes = std::fs::read(&candidate.path).context(ReadFileSnafu {
+                        path: candidate.path.clone(),
+                    })?;
+                    ContentHash::of_bytes(&bytes)
+                };
+                Ok(FileEntry {
+                    rel_path: candidate.rel_path.clone(),
+                    hash,
+                    mtime_ms: candidate.mtime_ms,
+                    size: candidate.size,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         entries.sort_by(|a, b| a.rel_path.cmp(&b.rel_path));
         Ok(Self { entries })
