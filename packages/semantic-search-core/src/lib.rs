@@ -27,6 +27,7 @@ mod content;
 mod db;
 mod error;
 mod manifest;
+mod pipeline;
 mod search;
 mod sync;
 
@@ -37,5 +38,6 @@ pub use content::ContentHash;
 pub use db::{Db, db_path};
 pub use error::{Error, Result};
 pub use manifest::{FileEntry, Manifest};
+pub use pipeline::{Query, index_and_answer, index_and_search};
 pub use search::{AnswerView, DisplayHit, ask, search};
 pub use sync::{SyncReport, sync, wait_until_indexed};

@@ -8,12 +8,13 @@
 
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use semantic_search_core::{
-    Config, DEFAULT_STORE, Db, DisplayHit, Manifest, MixedbreadStore, SearchOptions, StoreStatus,
+    Config, DEFAULT_STORE, DisplayHit, MixedbreadStore, Query, SearchOptions, StoreStatus,
 };
 
 /// How long to wait for freshly uploaded files to finish embedding.
@@ -83,38 +84,61 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     );
 
     let config = Config::default();
-    let mut db = Db::open()?;
-    let previous = db.load(&root)?;
-    let manifest = Manifest::build(&root, Some(&previous), config.max_file_bytes)?;
-    db.save(&root, &manifest)?;
-
     let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
     let base_url = cli
         .base_url
         .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
     let store = MixedbreadStore::from_login(base_url).await?;
 
-    if !cli.no_sync {
-        index(&store, &store_name, &root, &manifest, config.max_files).await?;
-    }
-
-    let options = SearchOptions {
-        rerank: !cli.no_rerank,
-        agentic: cli.agentic,
+    let query = Query {
+        root: &root,
+        store_name: &store_name,
+        text: &cli.pattern,
+        top_k: cli.max_count.max(1),
+        options: SearchOptions {
+            rerank: !cli.no_rerank,
+            agentic: cli.agentic,
+        },
+        sync: !cli.no_sync,
+        include_web: cli.web,
+        index_timeout: INDEX_TIMEOUT,
     };
-    let top_k = cli.max_count.max(1);
+
+    // Progress UI, terminal only: an upload bar that flips to an embedding
+    // spinner on the first poll. Piped output stays clean (no bar).
+    let bar = std::io::stderr()
+        .is_terminal()
+        .then(ProgressBar::new_spinner);
+    if let Some(bar) = &bar {
+        bar.set_style(upload_style());
+    }
+    let embedding = AtomicBool::new(false);
+    let on_upload = |done: usize, total: usize| {
+        if let (Some(bar), true) = (&bar, total > 0) {
+            bar.set_length(u64::try_from(total).unwrap_or(u64::MAX));
+            bar.set_position(u64::try_from(done).unwrap_or(u64::MAX));
+        }
+    };
+    let on_poll = |status: StoreStatus| {
+        if let Some(bar) = &bar {
+            if !embedding.swap(true, Ordering::Relaxed) {
+                bar.set_style(embed_style());
+                bar.enable_steady_tick(Duration::from_millis(120));
+            }
+            bar.set_message(format!(
+                "embedding {} file(s)…",
+                status.pending + status.in_progress
+            ));
+        }
+    };
 
     if cli.answer {
-        let view = semantic_search_core::ask(
-            &store,
-            &store_name,
-            &manifest,
-            &cli.pattern,
-            top_k,
-            options,
-            cli.web,
-        )
-        .await?;
+        let view =
+            semantic_search_core::index_and_answer(&store, &query, &config, on_upload, on_poll)
+                .await?;
+        if let Some(bar) = &bar {
+            bar.finish_and_clear();
+        }
         println!("{}", view.answer);
         if !view.sources.is_empty() {
             println!();
@@ -123,87 +147,17 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
     } else {
-        let hits = semantic_search_core::search(
-            &store,
-            &store_name,
-            &manifest,
-            &cli.pattern,
-            top_k,
-            options,
-            cli.web,
-        )
-        .await?;
+        let hits =
+            semantic_search_core::index_and_search(&store, &query, &config, on_upload, on_poll)
+                .await?;
+        if let Some(bar) = &bar {
+            bar.finish_and_clear();
+        }
         for hit in &hits {
             println!("{}", render(hit, cli.content));
         }
     }
 
-    Ok(())
-}
-
-/// Detect new files, upload them, and wait for embedding, rendering an
-/// `indicatif` progress bar when stderr is a terminal and staying quiet (a
-/// single line) when it is piped to an agent or file.
-async fn index(
-    store: &MixedbreadStore,
-    store_name: &str,
-    root: &Path,
-    manifest: &Manifest,
-    max_files: usize,
-) -> anyhow::Result<()> {
-    let bar = std::io::stderr()
-        .is_terminal()
-        .then(ProgressBar::new_spinner);
-    if let Some(bar) = &bar {
-        bar.set_style(upload_style());
-    }
-
-    let on_progress = |done: usize, total: usize| {
-        if let (Some(bar), true) = (&bar, total > 0) {
-            bar.set_length(u64::try_from(total).unwrap_or(u64::MAX));
-            bar.set_position(u64::try_from(done).unwrap_or(u64::MAX));
-        }
-    };
-    let report =
-        semantic_search_core::sync(store, store_name, root, manifest, max_files, on_progress)
-            .await?;
-
-    if report.uploaded == 0 {
-        if let Some(bar) = bar {
-            bar.finish_and_clear();
-        }
-        return Ok(());
-    }
-
-    match &bar {
-        Some(bar) => {
-            bar.set_style(embed_style());
-            bar.enable_steady_tick(Duration::from_millis(120));
-            bar.set_message("embedding…");
-        }
-        None => eprintln!("indexing {} new file(s)...", report.uploaded),
-    }
-
-    let on_poll = |status: StoreStatus| {
-        if let Some(bar) = &bar {
-            bar.set_message(format!(
-                "embedding {} file(s)…",
-                status.pending + status.in_progress
-            ));
-        }
-    };
-    let indexed =
-        semantic_search_core::wait_until_indexed(store, store_name, INDEX_TIMEOUT, on_poll).await?;
-
-    if let Some(bar) = bar {
-        bar.finish_and_clear();
-    }
-    if !indexed {
-        eprintln!(
-            "warning: indexing still in progress after {}s; results may be incomplete",
-            INDEX_TIMEOUT.as_secs()
-        );
-    }
     Ok(())
 }
 

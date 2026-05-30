@@ -1,0 +1,123 @@
+//! High-level orchestration: build the manifest, embed any new files, then
+//! search or answer in one call. The CLI and the `PyO3` bindings both go through
+//! here, so the index-then-query flow lives in exactly one place.
+
+use std::path::Path;
+use std::time::Duration;
+
+use crate::backend::{SearchOptions, Store, StoreStatus};
+use crate::config::Config;
+use crate::db::Db;
+use crate::error::Result;
+use crate::manifest::Manifest;
+use crate::search::{AnswerView, DisplayHit, ask, search};
+use crate::sync::{sync, wait_until_indexed};
+
+/// What to query and how, independent of the backend and progress reporting.
+#[derive(Debug, Clone, Copy)]
+pub struct Query<'a> {
+    /// Absolute checkout root to index and scope results to.
+    pub root: &'a Path,
+    /// Store name (one store holds every worktree's content).
+    pub store_name: &'a str,
+    /// Natural-language query.
+    pub text: &'a str,
+    /// Maximum results to return.
+    pub top_k: usize,
+    /// Search tuning (rerank, agentic).
+    pub options: SearchOptions,
+    /// Detect and embed new files before querying. Set false for offline search.
+    pub sync: bool,
+    /// Mix in web results.
+    pub include_web: bool,
+    /// How long to wait for new files to embed before querying anyway.
+    pub index_timeout: Duration,
+}
+
+/// Build + persist the manifest for the checkout, and (when `query.sync`)
+/// upload new content and wait for it to embed. Returns the manifest used to
+/// scope results.
+async fn prepare(
+    store: &(impl Store + Sync),
+    query: &Query<'_>,
+    config: &Config,
+    on_upload: impl Fn(usize, usize) + Send + Sync,
+    on_poll: impl Fn(StoreStatus) + Send + Sync,
+) -> Result<Manifest> {
+    // Scope the database handle so it is dropped before any await: rusqlite's
+    // connection is not Sync, and the returned future must be Send.
+    let manifest = {
+        let mut db = Db::open()?;
+        let previous = db.load(query.root)?;
+        let manifest = Manifest::build(query.root, Some(&previous), config.max_file_bytes)?;
+        db.save(query.root, &manifest)?;
+        manifest
+    };
+
+    if query.sync {
+        let report = sync(
+            store,
+            query.store_name,
+            query.root,
+            &manifest,
+            config.max_files,
+            on_upload,
+        )
+        .await?;
+        if report.uploaded > 0 {
+            wait_until_indexed(store, query.store_name, query.index_timeout, on_poll).await?;
+        }
+    }
+
+    Ok(manifest)
+}
+
+/// Index the checkout (unless `query.sync` is false) and return search hits
+/// scoped to it.
+///
+/// # Errors
+/// Returns an error if indexing or the search request fails.
+pub async fn index_and_search(
+    store: &(impl Store + Sync),
+    query: &Query<'_>,
+    config: &Config,
+    on_upload: impl Fn(usize, usize) + Send + Sync,
+    on_poll: impl Fn(StoreStatus) + Send + Sync,
+) -> Result<Vec<DisplayHit>> {
+    let manifest = prepare(store, query, config, on_upload, on_poll).await?;
+    search(
+        store,
+        query.store_name,
+        &manifest,
+        query.text,
+        query.top_k,
+        query.options,
+        query.include_web,
+    )
+    .await
+}
+
+/// Index the checkout (unless `query.sync` is false) and return a synthesized
+/// answer with sources scoped to it.
+///
+/// # Errors
+/// Returns an error if indexing or the question-answering request fails.
+pub async fn index_and_answer(
+    store: &(impl Store + Sync),
+    query: &Query<'_>,
+    config: &Config,
+    on_upload: impl Fn(usize, usize) + Send + Sync,
+    on_poll: impl Fn(StoreStatus) + Send + Sync,
+) -> Result<AnswerView> {
+    let manifest = prepare(store, query, config, on_upload, on_poll).await?;
+    ask(
+        store,
+        query.store_name,
+        &manifest,
+        query.text,
+        query.top_k,
+        query.options,
+        query.include_web,
+    )
+    .await
+}
