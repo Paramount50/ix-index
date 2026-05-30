@@ -8,7 +8,7 @@
 
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use clap::Parser;
@@ -113,22 +113,29 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         bar.set_style(upload_style());
     }
     let embedding = AtomicBool::new(false);
+    // Captured during upload so the embedding bar knows its length: the number
+    // of files uploaded is exactly the number that will embed.
+    let embed_total = AtomicU64::new(0);
     let on_upload = |done: usize, total: usize| {
         if let (Some(bar), true) = (&bar, total > 0) {
-            bar.set_length(u64::try_from(total).unwrap_or(u64::MAX));
+            let total = u64::try_from(total).unwrap_or(u64::MAX);
+            embed_total.store(total, Ordering::Relaxed);
+            bar.set_length(total);
             bar.set_position(u64::try_from(done).unwrap_or(u64::MAX));
         }
     };
     let on_poll = |status: StoreStatus| {
         if let Some(bar) = &bar {
+            let len = embed_total.load(Ordering::Relaxed);
             if !embedding.swap(true, Ordering::Relaxed) {
                 bar.set_style(embed_style());
+                bar.set_length(len);
                 bar.enable_steady_tick(Duration::from_millis(120));
             }
-            bar.set_message(format!(
-                "embedding {} file(s)…",
-                status.pending + status.in_progress
-            ));
+            // store_status is store-wide, so the pending count can exceed our
+            // batch; clamp to len so the bar never reads past full.
+            let remaining = (status.pending + status.in_progress).min(len);
+            bar.set_position(len - remaining);
         }
     };
 
@@ -170,8 +177,11 @@ fn upload_style() -> ProgressStyle {
 }
 
 fn embed_style() -> ProgressStyle {
-    ProgressStyle::with_template("{spinner:.green} {msg} {elapsed}")
-        .expect("valid progress template")
+    ProgressStyle::with_template(
+        "{spinner:.green} embedding {pos}/{len} files {wide_bar:.magenta/blue} {elapsed}",
+    )
+    .expect("valid progress template")
+    .progress_chars("=>-")
 }
 
 fn resolve_root(path: Option<&str>) -> anyhow::Result<PathBuf> {
