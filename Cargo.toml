@@ -51,6 +51,8 @@ cargo = { level = "deny", priority = -1 }
 multiple_crate_versions = "allow"
 
 [workspace.dependencies]
+anstream = "1"
+anstyle = "1"
 anyhow = "1"
 askama = { version = "0.16.0", default-features = false }
 axum = "0.8"

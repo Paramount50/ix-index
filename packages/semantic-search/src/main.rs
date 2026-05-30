@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
+use anstyle::{AnsiColor, Style};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use semantic_search_core::{
@@ -83,6 +84,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         root.display(),
     );
 
+    // Color is decided once on stdout, where results print. `anstream` folds in
+    // TTY detection, `NO_COLOR`, and `CLICOLOR_FORCE`, so piped output and
+    // `NO_COLOR=1` both yield a plain palette that emits no escape codes.
+    let palette = Palette::for_stdout();
+
     let config = Config::default();
     let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
     let base_url = cli
@@ -150,7 +156,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         if !view.sources.is_empty() {
             println!();
             for (index, hit) in view.sources.iter().enumerate() {
-                println!("{index}: {}", render(hit, cli.content));
+                println!("{index}: {}", render(hit, cli.content, &palette));
             }
         }
     } else {
@@ -161,7 +167,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             bar.finish_and_clear();
         }
         for hit in &hits {
-            println!("{}", render(hit, cli.content));
+            println!("{}", render(hit, cli.content, &palette));
         }
     }
 
@@ -202,18 +208,130 @@ fn at_or_above_home(path: &Path) -> bool {
     path == home || home.starts_with(path)
 }
 
-fn render(hit: &DisplayHit, show_content: bool) -> String {
+/// Styles for one result, resolved once against stdout's color support.
+///
+/// A plain palette holds default `Style`s, whose `render()`/`render_reset()`
+/// emit nothing, so the same `render` path produces clean text when output is
+/// piped or `NO_COLOR` is set.
+struct Palette {
+    /// File path or web URL.
+    path: Style,
+    /// The `:start-end` line range after a path.
+    range: Style,
+    /// The `(NN.NN% match)` score suffix.
+    score: Style,
+    /// The left line-number gutter under `-c` content.
+    gutter: Style,
+}
+
+impl Palette {
+    /// Resolve color support from stdout, the stream results print to.
+    fn for_stdout() -> Self {
+        // `AutoStream::choice` honors `NO_COLOR`, `CLICOLOR_FORCE`, and whether
+        // stdout is a TTY, so a single check covers every disable path.
+        let choice = anstream::AutoStream::choice(&std::io::stdout());
+        if choice == anstream::ColorChoice::Never {
+            Self::plain()
+        } else {
+            Self::colored()
+        }
+    }
+
+    /// No-op styles: every `render()` is empty, so output carries no escapes.
+    const fn plain() -> Self {
+        let none = Style::new();
+        Self {
+            path: none,
+            range: none,
+            score: none,
+            gutter: none,
+        }
+    }
+
+    /// The interactive palette: bold cyan path, dim range, green score.
+    fn colored() -> Self {
+        Self {
+            path: Style::new().bold().fg_color(Some(AnsiColor::Cyan.into())),
+            range: Style::new().dimmed(),
+            score: Style::new().fg_color(Some(AnsiColor::Green.into())),
+            gutter: Style::new().dimmed(),
+        }
+    }
+
+    /// Higher relevance gets a brighter, bold green so strong hits stand out;
+    /// a plain palette stays plain.
+    fn score_for(&self, fraction: f32) -> Style {
+        if self.score == Style::new() || fraction < 0.8 {
+            self.score
+        } else {
+            Style::new()
+                .bold()
+                .fg_color(Some(AnsiColor::BrightGreen.into()))
+        }
+    }
+}
+
+/// Wrap `text` in `style`'s ANSI codes; a plain style yields `text` unchanged.
+fn paint(style: Style, text: &str) -> String {
+    format!("{}{text}{}", style.render(), style.render_reset())
+}
+
+fn render(hit: &DisplayHit, show_content: bool, palette: &Palette) -> String {
+    let prefix = if hit.is_web { "" } else { "./" };
+    let path = paint(palette.path, &format!("{prefix}{}", hit.label));
+
     let location = match (hit.start_line, hit.num_lines) {
-        (Some(start), Some(num)) => format!(":{}-{}", start + 1, start + 1 + num),
-        (Some(start), None) => format!(":{}", start + 1),
+        (Some(start), Some(num)) => paint(
+            palette.range,
+            &format!(":{}-{}", start + 1, start + 1 + num),
+        ),
+        (Some(start), None) => paint(palette.range, &format!(":{}", start + 1)),
         _ => String::new(),
     };
-    let prefix = if hit.is_web { "" } else { "./" };
+
     let percent = hit.score * 100.0;
-    let head = format!("{prefix}{}{location} ({percent:.2}% match)", hit.label);
-    if show_content && !hit.text.is_empty() {
-        format!("{head}\n{}", hit.text)
-    } else {
-        head
+    let score = paint(
+        palette.score_for(hit.score),
+        &format!("({percent:.2}% match)"),
+    );
+    let head = format!("{path}{location} {score}");
+
+    match show_content.then(|| render_snippet(hit, palette)).flatten() {
+        Some(body) => format!("{head}\n{body}"),
+        None => head,
     }
+}
+
+/// Render the matched content as a readable block.
+///
+/// When the hit carries a start line, each line gets its 1-based number in a
+/// right-aligned, dim gutter (ripgrep/mgrep feel); otherwise the text prints
+/// as-is (web hits). Trailing whitespace is trimmed and an empty snippet
+/// returns `None`, so nothing is printed.
+fn render_snippet(hit: &DisplayHit, palette: &Palette) -> Option<String> {
+    let body = hit.text.trim_end();
+    if body.is_empty() {
+        return None;
+    }
+
+    let Some(start) = hit.start_line else {
+        return Some(body.to_owned());
+    };
+
+    let first = u64::from(start) + 1;
+    let lines: Vec<&str> = body.lines().collect();
+    let last = first + lines.len().saturating_sub(1) as u64;
+    let width = last.to_string().len();
+
+    let rendered = lines
+        .iter()
+        .enumerate()
+        .map(|(offset, line)| {
+            let number = first + offset as u64;
+            let gutter = paint(palette.gutter, &format!("{number:>width$} │"));
+            format!("{gutter} {}", line.trim_end())
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(rendered)
 }

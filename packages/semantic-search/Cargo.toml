@@ -13,6 +13,8 @@ name = "semantic-search"
 path = "src/main.rs"
 
 [dependencies]
+anstream.workspace = true
+anstyle.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 dirs.workspace = true
