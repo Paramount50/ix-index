@@ -12,7 +12,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use semantic_search::{
+use semantic_search_core::{
     Config, DEFAULT_STORE, Db, DisplayHit, Manifest, MixedbreadStore, SearchOptions, StoreStatus,
 };
 
@@ -105,7 +105,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let top_k = cli.max_count.max(1);
 
     if cli.answer {
-        let view = semantic_search::ask(
+        let view = semantic_search_core::ask(
             &store,
             &store_name,
             &manifest,
@@ -123,7 +123,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             }
         }
     } else {
-        let hits = semantic_search::search(
+        let hits = semantic_search_core::search(
             &store,
             &store_name,
             &manifest,
@@ -165,7 +165,8 @@ async fn index(
         }
     };
     let report =
-        semantic_search::sync(store, store_name, root, manifest, max_files, on_progress).await?;
+        semantic_search_core::sync(store, store_name, root, manifest, max_files, on_progress)
+            .await?;
 
     if report.uploaded == 0 {
         if let Some(bar) = bar {
@@ -192,7 +193,7 @@ async fn index(
         }
     };
     let indexed =
-        semantic_search::wait_until_indexed(store, store_name, INDEX_TIMEOUT, on_poll).await?;
+        semantic_search_core::wait_until_indexed(store, store_name, INDEX_TIMEOUT, on_poll).await?;
 
     if let Some(bar) = bar {
         bar.finish_and_clear();

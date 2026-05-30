@@ -4056,8 +4056,18 @@ dependencies = [
  "anyhow",
  "clap",
  "dirs",
- "futures",
  "indicatif",
+ "mixedbread",
+ "semantic-search-core",
+ "tokio",
+]
+
+[[package]]
+name = "semantic-search-core"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "futures",
  "mixedbread",
  "rayon",
  "repo-walker",

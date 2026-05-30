@@ -3,14 +3,10 @@ name = "semantic-search"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
-description = "Content-addressed semantic code search over a Mixedbread store, deduplicated across git worktrees"
+description = "CLI for content-addressed semantic code search (thin wrapper over semantic-search-core)"
 
 [lints]
 workspace = true
-
-[lib]
-name = "semantic_search"
-path = "src/lib.rs"
 
 [[bin]]
 name = "semantic-search"
@@ -20,17 +16,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 dirs.workspace = true
-futures.workspace = true
 indicatif.workspace = true
 mixedbread.workspace = true
-rayon.workspace = true
-repo-walker.workspace = true
-rusqlite = { workspace = true, features = ["bundled"] }
-serde = { workspace = true, features = ["derive"] }
-serde_json.workspace = true
-sha2.workspace = true
-snafu.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs", "time"] }
-
-[dev-dependencies]
-tempfile.workspace = true
+semantic-search-core.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
