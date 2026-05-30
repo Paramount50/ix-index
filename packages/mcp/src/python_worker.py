@@ -6,6 +6,7 @@ import base64
 import contextlib
 import io
 import json
+import os
 import sys
 import traceback
 from collections.abc import Callable
@@ -14,6 +15,12 @@ from typing import Any
 # Cap on images returned per call, so a cell that opens many figures cannot
 # balloon one response. The Rust side enforces the same ceiling.
 MAX_IMAGES = 8
+
+# Cap on characters returned per text field (stdout, stderr, result). A cell
+# that prints a large file or reprs a huge object would otherwise stream
+# straight into the caller's context window. Truncation is explicit: the marker
+# names the dropped count so a clipped field never reads as complete.
+MAX_OUTPUT_CHARS = 100_000
 
 # Compile every snippet with this flag so `await` is legal at the top level.
 # Without it, `await x` outside a function raises SyntaxError. CPython's own
@@ -111,11 +118,17 @@ class PythonSession:
 
         return {
             "ok": ok,
-            "stdout": stdout.getvalue(),
-            "stderr": stderr.getvalue(),
-            "result": value,
+            "stdout": _truncate(stdout.getvalue()),
+            "stderr": _truncate(stderr.getvalue()),
+            "result": _truncate(value),
             "images": self._collect_images(),
         }
+
+
+def _truncate(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n... [ix-mcp truncated {len(text) - limit} chars]"
 
 
 def _object_png(obj: object) -> dict[str, str] | None:
@@ -185,8 +198,18 @@ def _matplotlib_pngs() -> list[dict[str, str]]:
 
 
 def main() -> None:
+    # Detach the JSON-RPC channel from fd 0 before any session code runs. The
+    # Rust server talks to this worker over stdin/stdout, but a child process
+    # spawned from a session (subprocess.run([...])) inherits fd 0, so a
+    # path-less `rg`/`cat`/`grep` would read this RPC pipe and block the whole
+    # session forever. Read requests from a dup and point fd 0 at /dev/null so
+    # inherited stdin returns EOF immediately instead of stealing the pipe.
+    rpc_in = os.fdopen(os.dup(sys.stdin.fileno()), "r", encoding="utf-8")
+    with open(os.devnull, "rb") as devnull:
+        os.dup2(devnull.fileno(), sys.stdin.fileno())
+
     session = PythonSession()
-    for line in sys.stdin:
+    for line in rpc_in:
         response = handle_request(session, line)
         sys.stdout.write(json.dumps(response) + "\n")
         sys.stdout.flush()
