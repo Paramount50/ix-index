@@ -4081,6 +4081,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "semantic-search-py"
+version = "0.1.0"
+dependencies = [
+ "mixedbread",
+ "pyo3",
+ "pyo3-async-runtimes",
+ "semantic-search-core",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"

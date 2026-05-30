@@ -18,6 +18,7 @@ members = [
   "packages/repo-walker",
   "packages/semantic-search",
   "packages/semantic-search-core",
+  "packages/semantic-search-py",
   "packages/tap",
   "packages/tap/protocol",
   "packages/tap/pty",

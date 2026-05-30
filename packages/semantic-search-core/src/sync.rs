@@ -91,26 +91,27 @@ pub async fn sync(
     on_progress(0, upload_target);
     let done = AtomicUsize::new(0);
 
+    // Feed owned `FileEntry` clones into the upload stream rather than the
+    // `&FileEntry` references gathered above. A per-task future that borrows its
+    // entry makes the stream's closure return `fn(&'0 FileEntry) -> impl Future`,
+    // whose higher-ranked lifetime a `Send + 'static` consumer cannot unify
+    // (`implementation of FnOnce is not general enough`). The PyO3 bindings hit
+    // exactly this: they drive `index_and_search` through
+    // `pyo3_async_runtimes::future_into_py`, which requires the whole future to
+    // be `Send + 'static`. Owning the entry per task removes the borrow and the
+    // clone is one small struct per uploaded file, paid only for new content.
+    let to_upload: Vec<FileEntry> = to_upload.into_iter().cloned().collect();
     let results: Vec<Result<()>> = stream::iter(to_upload)
         .map(|entry| {
-            let on_progress = &on_progress;
-            let done = &done;
-            async move {
-                let abs = root.join(&entry.rel_path);
-                let content = tokio::fs::read(&abs)
-                    .await
-                    .context(ReadFileSnafu { path: abs })?;
-                let file_name = file_name_of(&entry.rel_path);
-                let meta = UploadMeta {
-                    path: entry.rel_path.clone(),
-                    hash: entry.hash.as_str().to_owned(),
-                };
-                store
-                    .upload(store_name, content, file_name, entry.hash.as_str(), meta)
-                    .await?;
-                on_progress(done.fetch_add(1, Ordering::Relaxed) + 1, upload_target);
-                Ok(())
-            }
+            upload_entry(
+                store,
+                store_name,
+                root,
+                entry,
+                upload_target,
+                &done,
+                &on_progress,
+            )
         })
         .buffer_unordered(UPLOAD_CONCURRENCY)
         .collect()
@@ -127,6 +128,35 @@ pub async fn sync(
         skipped,
         total,
     })
+}
+
+/// Read one file and upload it under its content hash, then report progress.
+/// Factored out of [`sync`] so the per-entry future has a named, concrete type
+/// (see the call site for why an inline closure breaks higher-ranked lifetime
+/// unification for `Send + 'static` consumers).
+async fn upload_entry(
+    store: &(impl Store + Sync),
+    store_name: &str,
+    root: &Path,
+    entry: FileEntry,
+    upload_target: usize,
+    done: &AtomicUsize,
+    on_progress: &(impl Fn(usize, usize) + Send + Sync),
+) -> Result<()> {
+    let abs = root.join(&entry.rel_path);
+    let content = tokio::fs::read(&abs)
+        .await
+        .context(ReadFileSnafu { path: abs })?;
+    let file_name = file_name_of(&entry.rel_path);
+    let meta = UploadMeta {
+        path: entry.rel_path.clone(),
+        hash: entry.hash.as_str().to_owned(),
+    };
+    store
+        .upload(store_name, content, file_name, entry.hash.as_str(), meta)
+        .await?;
+    on_progress(done.fetch_add(1, Ordering::Relaxed) + 1, upload_target);
+    Ok(())
 }
 
 /// Poll the store until newly uploaded files finish embedding.
