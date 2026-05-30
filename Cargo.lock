@@ -2657,7 +2657,6 @@ dependencies = [
  "serde",
  "serde_json",
  "snafu",
- "tokio",
 ]
 
 [[package]]
@@ -4092,6 +4091,7 @@ dependencies = [
  "anstyle",
  "anyhow",
  "clap",
+ "code-highlight",
  "dirs",
  "indicatif",
  "mixedbread",

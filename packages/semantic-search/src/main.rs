@@ -111,7 +111,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     };
 
     // Progress UI, terminal only: an upload bar that flips to an embedding
-    // spinner on the first poll. Piped output stays clean (no bar).
+    // bar on the first poll. Piped output stays clean (no bar).
     let bar = std::io::stderr()
         .is_terminal()
         .then(ProgressBar::new_spinner);
@@ -133,15 +133,18 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let on_poll = |status: StoreStatus| {
         if let Some(bar) = &bar {
             let len = embed_total.load(Ordering::Relaxed);
+            // store_status is store-wide, so the pending count can exceed our
+            // batch; clamp to len so the bar never reads past full. Set the
+            // position before any style flip so the first embedding draw shows
+            // the real position, not the carried-over full upload position
+            // (which would flash as "len/len" for one frame).
+            let remaining = (status.pending + status.in_progress).min(len);
+            bar.set_position(len - remaining);
             if !embedding.swap(true, Ordering::Relaxed) {
                 bar.set_style(embed_style());
                 bar.set_length(len);
                 bar.enable_steady_tick(Duration::from_millis(120));
             }
-            // store_status is store-wide, so the pending count can exceed our
-            // batch; clamp to len so the bar never reads past full.
-            let remaining = (status.pending + status.in_progress).min(len);
-            bar.set_position(len - remaining);
         }
     };
 
@@ -156,7 +159,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         if !view.sources.is_empty() {
             println!();
             for (index, hit) in view.sources.iter().enumerate() {
-                println!("{index}: {}", render(hit, cli.content, &palette));
+                println!("{index}: {}", render(hit, cli.content, &palette, &root));
             }
         }
     } else {
@@ -167,7 +170,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             bar.finish_and_clear();
         }
         for hit in &hits {
-            println!("{}", render(hit, cli.content, &palette));
+            println!("{}", render(hit, cli.content, &palette, &root));
         }
     }
 
@@ -222,6 +225,8 @@ struct Palette {
     score: Style,
     /// The left line-number gutter under `-c` content.
     gutter: Style,
+    /// Whether ANSI color is enabled; forwarded to the syntax highlighter.
+    color: bool,
 }
 
 impl Palette {
@@ -245,6 +250,7 @@ impl Palette {
             range: none,
             score: none,
             gutter: none,
+            color: false,
         }
     }
 
@@ -255,6 +261,7 @@ impl Palette {
             range: Style::new().dimmed(),
             score: Style::new().fg_color(Some(AnsiColor::Green.into())),
             gutter: Style::new().dimmed(),
+            color: true,
         }
     }
 
@@ -276,7 +283,7 @@ fn paint(style: Style, text: &str) -> String {
     format!("{}{text}{}", style.render(), style.render_reset())
 }
 
-fn render(hit: &DisplayHit, show_content: bool, palette: &Palette) -> String {
+fn render(hit: &DisplayHit, show_content: bool, palette: &Palette, root: &Path) -> String {
     let prefix = if hit.is_web { "" } else { "./" };
     let path = paint(palette.path, &format!("{prefix}{}", hit.label));
 
@@ -296,7 +303,10 @@ fn render(hit: &DisplayHit, show_content: bool, palette: &Palette) -> String {
     );
     let head = format!("{path}{location} {score}");
 
-    match show_content.then(|| render_snippet(hit, palette)).flatten() {
+    match show_content
+        .then(|| render_snippet(hit, palette, root))
+        .flatten()
+    {
         Some(body) => format!("{head}\n{body}"),
         None => head,
     }
@@ -308,7 +318,7 @@ fn render(hit: &DisplayHit, show_content: bool, palette: &Palette) -> String {
 /// right-aligned, dim gutter (ripgrep/mgrep feel); otherwise the text prints
 /// as-is (web hits). Trailing whitespace is trimmed and an empty snippet
 /// returns `None`, so nothing is printed.
-fn render_snippet(hit: &DisplayHit, palette: &Palette) -> Option<String> {
+fn render_snippet(hit: &DisplayHit, palette: &Palette, root: &Path) -> Option<String> {
     let body = hit.text.trim_end();
     if body.is_empty() {
         return None;
@@ -317,6 +327,27 @@ fn render_snippet(hit: &DisplayHit, palette: &Palette) -> Option<String> {
     let Some(start) = hit.start_line else {
         return Some(body.to_owned());
     };
+
+    // Prefer syntax-highlighting the real file lines: tree-sitter gets full
+    // parse context and code-highlight renders its own line-number gutter. Falls
+    // through to a plain gutter over the chunk text if the file is unreadable
+    // (e.g. a web hit or a file changed since indexing).
+    if !hit.is_web
+        && let Some(num) = hit.num_lines
+        && let Ok(source) = std::fs::read_to_string(root.join(&hit.label))
+    {
+        let snippet = code_highlight::highlight_lines(
+            &hit.label,
+            &source,
+            usize::try_from(start).unwrap_or(0) + 1,
+            usize::try_from(num).unwrap_or(0),
+            palette.color,
+        );
+        let snippet = snippet.trim_end();
+        if !snippet.is_empty() {
+            return Some(snippet.to_owned());
+        }
+    }
 
     let first = u64::from(start) + 1;
     let lines: Vec<&str> = body.lines().collect();

@@ -17,6 +17,7 @@ anstream.workspace = true
 anstyle.workspace = true
 anyhow.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
+code-highlight.workspace = true
 dirs.workspace = true
 indicatif.workspace = true
 mixedbread.workspace = true
