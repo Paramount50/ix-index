@@ -2,6 +2,7 @@
 members = [
   "modules/services/resource-monitor/stats-writer",
   "packages/agents-md",
+  "packages/code-highlight",
   "packages/code-tokenizer",
   "packages/dag-runner",
   "packages/file-search",
@@ -60,6 +61,7 @@ base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", default-features = false }
 clap = "4"
+code-highlight = { path = "packages/code-highlight" }
 code-tokenizer = { path = "packages/code-tokenizer" }
 color-eyre = "0.6"
 dirs = "5"
@@ -119,6 +121,34 @@ tokio-stream = "0.1"
 toml = { version = "1.1.2", default-features = false }
 tower = "0.5"
 tower-http = "0.6"
+tree-sitter = "0.26"
+tree-sitter-bash = "0.25"
+tree-sitter-c = "0.24"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-css = "0.25"
+tree-sitter-elixir = "0.3"
+tree-sitter-go = "0.25"
+tree-sitter-haskell = "0.23"
+tree-sitter-highlight = "0.26"
+tree-sitter-html = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-json = "0.24"
+tree-sitter-lua = "0.5"
+tree-sitter-md = "0.5"
+tree-sitter-nix = "0.3"
+tree-sitter-ocaml = "0.25"
+tree-sitter-php = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-ruby = "0.23"
+tree-sitter-rust = "0.24"
+tree-sitter-scala = "0.26"
+tree-sitter-sequel = "0.3"
+tree-sitter-swift = "0.7"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-typescript = "0.23"
+tree-sitter-yaml = "0.7"
 tui = { path = "packages/tui" }
 tui-dashboard-core = { path = "packages/tui-dashboard-core" }
 url = { version = "2.5.8", default-features = false }
