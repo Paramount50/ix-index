@@ -15,50 +15,38 @@
 
 # Index
 
-`index` is the open-source layer [ix](https://ix.dev) publishes on top of its
-closed-source VM primitives: ready-to-run OCI images, reusable NixOS service
-modules, agent and developer tooling, and the Nix library that builds them all.
+`index` is a shared, open-source monorepo of developer tools that anyone can
+modify. The bet: one repo everyone can edit is the fastest way for all of us to
+move. Add something useful, and everyone gets it.
 
-Every image targets x86_64 Linux and ships as an OCI archive. The same outputs
-are a library, so you can build your own images, import the helpers, or drive
-the bundled agent tools from a Python MCP server.
+A few things already here:
+
+- **Semantic code search** ([`semantic-search`](packages/semantic-search/)) that
+  finds code by meaning, not just exact strings.
+- A [PTY driver](packages/tui/) that lets code **drive any interactive terminal
+  program** (gdb, vim, REPLs) like a human typing into it.
+- **Agent loops** and a Python [`mcp`](packages/mcp/) server that hands these
+  primitives to an LLM, no install step.
+- Ready-to-run [OCI images](images/) and reusable [NixOS modules](modules/), the
+  layer [ix](https://ix.dev) publishes on top of its closed-source VM primitives.
+
+Easiest start: point Claude at this repo and ask if anything is useful for you.
 
 ## Quick Check
 
 ```sh
-nix build .#minecraft   # realize one image closure
-nix run .#lint          # nixfmt, statix, deadnix, ast-grep
 nix flake show          # list every package, module, and check
+nix run .#lint          # nixfmt, statix, deadnix, ast-grep
+nix build .#minecraft   # realize one image closure
 ```
 
-The first image build may be slow while Nix realizes the image closure. Later
-rebuilds reuse cached store paths from the local Nix store and configured
-substituters.
+## Layout
 
-## What Is Here
-
-- [`images/`](images/) holds runnable NixOS systems packaged as OCI archives:
-  Minecraft servers, development environments, and a remote desktop.
-- [`modules/`](modules/) holds opt-in NixOS service modules, auto-discovered so
-  a new directory needs no registry edit.
-- [`packages/`](packages/) holds repo-owned tools, including the
-  [`mcp`](packages/mcp/) Python agent server, the [`tui`](packages/tui/) PTY
-  driver, [`semantic-search`](packages/semantic-search/), and
-  [`llm-clippy`](packages/llm-clippy/).
-- [`lib/`](lib/) holds the shared helper and builder API used by the repo and by
-  consumers.
-- [`examples/`](examples/) holds standalone consumer fleets, including a daily
-  Python scraper.
-- [`site/`](site/) holds the public update log that tracks operator-facing
-  changes.
-
-## Agent Tooling
-
-The [`mcp`](packages/mcp/) package is a Python MCP server on a pinned
-interpreter. Sessions `import tui` to spawn and drive PTY-backed processes with
-full vt100 emulation, and `import semantic_search` for content-addressed code
-search, with no install step. It is how an agent reaches the same primitives
-this repo ships.
+- [`packages/`](packages/) repo-owned tools (search, PTY driver, agent loops, MCP server).
+- [`images/`](images/) runnable NixOS systems packaged as OCI archives.
+- [`modules/`](modules/) opt-in NixOS service modules, auto-discovered.
+- [`lib/`](lib/) shared helper and builder API.
+- [`examples/`](examples/) standalone consumer fleets.
 
 ## Bad Fit If
 
