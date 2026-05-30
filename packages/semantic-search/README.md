@@ -9,6 +9,11 @@ It is two crates: [`mixedbread`](../mixedbread) is a standalone async API client
 with no domain logic; this crate owns the indexing, manifest, and search logic
 and consumes that client behind a [`Store`] trait.
 
+The indexing and search engine lives in [`semantic-search-core`](../semantic-search-core);
+this crate is the CLI over it, and [`semantic-search-py`](../semantic-search-py)
+is the PyO3 binding (`import semantic_search`, also bundled into the `ix-mcp`
+interpreter).
+
 ## Why it exists
 
 `mgrep` keys each file by its absolute path and, on sync, deletes anything under
