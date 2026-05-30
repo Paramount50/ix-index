@@ -128,6 +128,29 @@ impl McpServer {
             session.request("reset", json!({}))
         })
     }
+
+    #[tool(
+        description = "Semantic code search over a checkout via the bundled `semantic_search` module. Indexes new/changed files (content-addressed, deduplicated across worktrees), then returns matching chunks scoped to the checkout as JSON. Needs a Mixedbread credential (MXBAI_API_KEY or a prior `mgrep login`)."
+    )]
+    fn semantic_search(&self, Parameters(request): Parameters<SemanticSearchRequest>) -> String {
+        self.with_sessions(|sessions| {
+            let session = sessions.get_or_create(request.session_id.as_deref())?;
+            // Run the search inside the session's persistent event loop via the
+            // bundled module: import it, await `search`, then emit JSON. Both
+            // arguments are interpolated as JSON literals, which are valid Python
+            // literals too, so a query or path containing quotes or newlines
+            // cannot break out of the expression.
+            let source = format!(
+                "import json, semantic_search\n\
+                 _ix_hits = await semantic_search.search({query}, {path}, top_k={top_k})\n\
+                 print(json.dumps(_ix_hits))\n",
+                query = json!(request.query),
+                path = json!(request.path.as_deref().unwrap_or(".")),
+                top_k = request.top_k.unwrap_or(10),
+            );
+            session.request("exec", json!({ "source": source }))
+        })
+    }
 }
 
 impl McpServer {
@@ -169,6 +192,19 @@ struct EvalRequest {
 #[serde(deny_unknown_fields)]
 struct ExecRequest {
     source: String,
+    session_id: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SemanticSearchRequest {
+    /// Natural-language query to search the checkout for.
+    query: String,
+    /// Checkout directory to index and scope results to. Defaults to the
+    /// session's working directory.
+    path: Option<String>,
+    /// Maximum number of results to return (default 10).
+    top_k: Option<usize>,
     session_id: Option<String>,
 }
 
@@ -387,8 +423,9 @@ fn session_temp_dir(id: &str) -> Result<TempDir> {
 /// `PATH`. The venv gives each session a writable site-packages with no
 /// per-call interpreter choice.
 fn create_venv(temp_dir: &Path) -> Result<PathBuf> {
-    let python = std::env::var("IX_MCP_PYTHON")
-        .context("IX_MCP_PYTHON is unset; run ix-mcp via its Nix wrapper, which pins the interpreter")?;
+    let python = std::env::var("IX_MCP_PYTHON").context(
+        "IX_MCP_PYTHON is unset; run ix-mcp via its Nix wrapper, which pins the interpreter",
+    )?;
     let venv_dir = temp_dir.join(".venv");
     // `--system-site-packages` exposes the pinned interpreter's bundled
     // packages (notably `tui`) to the session while keeping the venv writable,
@@ -490,7 +527,10 @@ async fn main() -> Result<ExitCode> {
                 .envs(venv_env(&venv_dir)?)
                 .status()
                 .with_context(|| {
-                    format!("failed to start Python REPL command {}", venv_python.display())
+                    format!(
+                        "failed to start Python REPL command {}",
+                        venv_python.display()
+                    )
                 })?;
             let code = status
                 .code()

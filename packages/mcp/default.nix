@@ -53,13 +53,57 @@ let
       ''
   );
 
+  # The semantic-search package, baked into the pinned interpreter so every
+  # session can `import semantic_search` and `await semantic_search.search(...)`
+  # with no setup. Same shape as `tuiModule`: the PyO3 cdylib comes from the
+  # shared workspace graph (not the Linux-only wheel), so this also works on
+  # macOS dev.
+  semanticSearchPythonSource = builtins.path {
+    name = "semantic-search-py-python-source";
+    path = ../semantic-search-py/python;
+  };
+  semanticSearchModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-semantic-search-python-module"
+      {
+        strictDeps = true;
+        meta.description = "ix-semantic-search PyO3 module bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/semantic_search"
+        mkdir -p "$site"
+        cp -r ${semanticSearchPythonSource}/semantic_search/. "$site/"
+
+        cdylib=""
+        for candidate in \
+          ${ix.rustWorkspace.units.libraries.semantic_search_py}/lib/libsemantic_search_py.so \
+          ${ix.rustWorkspace.units.libraries.semantic_search_py}/lib/libsemantic_search_py-*.so \
+          ${ix.rustWorkspace.units.libraries.semantic_search_py}/lib/libsemantic_search_py.dylib \
+          ${ix.rustWorkspace.units.libraries.semantic_search_py}/lib/libsemantic_search_py-*.dylib
+        do
+          if [ -f "$candidate" ]; then
+            cdylib="$candidate"
+            break
+          fi
+        done
+        if [ -z "$cdylib" ]; then
+          echo "ix-semantic-search module: no cdylib under ${ix.rustWorkspace.units.libraries.semantic_search_py}/lib" >&2
+          ls -la ${ix.rustWorkspace.units.libraries.semantic_search_py}/lib >&2 || true
+          exit 1
+        fi
+        install -m555 "$cdylib" "$site/_semantic_search.abi3.so"
+      ''
+  );
+
   # The interpreter the wrapper pins. Sessions build their venv from this with
-  # `--system-site-packages`, so `tui` and numpy are importable by default while
-  # an in-session `pip install` still writes to the per-session venv.
+  # `--system-site-packages`, so `tui`, `semantic_search`, numpy, and polars are
+  # importable by default while an in-session `pip install` still writes to the
+  # per-session venv.
   mcpPython = pkgs.python3.withPackages (ps: [
     ps.asyncssh
     ps.numpy
+    ps.polars
     tuiModule
+    semanticSearchModule
   ]);
 
   package =
@@ -142,6 +186,30 @@ let
 
         mkdir -p "$out"
       '';
+  semanticSearchBundled =
+    pkgs.runCommand "ix-mcp-semantic-search-bundled"
+      {
+        nativeBuildInputs = [ package ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+
+        # `semantic_search` ships in the pinned interpreter, so a bare session
+        # imports it with no install step. Importing loads the PyO3 cdylib, which
+        # exercises the link (the macOS dynamic_lookup path in particular).
+        # Running a real search needs network and a credential the build sandbox
+        # lacks, so leave that to runtime.
+        ix-mcp exec 'import semantic_search; print("semantic-search-ok", semantic_search.__version__)' >stdout 2>stderr
+        if ! grep -q '^semantic-search-ok ' stdout; then
+          echo "semantic_search was not importable in a default session:" >&2
+          cat stdout stderr >&2
+          exit 1
+        fi
+
+        mkdir -p "$out"
+      '';
 in
 package.overrideAttrs (old: {
   passthru =
@@ -150,7 +218,12 @@ package.overrideAttrs (old: {
     // {
       inherit unwrapped;
       tests = (unwrapped.passthru.tests or { }) // {
-        inherit replDefault sessionVenv tuiBundled;
+        inherit
+          replDefault
+          sessionVenv
+          tuiBundled
+          semanticSearchBundled
+          ;
       };
     };
 })
