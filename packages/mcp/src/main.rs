@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 use rmcp::{
     ServerHandler, ServiceExt,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
-    model::{ServerCapabilities, ServerInfo},
+    model::{CallToolResult, Content, ServerCapabilities, ServerInfo},
     tool, tool_handler, tool_router,
     transport::stdio,
 };
@@ -104,20 +104,20 @@ impl McpServer {
     #[tool(
         description = "Evaluate a Python expression in a persistent session. Top-level await works (e.g. `await client.get(url)`); the session keeps one event loop, so async clients and pools created in one call stay usable in later calls."
     )]
-    fn python_eval(&self, Parameters(request): Parameters<EvalRequest>) -> String {
-        self.with_sessions(|sessions| {
+    fn python_eval(&self, Parameters(request): Parameters<EvalRequest>) -> CallToolResult {
+        self.with_sessions_content(|sessions| {
             let session = sessions.get_or_create(request.session_id.as_deref())?;
-            session.request("eval", json!({ "expression": request.expression }))
+            session.request_raw("eval", json!({ "expression": request.expression }))
         })
     }
 
     #[tool(
         description = "Execute Python statements in a persistent session. Top-level await works (e.g. `await pool.fetch(sql)`); the session keeps one event loop, so async resources created in one call stay usable in later calls."
     )]
-    fn python_exec(&self, Parameters(request): Parameters<ExecRequest>) -> String {
-        self.with_sessions(|sessions| {
+    fn python_exec(&self, Parameters(request): Parameters<ExecRequest>) -> CallToolResult {
+        self.with_sessions_content(|sessions| {
             let session = sessions.get_or_create(request.session_id.as_deref())?;
-            session.request("exec", json!({ "source": request.source }))
+            session.request_raw("exec", json!({ "source": request.source }))
         })
     }
 
@@ -158,6 +158,26 @@ impl McpServer {
         match self.sessions.lock() {
             Ok(mut sessions) => format_result(f(&mut sessions)),
             Err(error) => format!("stderr:\nPython session registry lock failed: {error}"),
+        }
+    }
+
+    /// Like [`with_sessions`](Self::with_sessions) but returns rich content: the
+    /// formatted text plus an image block per captured figure, so a `plt.plot`,
+    /// PIL image, or `display()`ed object comes back as an actual image.
+    fn with_sessions_content(
+        &self,
+        f: impl FnOnce(&mut SessionManager) -> Result<Value>,
+    ) -> CallToolResult {
+        match self.sessions.lock() {
+            Ok(mut sessions) => match f(&mut sessions) {
+                Ok(response) => worker_response_content(&response),
+                Err(error) => {
+                    CallToolResult::success(vec![Content::text(format!("stderr:\n{error:#}"))])
+                }
+            },
+            Err(error) => CallToolResult::success(vec![Content::text(format!(
+                "stderr:\nPython session registry lock failed: {error}"
+            ))]),
         }
     }
 }
@@ -351,7 +371,7 @@ impl PythonSession {
         Ok(session)
     }
 
-    fn request(&mut self, op: &str, mut payload: Value) -> Result<String> {
+    fn request_raw(&mut self, op: &str, mut payload: Value) -> Result<Value> {
         let request_id = self.next_request_id;
         self.next_request_id += 1;
         let request = payload
@@ -384,7 +404,11 @@ impl PythonSession {
                 self.id
             );
         }
-        Ok(format_worker_response(&response))
+        Ok(response)
+    }
+
+    fn request(&mut self, op: &str, payload: Value) -> Result<String> {
+        Ok(format_worker_response(&self.request_raw(op, payload)?))
     }
 
     fn close(&mut self) {
@@ -461,6 +485,29 @@ fn venv_env(venv_dir: &Path) -> Result<Vec<(OsString, OsString)>> {
         ("VIRTUAL_ENV".into(), venv_dir.as_os_str().to_owned()),
         ("PATH".into(), path),
     ])
+}
+
+/// Cap on image blocks per response, so a cell that opens dozens of figures
+/// cannot balloon a single tool result. The worker also caps; this is a
+/// defense-in-depth ceiling on the rendering side.
+const MAX_IMAGES: usize = 8;
+
+/// Build tool content from a worker response: the formatted text first, then an
+/// image block for each captured rich image (`{ "mime", "base64" }` entries in
+/// the worker's `images` field).
+fn worker_response_content(response: &Value) -> CallToolResult {
+    let mut content = vec![Content::text(format_worker_response(response))];
+    if let Some(images) = response.get("images").and_then(Value::as_array) {
+        for image in images.iter().take(MAX_IMAGES) {
+            if let (Some(mime), Some(data)) = (
+                image.get("mime").and_then(Value::as_str),
+                image.get("base64").and_then(Value::as_str),
+            ) {
+                content.push(Content::image(data.to_owned(), mime.to_owned()));
+            }
+        }
+    }
+    CallToolResult::success(content)
 }
 
 fn format_worker_response(response: &Value) -> String {

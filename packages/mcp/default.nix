@@ -102,6 +102,10 @@ let
     ps.asyncssh
     ps.numpy
     ps.polars
+    # matplotlib (and Pillow, pulled in transitively) so plots and images are
+    # capturable out of the box: the worker renders any open figure / object
+    # with a `_repr_png_` back as an MCP image block.
+    ps.matplotlib
     tuiModule
     semanticSearchModule
   ]);

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import base64
 import contextlib
 import io
 import json
@@ -9,6 +10,10 @@ import sys
 import traceback
 from collections.abc import Callable
 from typing import Any
+
+# Cap on images returned per call, so a cell that opens many figures cannot
+# balloon one response. The Rust side enforces the same ceiling.
+MAX_IMAGES = 8
 
 # Compile every snippet with this flag so `await` is legal at the top level.
 # Without it, `await x` outside a function raises SyntaxError. CPython's own
@@ -20,7 +25,12 @@ _AWAIT_FLAG = ast.PyCF_ALLOW_TOP_LEVEL_AWAIT
 
 class PythonSession:
     def __init__(self) -> None:
-        self.globals: dict[str, object] = {"__name__": "__ix_mcp__"}
+        self.globals: dict[str, object] = {}
+        # Objects to render as images this call: anything passed to the injected
+        # `display()`, plus the eval result. Reset at the start of each capture.
+        self._displayed: list[object] = []
+        self._last_result: object = None
+        self._reset_globals()
         # One persistent loop for the whole session. asyncio.run() would create
         # and close a fresh loop per call, orphaning any async resource (client,
         # connection pool, socket) bound to it; keeping one loop lets those
@@ -28,10 +38,30 @@ class PythonSession:
         self.loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self.loop)
 
+    def _reset_globals(self) -> None:
+        self.globals.clear()
+        self.globals["__name__"] = "__ix_mcp__"
+        # A Jupyter-style `display()` so explicit `display(obj)` (and several
+        # per cell) are captured as images, not just the cell's final value.
+        self.globals["display"] = self._display
+
+    def _display(self, *objects: object, **_kwargs: object) -> None:
+        self._displayed.extend(objects)
+
+    def _collect_images(self) -> list[dict[str, str]]:
+        candidates = list(self._displayed)
+        if self._last_result is not None:
+            candidates.append(self._last_result)
+        images = [image for obj in candidates if (image := _object_png(obj)) is not None]
+        images.extend(_matplotlib_pngs())
+        return images[:MAX_IMAGES]
+
     def evaluate(self, expression: str) -> dict[str, object]:
         def run() -> str:
             code = compile(expression, "<ix-mcp eval>", "eval", flags=_AWAIT_FLAG)
-            return repr(self._drive(eval(code, self.globals)))
+            result = self._drive(eval(code, self.globals))
+            self._last_result = result
+            return repr(result)
 
         return self.capture(run)
 
@@ -54,8 +84,7 @@ class PythonSession:
         return value
 
     def reset(self) -> dict[str, object]:
-        self.globals.clear()
-        self.globals["__name__"] = "__ix_mcp__"
+        self._reset_globals()
         # Keep the loop. Clearing globals already drops the caller's async
         # resources, and recreating the loop would invalidate any reference the
         # caller stored elsewhere.
@@ -69,6 +98,8 @@ class PythonSession:
         stdout = io.StringIO()
         stderr = io.StringIO()
         ok = True
+        self._displayed = []
+        self._last_result = None
 
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             try:
@@ -83,7 +114,74 @@ class PythonSession:
             "stdout": stdout.getvalue(),
             "stderr": stderr.getvalue(),
             "result": value,
+            "images": self._collect_images(),
         }
+
+
+def _object_png(obj: object) -> dict[str, str] | None:
+    """Extract a PNG/JPEG for `obj` via the Jupyter rich-display protocol.
+
+    Tries `_repr_mimebundle_()` first, then the per-format `_repr_png_` /
+    `_repr_jpeg_` hooks. Covers `PIL.Image`, `IPython.display.Image`, matplotlib
+    figures, and anything else implementing those methods.
+    """
+    bundle = _mime_bundle(obj)
+    if bundle is not None:
+        for mime in ("image/png", "image/jpeg"):
+            data = bundle.get(mime)
+            if data:
+                return _as_b64(mime, data)
+    for mime, method in (("image/png", "_repr_png_"), ("image/jpeg", "_repr_jpeg_")):
+        hook = getattr(obj, method, None)
+        if callable(hook):
+            try:
+                data = hook()
+            except Exception:
+                continue
+            if data:
+                return _as_b64(mime, data)
+    return None
+
+
+def _mime_bundle(obj: object) -> dict[str, object] | None:
+    hook = getattr(obj, "_repr_mimebundle_", None)
+    if not callable(hook):
+        return None
+    try:
+        data = hook()
+    except Exception:
+        return None
+    if isinstance(data, tuple):  # (bundle, metadata)
+        data = data[0]
+    return data if isinstance(data, dict) else None
+
+
+def _as_b64(mime: str, data: object) -> dict[str, str]:
+    # `_repr_png_` returns raw bytes; a MIME bundle stores image/png as a
+    # base64 string already (the Jupyter convention), so pass strings through.
+    encoded = data if isinstance(data, str) else base64.b64encode(bytes(data)).decode("ascii")
+    return {"mime": mime, "base64": encoded}
+
+
+def _matplotlib_pngs() -> list[dict[str, str]]:
+    """Capture any open matplotlib figures as PNGs, so a bare `plt.plot(...)`
+    returns an image without an explicit `display()`. Figures are closed after
+    capture so they are not re-emitted on the next call."""
+    plt = sys.modules.get("matplotlib.pyplot")
+    if plt is None:
+        return []
+    images: list[dict[str, str]] = []
+    try:
+        for num in plt.get_fignums():
+            buffer = io.BytesIO()
+            plt.figure(num).savefig(buffer, format="png", bbox_inches="tight")
+            images.append(
+                {"mime": "image/png", "base64": base64.b64encode(buffer.getvalue()).decode("ascii")}
+            )
+        plt.close("all")
+    except Exception:
+        return images
+    return images
 
 
 def main() -> None:
