@@ -48,11 +48,6 @@ nix build .#minecraft   # realize one image closure
 - [`lib/`](lib/) shared helper and builder API.
 - [`examples/`](examples/) standalone consumer fleets.
 
-## Bad Fit If
-
-You need aarch64 images, FreeBSD, or a sealed appliance with almost no operator
-tooling. This repo is tuned for ix VM workflows on x86_64 Linux.
-
 ## Feedback
 
 Bug reports and enhancement requests go to [GitHub Issues](https://github.com/indexable-inc/index/issues). Security reports follow [SECURITY.md](SECURITY.md). Code changes land through pull requests against the `main` branch; see [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, coding standards, and commit conventions.
