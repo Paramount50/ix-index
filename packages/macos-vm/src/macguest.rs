@@ -197,7 +197,7 @@ pub(crate) fn schedule_captures(
                 // only touch it on the main queue.
                 let view: &VZVirtualMachineView =
                     unsafe { &*(view_ptr as *const VZVirtualMachineView) };
-                match capture(view, &p) {
+                match capture(view, &p, None) {
                     Ok(bytes) => eprintln!("macos-vm: wrote {bytes} bytes -> {}", p.display()),
                     Err(error) => eprintln!("macos-vm: capture: {error}"),
                 }
@@ -216,8 +216,67 @@ fn frame_contents(view: &VZVirtualMachineView) -> Option<Retained<AnyObject>> {
     unsafe { layer.contents() }
 }
 
-/// Read the framebuffer `IOSurface` (BGRA) and encode a PNG.
-pub fn capture(view: &VZVirtualMachineView, path: &Path) -> Result<usize, Error> {
+/// The captured framebuffer size in pixels (`(width, height)`), or `None` until
+/// the guest has rendered an `IOSurface`. The authoritative size for mapping
+/// display fractions to pixels (the configured display size and the actual
+/// scanout can differ once the guest picks a resolution).
+pub fn frame_size(view: &VZVirtualMachineView) -> Option<(usize, usize)> {
+    let contents = frame_contents(view)?;
+    let surface_obj: Retained<IOSurface> = contents.downcast::<IOSurface>().ok()?;
+    let surface: &IOSurfaceRef =
+        unsafe { &*Retained::as_ptr(&surface_obj).cast::<IOSurfaceRef>() };
+    Some((surface.width(), surface.height()))
+}
+
+/// Set one opaque RGBA pixel at `(x, y)` if it is in bounds. The casts are sound:
+/// `x`/`y` are compared against `width`/`height` before any cast, so the `usize`
+/// conversion only runs on non-negative, in-range values.
+#[allow(clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+fn put_pixel(rgba: &mut [u8], width: usize, height: usize, x: isize, y: isize, rgb: [u8; 3]) {
+    if x < 0 || y < 0 || x >= width as isize || y >= height as isize {
+        return;
+    }
+    let o = (y as usize * width + x as usize) * 4;
+    rgba[o..o + 4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+}
+
+/// Draw a high-contrast pointer marker (a red cross with a white halo) into the
+/// RGBA buffer at display fraction `(fx, fy)`, top-left origin. The synthetic
+/// pointing device's cursor is not always part of the captured scanout, so this
+/// shows a caller exactly where the driver's pointer is. Fully bounds-checked.
+/// The fraction-to-pixel casts are intentional rasterization rounding; `fx`/`fy`
+/// are display fractions the driver clamps to `0..=1`, so the result is in range.
+#[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
+fn draw_cursor_marker(rgba: &mut [u8], width: usize, height: usize, fx: f64, fy: f64) {
+    const ARM: isize = 10;
+    const RED: [u8; 3] = [255, 40, 40];
+    const WHITE: [u8; 3] = [255, 255, 255];
+    if width == 0 || height == 0 {
+        return;
+    }
+    let cx = (fx * width as f64).round() as isize;
+    let cy = (fy * height as f64).round() as isize;
+    // White halo first (the cross one pixel thick on each side), so the red cross
+    // stays visible over any background colour.
+    for d in -ARM..=ARM {
+        for off in [-1_isize, 1] {
+            put_pixel(rgba, width, height, cx + d, cy + off, WHITE);
+            put_pixel(rgba, width, height, cx + off, cy + d, WHITE);
+        }
+    }
+    for d in -ARM..=ARM {
+        put_pixel(rgba, width, height, cx + d, cy, RED);
+        put_pixel(rgba, width, height, cx, cy + d, RED);
+    }
+}
+
+/// Read the framebuffer `IOSurface` (BGRA) and encode a PNG. With `cursor` set
+/// (display fractions, top-left), a pointer marker is drawn into the PNG.
+pub fn capture(
+    view: &VZVirtualMachineView,
+    path: &Path,
+    cursor: Option<(f64, f64)>,
+) -> Result<usize, Error> {
     let contents = frame_contents(view).ok_or(Error::NoFramebuffer)?;
     // Verify the layer contents really is an IOSurface before any unsafe access.
     let surface_obj: Retained<IOSurface> = contents
@@ -264,6 +323,10 @@ pub fn capture(view: &VZVirtualMachineView, path: &Path) -> Result<usize, Error>
             }
         }
         let _ = surface.unlock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut());
+    }
+
+    if let Some((fx, fy)) = cursor {
+        draw_cursor_marker(&mut rgba, width, height, fx, fy);
     }
 
     let w = u32::try_from(width).map_err(|_| Error::CaptureEncode {
