@@ -15,8 +15,9 @@ use anstyle::{AnsiColor, Style};
 use clap::{Args, Parser, Subcommand};
 use indicatif::ProgressBar;
 use search_core::{
-    Config, DEFAULT_STORE, DisplayHit, GrepOptions, GrepTargets, MixedbreadStore, Query,
-    SearchOptions, StoreStatus,
+    CodeScope, Config, DEFAULT_STORE, DisplayHit, Filter, FilterSpec, GrepOptions, GrepTargets,
+    MixedbreadStore, Query, SearchOptions, Source, SourceAdapter, StoreStatus, build_filter,
+    repo_slug,
 };
 
 /// How long to wait for freshly uploaded files to finish embedding.
@@ -46,6 +47,93 @@ struct Cli {
 enum Command {
     /// Grep the indexed chunks with a regular expression.
     Grep(GrepArgs),
+    /// Ingest a non-code source (slack, linear) from an export directory.
+    Ingest(IngestArgs),
+    /// Garbage-collect a non-code source: delete store records absent from the
+    /// export (a full-snapshot reconcile, never a window slice).
+    Gc(IngestArgs),
+}
+
+/// Arguments for `ingest` and `gc`. Code is indexed by an ordinary `search`, so
+/// these cover the record sources only.
+#[derive(Debug, Args)]
+struct IngestArgs {
+    /// Which source to ingest: slack or linear.
+    source: String,
+
+    /// Path to the export directory.
+    dir: String,
+
+    /// Store name (one store holds every source's content).
+    #[arg(long, env = "MXBAI_STORE")]
+    store: Option<String>,
+
+    /// Mixedbread API base URL.
+    #[arg(long = "base-url", env = "MXBAI_BASE_URL")]
+    base_url: Option<String>,
+}
+
+/// Scope selectors shared by the semantic and grep paths. With no selector the
+/// default is all sources, with code scoped to the current worktree.
+#[derive(Debug, Args)]
+struct ScopeArgs {
+    /// Restrict to these sources (repeatable): code, slack, linear, web.
+    #[arg(long = "source", value_name = "SOURCE")]
+    sources: Vec<String>,
+
+    /// Exclude these sources (repeatable).
+    #[arg(long = "not-source", value_name = "SOURCE")]
+    not_sources: Vec<String>,
+
+    /// Restrict code to a repository slug (e.g. indexable-inc/index).
+    #[arg(long)]
+    repo: Option<String>,
+
+    /// Search code across all repositories, not just this checkout.
+    #[arg(long = "all-repos")]
+    all_repos: bool,
+
+    /// Search this repository across all worktrees, not just files checked out
+    /// here.
+    #[arg(long = "all-worktrees")]
+    all_worktrees: bool,
+}
+
+/// Resolve scope selectors into a server-side metadata filter and the code
+/// scoping mode.
+fn resolve_scope(scope: &ScopeArgs, root: &Path) -> anyhow::Result<(Option<Filter>, CodeScope)> {
+    let sources = parse_sources(&scope.sources)?;
+    let exclude_sources = parse_sources(&scope.not_sources)?;
+
+    // A repo / all-repos / all-worktrees query is server-filtered: the manifest
+    // can only answer "files checked out here", so anything coarser must trust
+    // the metadata filter instead.
+    let (repo, code_scope) = if scope.all_repos {
+        (None, CodeScope::ServerFiltered)
+    } else if let Some(repo) = scope.repo.clone() {
+        (Some(repo), CodeScope::ServerFiltered)
+    } else if scope.all_worktrees {
+        (Some(repo_slug(root).as_str().to_owned()), CodeScope::ServerFiltered)
+    } else {
+        (None, CodeScope::WorktreeExact)
+    };
+
+    let spec = FilterSpec {
+        sources,
+        exclude_sources,
+        repo,
+    };
+    Ok((build_filter(&spec), code_scope))
+}
+
+fn parse_sources(values: &[String]) -> anyhow::Result<Vec<Source>> {
+    values
+        .iter()
+        // A source may arrive comma-joined (`--source code,slack`) or repeated.
+        .flat_map(|value| value.split(','))
+        .filter(|value| !value.is_empty())
+        .map(|value| value.parse::<Source>().map_err(anyhow::Error::from))
+        .collect()
 }
 
 /// Arguments for the default search path. Flags mirror `mgrep search`
@@ -55,8 +143,9 @@ enum Command {
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Args)]
 struct SemanticArgs {
-    /// The query to search for.
-    pattern: String,
+    /// The query to search for. Required for a bare search; omitted when a
+    /// subcommand (grep/ingest/gc) is used.
+    pattern: Option<String>,
 
     /// Directory to search in (defaults to the current directory).
     path: Option<String>,
@@ -88,6 +177,10 @@ struct SemanticArgs {
     /// Let the backend plan and run multiple searches.
     #[arg(long)]
     agentic: bool,
+
+    /// Source and repo scope selectors.
+    #[command(flatten)]
+    scope: ScopeArgs,
 
     /// Store name (one store holds every worktree's content).
     #[arg(long, env = "MXBAI_STORE")]
@@ -124,6 +217,10 @@ struct GrepArgs {
     #[arg(long = "no-sync")]
     no_sync: bool,
 
+    /// Source and repo scope selectors.
+    #[command(flatten)]
+    scope: ScopeArgs,
+
     /// Store name (one store holds every worktree's content).
     #[arg(long, env = "MXBAI_STORE")]
     store: Option<String>,
@@ -138,11 +235,87 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Grep(args)) => run_grep(args).await,
+        Some(Command::Ingest(args)) => run_ingest(args, false).await,
+        Some(Command::Gc(args)) => run_ingest(args, true).await,
         None => run(cli.semantic).await,
     }
 }
 
+/// Ingest (or, with `gc`, garbage-collect) a record source into the store.
+async fn run_ingest(cli: IngestArgs, gc: bool) -> anyhow::Result<()> {
+    let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
+    let base_url = cli
+        .base_url
+        .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
+    let store = MixedbreadStore::from_login(base_url).await?;
+    let dir = Path::new(&cli.dir);
+    let source: Source = cli.source.parse()?;
+
+    match source {
+        Source::Linear => {
+            let adapter = linear_export::LinearExport::open(dir)?;
+            run_one_source(&adapter, &store, &store_name, gc).await
+        }
+        Source::Slack => {
+            let adapter = slack_export::SlackExport::open(dir)?;
+            run_one_source(&adapter, &store, &store_name, gc).await
+        }
+        Source::Code | Source::Web => anyhow::bail!(
+            "ingest covers record sources (slack, linear); code is indexed by a normal `search`"
+        ),
+    }
+}
+
+async fn run_one_source(
+    adapter: &(impl SourceAdapter + Sync),
+    store: &MixedbreadStore,
+    store_name: &str,
+    gc: bool,
+) -> anyhow::Result<()> {
+    if gc {
+        let report = search_core::gc_documents(adapter, store, store_name).await?;
+        println!(
+            "gc {}: deleted {} stale records, kept {}",
+            adapter.source(),
+            report.deleted,
+            report.kept
+        );
+        return Ok(());
+    }
+
+    let bar = std::io::stderr().is_terminal().then(ProgressBar::new_spinner);
+    if let Some(bar) = &bar {
+        bar.set_style(progress_style::bar("cyan"));
+        bar.set_prefix("uploading records");
+    }
+    let on_progress = |done: usize, total: usize| {
+        if let (Some(bar), true) = (&bar, total > 0) {
+            bar.set_length(u64::try_from(total).unwrap_or(u64::MAX));
+            bar.set_position(u64::try_from(done).unwrap_or(u64::MAX));
+        }
+    };
+    let report =
+        search_core::sync_documents(adapter, store, store_name, INDEX_TIMEOUT, on_progress).await?;
+    if let Some(bar) = &bar {
+        bar.finish_and_clear();
+    }
+    println!(
+        "ingest {}: uploaded {}, skipped {}, total {}",
+        adapter.source(),
+        report.uploaded,
+        report.skipped,
+        report.total
+    );
+    Ok(())
+}
+
 async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
+    // `pattern` is optional at the clap layer so a subcommand can be given
+    // without it; a bare search still requires one.
+    let pattern = cli
+        .pattern
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("a query is required: `search <pattern> [path]`"))?;
     let root = resolve_root(cli.path.as_deref())?;
     anyhow::ensure!(
         !at_or_above_home(&root),
@@ -171,10 +344,11 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
         .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
     let store = MixedbreadStore::from_login(base_url).await?;
 
+    let (filter, code_scope) = resolve_scope(&cli.scope, &root)?;
     let query = Query {
         root: &root,
         store_name: &store_name,
-        text: &cli.pattern,
+        text: &pattern,
         top_k: cli.max_count.max(1),
         options: SearchOptions {
             rerank: !cli.no_rerank,
@@ -182,6 +356,8 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
         },
         sync: !cli.no_sync,
         include_web: cli.web,
+        filters: filter.as_ref(),
+        code_scope,
         index_timeout: INDEX_TIMEOUT,
     };
 
@@ -278,6 +454,7 @@ async fn run_grep(cli: GrepArgs) -> anyhow::Result<()> {
 
     // Grep reuses the shared `Query` shape; its semantic-only knobs (rerank,
     // agentic, web) are inert here, and the grep pattern travels in `text`.
+    let (filter, code_scope) = resolve_scope(&cli.scope, &root)?;
     let query = Query {
         root: &root,
         store_name: &store_name,
@@ -289,6 +466,8 @@ async fn run_grep(cli: GrepArgs) -> anyhow::Result<()> {
         },
         sync: !cli.no_sync,
         include_web: false,
+        filters: filter.as_ref(),
+        code_scope,
         index_timeout: INDEX_TIMEOUT,
     };
     let grep_options = GrepOptions {
@@ -463,7 +642,9 @@ fn render(
     root: &Path,
     theme: code_highlight::Theme,
 ) -> String {
-    let prefix = if hit.is_web { "" } else { "./" };
+    // Only local code gets the `./path` prefix; web URLs and record titles
+    // (Slack threads, Linear issues) print as-is.
+    let prefix = if hit.source == Source::Code { "./" } else { "" };
     let path = paint(palette.path, &format!("{prefix}{}", hit.label));
 
     // `start_line` is 0-based and `num_lines` is a line count, so the displayed
@@ -533,10 +714,10 @@ fn render_snippet(
     }
 
     // Prefer syntax-highlighting the real file lines: tree-sitter gets full
-    // parse context and code-highlight renders its own line-number gutter. Falls
-    // through to a plain gutter over the chunk text if the file is unreadable
-    // (e.g. a web hit or a file changed since indexing).
-    if !hit.is_web
+    // parse context and code-highlight renders its own line-number gutter. Only
+    // local code has a readable file; web/Slack/Linear hits fall through to a
+    // plain gutter over the chunk text.
+    if hit.source == Source::Code
         && let Some(num) = hit.num_lines
         && let Ok(source) = std::fs::read_to_string(root.join(&hit.label))
     {
@@ -590,7 +771,7 @@ fn numbered_plain(body: &str, start: u32) -> String {
 mod tests {
     use std::path::Path;
 
-    use search_core::DisplayHit;
+    use search_core::{DisplayHit, Source};
 
     use super::{Palette, render_snippet};
 
@@ -599,11 +780,11 @@ mod tests {
     fn hit(text: &str) -> DisplayHit {
         DisplayHit {
             label: "web://example".to_owned(),
+            source: Source::Web,
             start_line: Some(4),
             num_lines: Some(2),
             score: 0.5,
             text: text.to_owned(),
-            is_web: true,
         }
     }
 
