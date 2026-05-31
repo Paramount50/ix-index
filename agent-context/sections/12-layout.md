@@ -13,6 +13,7 @@ lib/                                       # public helpers, builders, discovery
 modules/                                   # registered NixOS modules and profiles
 images/                                    # image modules plus optional versions
 packages/                                  # repo-owned packages (Rust crates, apps, tools)
+users/<github-username>/                    # personal-but-shareable home-manager modules
 skills/                                    # Claude Code skills, one dir per skill
 agent-context/                             # source fragments for generated AGENTS.md/CLAUDE.md
 nix-rules/                                 # ast-grep lint rules

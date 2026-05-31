@@ -147,6 +147,15 @@
       # Workstation-facing home-manager module: declare a service once, get a
       # native launchd agent on macOS and native systemd user units on Linux.
       homeModules.portable-services = ix.portableServices.homeModule;
+      # Personal-but-shareable workstation module for github:andrewgazelka: the
+      # ix.dev downtime watcher + boss bar overlay + the shared say-detached
+      # sound helper, all as portable services. Closed over the per-system flake
+      # packages so it resolves bossbar / minecraft-sound for the host it runs
+      # on. See users/andrewgazelka/home.nix.
+      homeModules.andrewgazelka = import ./users/andrewgazelka/home.nix {
+        indexPackages = system: (collect "packages").${system};
+        portableServicesModule = ix.portableServices.homeModule;
+      };
       overlays.default = ix.overlay;
       packages = collect "packages";
       checks = collect "checks";
