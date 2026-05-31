@@ -27,12 +27,12 @@ use objc2_quartz_core::CALayer;
 use objc2_virtualization::{
     VZBootLoader, VZDirectoryShare, VZDirectorySharingDeviceConfiguration,
     VZDiskImageStorageDeviceAttachment, VZGraphicsDeviceConfiguration, VZKeyboardConfiguration,
-    VZMacAuxiliaryStorage, VZMacGraphicsDeviceConfiguration, VZMacGraphicsDisplayConfiguration,
-    VZMacHardwareModel, VZMacMachineIdentifier, VZMacAuxiliaryStorageInitializationOptions,
-    VZMacOSBootLoader, VZMacOSInstaller, VZMacOSRestoreImage, VZMacPlatformConfiguration,
-    VZNATNetworkDeviceAttachment, VZNetworkDeviceConfiguration, VZPlatformConfiguration,
-    VZPointingDeviceConfiguration, VZSharedDirectory, VZSingleDirectoryShare,
-    VZStorageDeviceConfiguration, VZUSBKeyboardConfiguration,
+    VZMacAuxiliaryStorage, VZMacAuxiliaryStorageInitializationOptions,
+    VZMacGraphicsDeviceConfiguration, VZMacGraphicsDisplayConfiguration, VZMacHardwareModel,
+    VZMacMachineIdentifier, VZMacOSBootLoader, VZMacOSInstaller, VZMacOSRestoreImage,
+    VZMacPlatformConfiguration, VZNATNetworkDeviceAttachment, VZNetworkDeviceConfiguration,
+    VZPlatformConfiguration, VZPointingDeviceConfiguration, VZSharedDirectory,
+    VZSingleDirectoryShare, VZStorageDeviceConfiguration, VZUSBKeyboardConfiguration,
     VZUSBScreenCoordinatePointingDeviceConfiguration, VZVirtioBlockDeviceConfiguration,
     VZVirtioFileSystemDeviceConfiguration, VZVirtioNetworkDeviceConfiguration, VZVirtualMachine,
     VZVirtualMachineConfiguration, VZVirtualMachineView,
@@ -80,16 +80,32 @@ pub fn start_guest_offscreen(
             message: ns_error_message(&error),
         });
     }
+    Ok(start_vm_offscreen(mtm, &config))
+}
 
+/// Off-screen window + `VZVirtualMachineView` + VM start for any already-built,
+/// already-validated configuration. Guest-agnostic: the view renders whatever
+/// graphics device the config carries (Mac or virtio), and the `IOSurface`
+/// capture path reads its layer the same way regardless of guest type, so the
+/// macOS-guest and Linux-guest paths share this seam (the natural extraction
+/// point for a future standalone `vz` crate). Returns the view (retained; the
+/// caller leaks it for the process lifetime and drives the `AppKit` run loop).
+pub(crate) fn start_vm_offscreen(
+    mtm: MainThreadMarker,
+    config: &VZVirtualMachineConfiguration,
+) -> Retained<VZVirtualMachineView> {
     let app = NSApplication::sharedApplication(mtm);
     app.setActivationPolicy(NSApplicationActivationPolicy::Prohibited);
 
-    let vm = unsafe { VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), &config) };
+    let vm = unsafe { VZVirtualMachine::initWithConfiguration(VZVirtualMachine::alloc(), config) };
 
     // Off-screen, borderless window. Never visible; the host cursor is never
     // captured. We read the guest IOSurface, not the on-screen composite, so an
     // off-screen window is fine.
-    let frame = NSRect::new(NSPoint::new(-20000.0, -20000.0), NSSize::new(1920.0, 1080.0));
+    let frame = NSRect::new(
+        NSPoint::new(-20000.0, -20000.0),
+        NSSize::new(1920.0, 1080.0),
+    );
     let window = unsafe {
         NSWindow::initWithContentRect_styleMask_backing_defer(
             mtm.alloc(),
@@ -111,7 +127,10 @@ pub fn start_guest_offscreen(
             eprintln!("macos-vm: guest started");
         } else {
             let error = unsafe { &*error };
-            eprintln!("macos-vm: guest failed to start: {}", ns_error_message(error));
+            eprintln!(
+                "macos-vm: guest failed to start: {}",
+                ns_error_message(error)
+            );
             std::process::exit(1);
         }
     });
@@ -123,7 +142,7 @@ pub fn start_guest_offscreen(
     unsafe { vm.startWithCompletionHandler(&completion) };
     std::mem::forget(window);
     std::mem::forget(completion);
-    Ok(vm_view)
+    vm_view
 }
 
 pub fn boot_macos_screenshot(boot: MacBootScreenshot) -> Result<(), Error> {
@@ -140,7 +159,10 @@ pub fn boot_macos_screenshot(boot: MacBootScreenshot) -> Result<(), Error> {
     // Tick times for screenshots: the hardcoded ticks below the deadline, then
     // the deadline itself, so a short `--seconds` stops on time and always takes
     // a final shot.
-    let mut shots: Vec<u64> = [2, 18, 35, 55].into_iter().filter(|&t| t < seconds).collect();
+    let mut shots: Vec<u64> = [2, 18, 35, 55]
+        .into_iter()
+        .filter(|&t| t < seconds)
+        .collect();
     shots.push(seconds);
     schedule_captures(vm_view, out_prefix, shots);
 
@@ -152,7 +174,11 @@ pub fn boot_macos_screenshot(boot: MacBootScreenshot) -> Result<(), Error> {
 
 /// Sleep between ticks and hop each capture onto the main queue (`AppKit` and
 /// `IOSurface` access must be on the main thread), then exit the process.
-fn schedule_captures(view: Retained<VZVirtualMachineView>, out_prefix: PathBuf, shots: Vec<u64>) {
+pub(crate) fn schedule_captures(
+    view: Retained<VZVirtualMachineView>,
+    out_prefix: PathBuf,
+    shots: Vec<u64>,
+) {
     // The view is not `Send`, so move only the raw pointer and re-borrow on the
     // main queue, where it is valid. The view is leaked (lives for the process)
     // and also retained by the window, so the reborrow is never a use-after-free.
@@ -194,12 +220,12 @@ fn frame_contents(view: &VZVirtualMachineView) -> Option<Retained<AnyObject>> {
 pub fn capture(view: &VZVirtualMachineView, path: &Path) -> Result<usize, Error> {
     let contents = frame_contents(view).ok_or(Error::NoFramebuffer)?;
     // Verify the layer contents really is an IOSurface before any unsafe access.
-    let surface_obj: Retained<IOSurface> =
-        contents.downcast::<IOSurface>().map_err(|_| Error::NoFramebuffer)?;
+    let surface_obj: Retained<IOSurface> = contents
+        .downcast::<IOSurface>()
+        .map_err(|_| Error::NoFramebuffer)?;
     // `IOSurface` (objc) is toll-free bridged to `IOSurfaceRef` (CF), which
     // carries the data accessors.
-    let surface: &IOSurfaceRef =
-        unsafe { &*Retained::as_ptr(&surface_obj).cast::<IOSurfaceRef>() };
+    let surface: &IOSurfaceRef = unsafe { &*Retained::as_ptr(&surface_obj).cast::<IOSurfaceRef>() };
 
     let width = surface.width();
     let height = surface.height();
@@ -240,8 +266,12 @@ pub fn capture(view: &VZVirtualMachineView, path: &Path) -> Result<usize, Error>
         let _ = surface.unlock(IOSurfaceLockOptions::ReadOnly, std::ptr::null_mut());
     }
 
-    let w = u32::try_from(width).map_err(|_| Error::CaptureEncode { message: "width too large".into() })?;
-    let h = u32::try_from(height).map_err(|_| Error::CaptureEncode { message: "height too large".into() })?;
+    let w = u32::try_from(width).map_err(|_| Error::CaptureEncode {
+        message: "width too large".into(),
+    })?;
+    let h = u32::try_from(height).map_err(|_| Error::CaptureEncode {
+        message: "height too large".into(),
+    })?;
     let mut buf = std::io::Cursor::new(Vec::new());
     image::ImageEncoder::write_image(
         image::codecs::png::PngEncoder::new(&mut buf),
@@ -250,9 +280,13 @@ pub fn capture(view: &VZVirtualMachineView, path: &Path) -> Result<usize, Error>
         h,
         image::ExtendedColorType::Rgba8,
     )
-    .map_err(|e| Error::CaptureEncode { message: e.to_string() })?;
+    .map_err(|e| Error::CaptureEncode {
+        message: e.to_string(),
+    })?;
     let png = buf.into_inner();
-    std::fs::write(path, &png).map_err(|e| Error::CaptureEncode { message: e.to_string() })?;
+    std::fs::write(path, &png).map_err(|e| Error::CaptureEncode {
+        message: e.to_string(),
+    })?;
     Ok(png.len())
 }
 
@@ -261,37 +295,44 @@ pub fn capture(view: &VZVirtualMachineView, path: &Path) -> Result<usize, Error>
 /// gdmf is TLS-intercepted on some networks. Writes disk/aux/hardware-model/
 /// machine-id so [`boot_macos_screenshot`] can later boot the bundle.
 pub fn install_macos(ipsw: PathBuf, bundle: PathBuf, disk_gib: u64) -> Result<(), Error> {
-    std::fs::create_dir_all(&bundle).map_err(|e| Error::Bundle { message: e.to_string() })?;
+    std::fs::create_dir_all(&bundle).map_err(|e| Error::Bundle {
+        message: e.to_string(),
+    })?;
     let ipsw_url = file_url(&ipsw);
 
     eprintln!("macos-vm: loading restore image {} ...", ipsw.display());
     // load completion fires on an arbitrary thread; extract the (Send) hardware
     // model bytes there, then build the VM + installer on the main queue.
-    let load_done = RcBlock::new(move |image: *mut VZMacOSRestoreImage, error: *mut NSError| {
-        if !error.is_null() {
-            eprintln!("macos-vm: load restore image: {}", ns_error_message(unsafe { &*error }));
-            std::process::exit(1);
-        }
-        let image = unsafe { &*image };
-        let Some(req) = (unsafe { image.mostFeaturefulSupportedConfiguration() }) else {
-            eprintln!("macos-vm: restore image has no configuration supported by this host");
-            std::process::exit(1);
-        };
-        let hw = unsafe { req.hardwareModel() };
-        if !unsafe { hw.isSupported() } {
-            eprintln!("macos-vm: hardware model not supported by this host");
-            std::process::exit(1);
-        }
-        let hw_data = unsafe { hw.dataRepresentation() }.to_vec();
-        let bundle = bundle.clone();
-        let ipsw = ipsw.clone();
-        DispatchQueue::main().exec_async(move || {
-            if let Err(error) = start_install(&bundle, &ipsw, &hw_data, disk_gib) {
-                eprintln!("macos-vm: {error}");
+    let load_done = RcBlock::new(
+        move |image: *mut VZMacOSRestoreImage, error: *mut NSError| {
+            if !error.is_null() {
+                eprintln!(
+                    "macos-vm: load restore image: {}",
+                    ns_error_message(unsafe { &*error })
+                );
                 std::process::exit(1);
             }
-        });
-    });
+            let image = unsafe { &*image };
+            let Some(req) = (unsafe { image.mostFeaturefulSupportedConfiguration() }) else {
+                eprintln!("macos-vm: restore image has no configuration supported by this host");
+                std::process::exit(1);
+            };
+            let hw = unsafe { req.hardwareModel() };
+            if !unsafe { hw.isSupported() } {
+                eprintln!("macos-vm: hardware model not supported by this host");
+                std::process::exit(1);
+            }
+            let hw_data = unsafe { hw.dataRepresentation() }.to_vec();
+            let bundle = bundle.clone();
+            let ipsw = ipsw.clone();
+            DispatchQueue::main().exec_async(move || {
+                if let Err(error) = start_install(&bundle, &ipsw, &hw_data, disk_gib) {
+                    eprintln!("macos-vm: {error}");
+                    std::process::exit(1);
+                }
+            });
+        },
+    );
     unsafe { VZMacOSRestoreImage::loadFileURL_completionHandler(&ipsw_url, &load_done) };
 
     dispatch_main();
@@ -299,24 +340,33 @@ pub fn install_macos(ipsw: PathBuf, bundle: PathBuf, disk_gib: u64) -> Result<()
 
 /// On the main queue: materialize the bundle, then run `VZMacOSInstaller`.
 fn start_install(bundle: &Path, ipsw: &Path, hw_data: &[u8], disk_gib: u64) -> Result<(), Error> {
-    std::fs::write(bundle.join("hardware-model.bin"), hw_data)
-        .map_err(|e| Error::Bundle { message: format!("write hardware-model.bin: {e}") })?;
+    std::fs::write(bundle.join("hardware-model.bin"), hw_data).map_err(|e| Error::Bundle {
+        message: format!("write hardware-model.bin: {e}"),
+    })?;
 
     let machine_id = unsafe { VZMacMachineIdentifier::new() };
     let id_data = unsafe { machine_id.dataRepresentation() }.to_vec();
-    std::fs::write(bundle.join("machine-id.bin"), &id_data)
-        .map_err(|e| Error::Bundle { message: format!("write machine-id.bin: {e}") })?;
+    std::fs::write(bundle.join("machine-id.bin"), &id_data).map_err(|e| Error::Bundle {
+        message: format!("write machine-id.bin: {e}"),
+    })?;
 
     if disk_gib == 0 {
-        return Err(Error::Bundle { message: "disk-gib must be greater than 0".into() });
+        return Err(Error::Bundle {
+            message: "disk-gib must be greater than 0".into(),
+        });
     }
     let disk_bytes = disk_gib
         .checked_mul(1024 * 1024 * 1024)
-        .ok_or_else(|| Error::Bundle { message: format!("disk-gib {disk_gib} is too large") })?;
+        .ok_or_else(|| Error::Bundle {
+            message: format!("disk-gib {disk_gib} is too large"),
+        })?;
     let disk = bundle.join("disk.img");
-    let file = std::fs::File::create(&disk).map_err(|e| Error::Bundle { message: format!("create disk.img: {e}") })?;
-    file.set_len(disk_bytes)
-        .map_err(|e| Error::Bundle { message: format!("size disk.img: {e}") })?;
+    let file = std::fs::File::create(&disk).map_err(|e| Error::Bundle {
+        message: format!("create disk.img: {e}"),
+    })?;
+    file.set_len(disk_bytes).map_err(|e| Error::Bundle {
+        message: format!("size disk.img: {e}"),
+    })?;
 
     // Auxiliary storage: create fresh (remove any stale copy so the no-overwrite
     // initializer succeeds on re-install).
@@ -328,7 +378,9 @@ fn start_install(bundle: &Path, ipsw: &Path, hw_data: &[u8], disk_gib: u64) -> R
             &NSData::with_bytes(hw_data),
         )
     }
-    .ok_or_else(|| Error::Bundle { message: "invalid hardware model".into() })?;
+    .ok_or_else(|| Error::Bundle {
+        message: "invalid hardware model".into(),
+    })?;
     let aux_url = file_url(&aux_path);
     unsafe {
         VZMacAuxiliaryStorage::initCreatingStorageAtURL_hardwareModel_options_error(
@@ -338,7 +390,9 @@ fn start_install(bundle: &Path, ipsw: &Path, hw_data: &[u8], disk_gib: u64) -> R
             VZMacAuxiliaryStorageInitializationOptions(0),
         )
     }
-    .map_err(|e| Error::Bundle { message: format!("create aux storage: {}", ns_error_message(&e)) })?;
+    .map_err(|e| Error::Bundle {
+        message: format!("create aux storage: {}", ns_error_message(&e)),
+    })?;
 
     let config = build_macos_config(bundle, &[])?;
     if let Err(error) = unsafe { config.validateWithError() } {
@@ -355,14 +409,20 @@ fn start_install(bundle: &Path, ipsw: &Path, hw_data: &[u8], disk_gib: u64) -> R
             &file_url(ipsw),
         )
     };
-    eprintln!("macos-vm: installing macOS into {} (this takes ~15-20 min) ...", bundle.display());
+    eprintln!(
+        "macos-vm: installing macOS into {} (this takes ~15-20 min) ...",
+        bundle.display()
+    );
 
     let done = RcBlock::new(|error: *mut NSError| {
         if error.is_null() {
             println!("macos-vm: install complete");
             std::process::exit(0);
         }
-        eprintln!("macos-vm: install failed: {}", ns_error_message(unsafe { &*error }));
+        eprintln!(
+            "macos-vm: install failed: {}",
+            ns_error_message(unsafe { &*error })
+        );
         std::process::exit(1);
     });
     unsafe { installer.installWithCompletionHandler(&done) };
@@ -377,10 +437,12 @@ fn build_macos_config(
     bundle: &Path,
     shares: &[DirShare],
 ) -> Result<Retained<VZVirtualMachineConfiguration>, Error> {
-    let hw_data = std::fs::read(bundle.join("hardware-model.bin"))
-        .map_err(|e| Error::Bundle { message: format!("hardware-model.bin: {e}") })?;
-    let id_data = std::fs::read(bundle.join("machine-id.bin"))
-        .map_err(|e| Error::Bundle { message: format!("machine-id.bin: {e}") })?;
+    let hw_data = std::fs::read(bundle.join("hardware-model.bin")).map_err(|e| Error::Bundle {
+        message: format!("hardware-model.bin: {e}"),
+    })?;
+    let id_data = std::fs::read(bundle.join("machine-id.bin")).map_err(|e| Error::Bundle {
+        message: format!("machine-id.bin: {e}"),
+    })?;
 
     let hw = unsafe {
         VZMacHardwareModel::initWithDataRepresentation(
@@ -388,17 +450,22 @@ fn build_macos_config(
             &NSData::with_bytes(&hw_data),
         )
     }
-    .ok_or_else(|| Error::Bundle { message: "invalid hardware model".into() })?;
+    .ok_or_else(|| Error::Bundle {
+        message: "invalid hardware model".into(),
+    })?;
     let machine_id = unsafe {
         VZMacMachineIdentifier::initWithDataRepresentation(
             VZMacMachineIdentifier::alloc(),
             &NSData::with_bytes(&id_data),
         )
     }
-    .ok_or_else(|| Error::Bundle { message: "invalid machine id".into() })?;
+    .ok_or_else(|| Error::Bundle {
+        message: "invalid machine id".into(),
+    })?;
 
     let aux_url = file_url(&bundle.join("aux.img"));
-    let aux = unsafe { VZMacAuxiliaryStorage::initWithURL(VZMacAuxiliaryStorage::alloc(), &aux_url) };
+    let aux =
+        unsafe { VZMacAuxiliaryStorage::initWithURL(VZMacAuxiliaryStorage::alloc(), &aux_url) };
 
     let platform = unsafe { VZMacPlatformConfiguration::new() };
     unsafe {
@@ -428,7 +495,9 @@ fn build_macos_config(
             false,
         )
     }
-    .map_err(|e| Error::Bundle { message: ns_error_message(&e) })?;
+    .map_err(|e| Error::Bundle {
+        message: ns_error_message(&e),
+    })?;
     let block = unsafe {
         VZVirtioBlockDeviceConfiguration::initWithAttachment(
             VZVirtioBlockDeviceConfiguration::alloc(),
@@ -506,8 +575,9 @@ fn build_fs_device(
     let shared = unsafe {
         VZSharedDirectory::initWithURL_readOnly(VZSharedDirectory::alloc(), &dir_url, false)
     };
-    let single =
-        unsafe { VZSingleDirectoryShare::initWithDirectory(VZSingleDirectoryShare::alloc(), &shared) };
+    let single = unsafe {
+        VZSingleDirectoryShare::initWithDirectory(VZSingleDirectoryShare::alloc(), &shared)
+    };
     let device = unsafe {
         VZVirtioFileSystemDeviceConfiguration::initWithTag(
             VZVirtioFileSystemDeviceConfiguration::alloc(),

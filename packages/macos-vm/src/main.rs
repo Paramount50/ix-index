@@ -74,6 +74,50 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         timeout_secs: u64,
     },
+    /// Boot an aarch64 Linux GUI guest from a raw EFI disk with a virtio-gpu
+    /// display + USB keyboard/mouse, fully off-screen, and screenshot its
+    /// framebuffer to `<out-prefix>.NNN.png` (no window, host cursor untouched).
+    BootLinuxGui {
+        /// Path to a raw EFI-bootable disk image (e.g. a NixOS `raw-efi` image).
+        #[arg(long)]
+        disk: std::path::PathBuf,
+        /// EFI variable store file (created if absent). Defaults to
+        /// `<disk>.efivars`.
+        #[arg(long)]
+        efi_vars: Option<std::path::PathBuf>,
+        /// Output path prefix for screenshots.
+        #[arg(long)]
+        out_prefix: std::path::PathBuf,
+        /// Stop the VM and exit after this many seconds (final shot at the
+        /// deadline).
+        #[arg(long, default_value_t = 40)]
+        seconds: u64,
+        /// Number of virtual CPUs.
+        #[arg(long, default_value_t = 4)]
+        cpus: usize,
+        /// Guest memory in MiB.
+        #[arg(long, default_value_t = 4096)]
+        memory_mib: u64,
+    },
+    /// Boot an aarch64 Linux GUI guest from a raw EFI disk off-screen and drive
+    /// it from stdin: synthetic keyboard/mouse and on-demand framebuffer
+    /// screenshots, with no host cursor or visible window. Same newline command
+    /// protocol as `drive-macos` (`key`/`down`/`up`/`type`/`click`/`wait`/`shot`/`quit`).
+    DriveLinux {
+        /// Path to a raw EFI-bootable disk image (e.g. a NixOS `raw-efi` image).
+        #[arg(long)]
+        disk: std::path::PathBuf,
+        /// EFI variable store file (created if absent). Defaults to
+        /// `<disk>.efivars`.
+        #[arg(long)]
+        efi_vars: Option<std::path::PathBuf>,
+        /// Number of virtual CPUs.
+        #[arg(long, default_value_t = 4)]
+        cpus: usize,
+        /// Guest memory in MiB.
+        #[arg(long, default_value_t = 4096)]
+        memory_mib: u64,
+    },
     /// Install macOS into a fresh bundle directory from a local restore image
     /// (IPSW). Bypasses Apple's online catalog (take a downloaded `.ipsw`).
     InstallMacos {
@@ -281,6 +325,9 @@ mod drive;
 mod input;
 
 #[cfg(target_os = "macos")]
+mod linuxguest;
+
+#[cfg(target_os = "macos")]
 mod macguest;
 
 #[cfg(target_os = "macos")]
@@ -383,6 +430,40 @@ mod imp {
                 cmdline,
                 timeout: Duration::from_secs(timeout_secs),
             }),
+            Command::BootLinuxGui {
+                disk,
+                efi_vars,
+                out_prefix,
+                seconds,
+                cpus,
+                memory_mib,
+            } => {
+                // Default the EFI variable store next to the disk so a bare
+                // `--disk foo.raw` just works and persists boot entries.
+                let var_store = efi_vars.unwrap_or_else(|| disk.with_extension("efivars"));
+                crate::linuxguest::boot_linux_gui(crate::linuxguest::LinuxGuiBoot {
+                    disk,
+                    var_store,
+                    out_prefix,
+                    seconds,
+                    cpus,
+                    memory_mib,
+                })
+            }
+            Command::DriveLinux {
+                disk,
+                efi_vars,
+                cpus,
+                memory_mib,
+            } => {
+                let var_store = efi_vars.unwrap_or_else(|| disk.with_extension("efivars"));
+                crate::linuxguest::drive_linux(crate::linuxguest::DriveLinux {
+                    disk,
+                    var_store,
+                    cpus,
+                    memory_mib,
+                })
+            }
             Command::InstallMacos {
                 ipsw,
                 bundle,
@@ -444,7 +525,9 @@ mod imp {
         let mut buf = String::new();
         std::io::stdin()
             .read_to_string(&mut buf)
-            .map_err(|e| Error::Bundle { message: format!("read password from stdin: {e}") })?;
+            .map_err(|e| Error::Bundle {
+                message: format!("read password from stdin: {e}"),
+            })?;
         if let Some(stripped) = buf.strip_suffix('\n') {
             buf.truncate(stripped.len());
             if let Some(stripped) = buf.strip_suffix('\r') {
@@ -489,7 +572,11 @@ mod imp {
     fn info() -> Result<(), Error> {
         let supported = unsafe { VZVirtualMachine::isSupported() };
         println!("virtualization_supported={supported}");
-        if supported { Ok(()) } else { Err(Error::Unsupported) }
+        if supported {
+            Ok(())
+        } else {
+            Err(Error::Unsupported)
+        }
     }
 
     fn boot_linux(boot: LinuxBoot) -> Result<(), Error> {
@@ -519,7 +606,10 @@ mod imp {
                 } else {
                     // Safety: VZ hands us a valid retained NSError on failure.
                     let error = unsafe { &*error };
-                    eprintln!("macos-vm: guest failed to start: {}", ns_error_message(error));
+                    eprintln!(
+                        "macos-vm: guest failed to start: {}",
+                        ns_error_message(error)
+                    );
                     std::process::exit(1);
                 }
             });
@@ -544,17 +634,22 @@ mod imp {
         dispatch_main();
     }
 
-    fn build_linux_config(boot: &LinuxBoot) -> Result<Retained<VZVirtualMachineConfiguration>, Error> {
-        let memory_bytes = boot
-            .memory_mib
-            .checked_mul(1024 * 1024)
-            .ok_or(Error::MemoryTooLarge { mib: boot.memory_mib })?;
+    fn build_linux_config(
+        boot: &LinuxBoot,
+    ) -> Result<Retained<VZVirtualMachineConfiguration>, Error> {
+        let memory_bytes =
+            boot.memory_mib
+                .checked_mul(1024 * 1024)
+                .ok_or(Error::MemoryTooLarge {
+                    mib: boot.memory_mib,
+                })?;
 
         let kernel_url = file_url(&boot.kernel);
         let initramfs_url = file_url(&boot.initramfs);
 
-        let boot_loader =
-            unsafe { VZLinuxBootLoader::initWithKernelURL(VZLinuxBootLoader::alloc(), &kernel_url) };
+        let boot_loader = unsafe {
+            VZLinuxBootLoader::initWithKernelURL(VZLinuxBootLoader::alloc(), &kernel_url)
+        };
         unsafe {
             boot_loader.setInitialRamdiskURL(Some(&initramfs_url));
             boot_loader.setCommandLine(&NSString::from_str(&boot.cmdline));

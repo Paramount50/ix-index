@@ -32,6 +32,14 @@ What works today:
 - `info` reports `VZVirtualMachine.isSupported`.
 - `boot-linux` boots a Linux guest and streams its console, then stops on a
   timeout.
+- `boot-linux-gui` boots an aarch64 **Linux GUI** guest from a raw EFI disk with
+  a virtio-gpu display + USB keyboard/mouse, fully off-screen, and screenshots
+  the guest framebuffer to PNGs (same IOSurface capture as `boot-macos`). The
+  `vz-linux-guest` package builds a NixOS disk that boots straight into a sway
+  compositor running a GUI app on software graphics (Mesa lavapipe), so a wgpu
+  app like `bossbar-overlay` is verified rendering on Linux without a GPU.
+- `drive-linux` drives a Linux GUI guest from stdin, same command protocol as
+  `drive-macos`.
 - `install-macos` installs macOS into a fresh bundle from a local restore image
   (IPSW), via `VZMacOSInstaller`. Bypasses Apple's online catalog (gdmf), which
   is TLS-intercepted on some networks: download the `.ipsw` and pass it.
@@ -62,7 +70,9 @@ What works today:
 The `macvm` Python module bundled into ix-mcp exposes the full surface:
 `info`, `install`, `provision`, `stage_binary`, `screenshot`,
 `screenshot_many`, `drive`, `Driver`, and the one-call `run_app` (share a host
-app in, launch it, return a frame of the guest display).
+app in, launch it, return a frame of the guest display). For Linux GUI guests it
+adds `boot_linux_gui` (boot a raw EFI disk off-screen, return a `PIL.Image` of
+the render), `drive_linux`, and `Driver(disk=...)`.
 
 What is designed but not yet built (see [Roadmap](#roadmap)):
 

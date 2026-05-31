@@ -84,6 +84,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -97,7 +98,9 @@ if TYPE_CHECKING:
 __all__ = [
     "Driver",
     "MacVmError",
+    "boot_linux_gui",
     "drive",
+    "drive_linux",
     "info",
     "install",
     "provision",
@@ -342,6 +345,101 @@ def screenshot_many(
     return results
 
 
+def _resolve_disk(disk: str | os.PathLike) -> str:
+    """Resolve a guest disk argument to a disk-image file path.
+
+    The ``vz-linux-guest`` package output (and a ``nix build`` ``result``) is a
+    *directory* containing ``nixos.img`` (make-disk-image's shape), so a directory
+    is resolved to the single ``*.img``/``*.raw`` inside it. A file path is
+    returned as-is. Raises :class:`MacVmError` if a directory holds zero or
+    several images.
+    """
+    path = pathlib.Path(os.fspath(disk))
+    if path.is_dir():
+        imgs = sorted([*path.glob("*.img"), *path.glob("*.raw")])
+        if len(imgs) != 1:
+            raise MacVmError(
+                f"disk {path} is a directory with {len(imgs)} disk images; "
+                "pass the .img/.raw file (e.g. <result>/nixos.img)"
+            )
+        return str(imgs[0])
+    return str(path)
+
+
+def _writable_disk(disk: str | os.PathLike, staging_dir: str) -> str:
+    """Return a writable disk-image path. VZ opens the boot disk read-write, so a
+    read-only image (e.g. a `/nix/store` build) is copied into ``staging_dir``;
+    an already-writable path is used in place (no multi-GiB copy). A directory
+    argument is resolved to its image via :func:`_resolve_disk` first."""
+    src = _resolve_disk(disk)
+    if os.access(src, os.W_OK):
+        return src
+    dst = str(pathlib.Path(staging_dir) / "disk.img")
+    # Try an APFS clone first (instant, sparse-preserving) when src and staging
+    # share a volume; fall back to a full byte copy across volumes (the common
+    # /nix/store case, which lives on its own volume).
+    try:
+        subprocess.run(["cp", "-c", src, dst], check=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        shutil.copyfile(src, dst)
+    os.chmod(dst, 0o644)
+    return dst
+
+
+def boot_linux_gui(
+    disk: str | os.PathLike,
+    seconds: int = 60,
+    timeout: float | None = None,
+    efi_vars: str | os.PathLike | None = None,
+) -> "Image.Image":
+    """Boot an aarch64 Linux GUI guest from a raw EFI ``disk`` off-screen and
+    return a ``PIL.Image`` of its display after ``seconds`` (the last frame).
+
+    The Linux analogue of :func:`screenshot`: the disk boots into its own
+    compositor/app, rendered with software graphics (Mesa lavapipe, since VZ's
+    virtio-gpu has no 3D), and the host captures the guest framebuffer with no
+    window and without touching the host cursor. ``disk`` may be the
+    ``vz-linux-guest`` package output directory (its ``nixos.img`` is found
+    automatically) or a ``.img``/``.raw`` file; a read-only image (e.g. a
+    `/nix/store` build) is copied to a writable temp file first. Raises
+    :class:`MacVmError` on failure or no frame.
+    """
+    from PIL import Image
+
+    bin_path = _binary()
+    # NixOS boot + compositor start is slower than a macOS-bundle boot, so give a
+    # wider default deadline.
+    deadline = timeout if timeout is not None else seconds + 180
+    with tempfile.TemporaryDirectory(prefix="ix-macvm-linux-") as tmp:
+        work_disk = _writable_disk(disk, tmp)
+        prefix = pathlib.Path(tmp) / "shot"
+        argv = [
+            bin_path,
+            "boot-linux-gui",
+            "--disk",
+            work_disk,
+            "--out-prefix",
+            str(prefix),
+            "--seconds",
+            str(seconds),
+        ]
+        if efi_vars is not None:
+            argv += ["--efi-vars", str(efi_vars)]
+        try:
+            result = subprocess.run(
+                argv, capture_output=True, text=True, check=False, timeout=deadline
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise MacVmError(f"boot-linux-gui timed out after {deadline}s") from exc
+        shots = sorted(pathlib.Path(tmp).glob("shot.*.png"))
+        if not shots:
+            raise MacVmError(
+                f"boot-linux-gui produced no screenshot (rc={result.returncode}): {result.stderr.strip()}"
+            )
+        with Image.open(shots[-1]) as img:
+            return img.convert("RGB")
+
+
 class Driver:
     """Drive a booted macOS guest in lockstep over the binary's ``drive-macos``
     mode.
@@ -364,30 +462,63 @@ class Driver:
 
     def __init__(
         self,
-        bundle: str | os.PathLike,
+        bundle: str | os.PathLike | None = None,
         shares: Sequence[str] | None = None,
         timeout: float = 120,
+        *,
+        disk: str | os.PathLike | None = None,
+        efi_vars: str | os.PathLike | None = None,
     ) -> None:
-        """Prepare a driver for ``bundle`` (the guest boots on :meth:`__enter__`).
+        """Prepare a driver (the guest boots on :meth:`__enter__`).
 
-        ``shares`` is a list of ``"TAG=HOSTDIR"`` virtio-fs specs (see the
-        module docstring). ``timeout`` bounds how long :meth:`close` waits for
-        the process to quit; per-command reads block until the ack arrives, since
-        a slow guest boot can delay the first one.
+        Pass exactly one guest: ``bundle`` for a macOS guest, or ``disk`` for an
+        aarch64 Linux GUI guest (a raw EFI image; ``efi_vars`` defaults to
+        ``<disk>.efivars``). The Linux ``disk`` must be writable (VZ opens it
+        read-write); copy a `/nix/store` image out first.
+
+        ``shares`` is a list of ``"TAG=HOSTDIR"`` virtio-fs specs (macOS only;
+        see the module docstring). ``timeout`` bounds how long :meth:`close`
+        waits for the process to quit; per-command reads block until the ack
+        arrives, since a slow guest boot can delay the first one.
         """
-        self._bundle = str(bundle)
+        if (bundle is None) == (disk is None):
+            raise MacVmError("Driver needs exactly one of bundle (macOS) or disk (Linux)")
+        # virtio-fs shares are a macOS-guest feature here; the Linux GUI config
+        # wires no sharing device, so reject rather than silently drop them.
+        if disk is not None and shares:
+            raise MacVmError("shares are macOS-only; the Linux GUI Driver wires no virtio-fs")
+        self._bundle = str(bundle) if bundle is not None else None
+        # Resolve a directory (the vz-linux-guest package output) to its image.
+        self._disk = _resolve_disk(disk) if disk is not None else None
+        self._efi_vars = str(efi_vars) if efi_vars is not None else None
         self._shares = list(shares) if shares else []
         self.timeout = timeout
         self._proc: subprocess.Popen[str] | None = None
 
     def __enter__(self) -> "Driver":
         bin_path = _binary()
+        if self._disk is not None:
+            # VZ opens the boot disk read-write; a read-only image (e.g. a
+            # /nix/store build) would fail to attach and the process would exit
+            # with only a "no ack" symptom. Fail clearly up front instead.
+            if not os.access(self._disk, os.W_OK):
+                raise MacVmError(
+                    f"Linux Driver disk must be writable (copy the image out of the store first): {self._disk}"
+                )
+            argv = [bin_path, "drive-linux", "--disk", self._disk]
+            if self._efi_vars is not None:
+                argv += ["--efi-vars", self._efi_vars]
+        else:
+            # __init__ guarantees exactly one of bundle/disk is set, so here
+            # (disk is None) the bundle is present.
+            assert self._bundle is not None
+            argv = [bin_path, "drive-macos", "--bundle", self._bundle, *_share_args(self._shares)]
         # stderr carries only the binary's boot/log lines; stdout carries the
         # acks, one per command. Send stderr to DEVNULL so a clean stdout read
         # never has to skip non-ack noise. The signed re-exec inherits these
         # pipes, so the channel survives it.
         self._proc = subprocess.Popen(
-            [bin_path, "drive-macos", "--bundle", self._bundle, *_share_args(self._shares)],
+            argv,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -531,6 +662,20 @@ def drive(
     failing command.
     """
     with Driver(bundle, shares=shares, timeout=timeout) as d:
+        return [d.send(command) for command in commands]
+
+
+def drive_linux(
+    disk: str | os.PathLike,
+    commands: Sequence[str],
+    efi_vars: str | os.PathLike | None = None,
+    timeout: float = 120,
+) -> list[str]:
+    """Open a :class:`Driver` for a Linux GUI ``disk``, send each command, return
+    the acks. The Linux analogue of :func:`drive`; the ``disk`` must be writable.
+    Use :class:`Driver` directly when the next command depends on a frame.
+    """
+    with Driver(disk=disk, efi_vars=efi_vars, timeout=timeout) as d:
         return [d.send(command) for command in commands]
 
 

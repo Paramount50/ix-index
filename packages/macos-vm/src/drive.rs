@@ -46,17 +46,26 @@ pub fn drive_macos(drive: DriveMacos) -> Result<(), Error> {
     let DriveMacos { bundle, shares } = drive;
     let mtm = MainThreadMarker::new().ok_or(Error::NotMainThread)?;
     let view = start_guest_offscreen(mtm, &bundle, &shares)?;
+    drive_view(mtm, view);
+    Ok(())
+}
+
+/// Hand an already-started off-screen guest view to the stdin command loop and
+/// run the `AppKit` run loop until `quit`/EOF exits the process. Guest-agnostic:
+/// shared by the macOS ([`drive_macos`]) and Linux
+/// ([`crate::linuxguest::drive_linux`]) drivers, since every command operates on
+/// the `VZVirtualMachineView` regardless of guest type.
+pub(crate) fn drive_view(mtm: MainThreadMarker, view: Retained<VZVirtualMachineView>) {
     // Leak the view (it lives for the process) and hand the raw pointer to the
     // driver thread; the view is not `Send`, so we only re-borrow it on the main
     // queue, where it is valid.
     let view_ptr = Retained::into_raw(view) as usize;
-    eprintln!("macos-vm: driving guest; stdin commands: key/down/up/type/wait/shot/quit");
+    eprintln!("macos-vm: driving guest; stdin commands: key/down/up/type/click/wait/shot/quit");
     std::thread::spawn(move || run_commands(view_ptr));
 
     // The view needs the `AppKit` run loop to build its layer tree and receive
     // guest frames; the driver thread exits the process on `quit` or EOF.
     NSApplication::sharedApplication(mtm).run();
-    Ok(())
 }
 
 /// Read and execute commands until stdin closes or `quit` exits the process.
@@ -144,7 +153,9 @@ fn execute(view_ptr: usize, trimmed: &str) -> String {
             } else {
                 NSEventType::KeyUp
             };
-            on_main(view_ptr, move |view| input::send_event(view, event_type, code));
+            on_main(view_ptr, move |view| {
+                input::send_event(view, event_type, code)
+            });
             std::thread::sleep(KEY_GAP_AFTER);
             format!("ok {command} {name}")
         }
