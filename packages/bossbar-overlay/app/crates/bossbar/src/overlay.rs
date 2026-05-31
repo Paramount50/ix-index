@@ -215,6 +215,9 @@ impl App {
         };
         let attrs = ocwin::float_attributes("Boss Bar", w_px, h_px, Some(pos));
         let window = Arc::new(event_loop.create_window(attrs).ok()?);
+        // Each bar is a background window, so hover (grow + breathe + description
+        // panel) only reaches it through an always-active tracking area.
+        ocwin::enable_background_hover(&window);
         let (surface, config) = self.make_surface(&window);
         window.request_redraw();
         let has_description = !bar.description.trim().is_empty();
@@ -464,14 +467,23 @@ impl ApplicationHandler<Vec<BossBar>> for App {
             }
             WindowEvent::RedrawRequested => self.render_id(id),
             WindowEvent::CursorEntered { .. } => {
-                if let Some(win) = self.wins.get_mut(&id) {
-                    win.hovered = true;
-                    win.window.set_cursor(CursorIcon::Grab);
-                    // Bring this bar above its siblings so its pop-down panel covers
-                    // them instead of unfolding underneath.
-                    ocwin::raise_to_front(&win.window);
+                // winit's own tracking rect and the always-active NSTrackingArea
+                // (enable_background_hover) both deliver mouseEntered:, so this can
+                // arrive twice per crossing; act only on the first.
+                let entered = self.wins.get_mut(&id).is_some_and(|win| {
+                    let first = !win.hovered;
+                    if first {
+                        win.hovered = true;
+                        win.window.set_cursor(CursorIcon::Grab);
+                        // Bring this bar above its siblings so its pop-down panel
+                        // covers them instead of unfolding underneath.
+                        ocwin::raise_to_front(&win.window);
+                    }
+                    first
+                });
+                if entered {
+                    self.render_id(id);
                 }
-                self.render_id(id);
             }
             WindowEvent::CursorLeft { .. } => {
                 if let Some(win) = self.wins.get_mut(&id) {

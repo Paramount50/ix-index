@@ -135,14 +135,21 @@ fn arrow_under(
 }
 
 impl App {
-    /// Auto-centered window position (logical points) for the spread.
+    /// Auto-centered window position (logical points) for the spread, within the
+    /// screen's usable area so the book and its bottom page-turn arrows clear the
+    /// menu bar and Dock. Falls back to the full display if the visible frame is
+    /// unavailable. When the spread is larger than the usable area (a small
+    /// display at a high scale) the offset clamps to zero, pinning it just below
+    /// the menu bar rather than centering it under the bar.
     fn center_pos(&self) -> LogicalPosition<f64> {
         let (w_px, h_px) = scene::spread_window_px(self.scale);
         let wl = w_px as f64 / self.scale_factor;
         let hl = h_px as f64 / self.scale_factor;
+        let (left, top, vw, vh) = ocwin::visible_frame_logical()
+            .unwrap_or((0.0, 0.0, self.mon_logical.0, self.mon_logical.1));
         LogicalPosition::new(
-            ((self.mon_logical.0 - wl) * 0.5).max(0.0),
-            ((self.mon_logical.1 - hl) * 0.5).max(0.0),
+            left + ((vw - wl) * 0.5).max(0.0),
+            top + ((vh - hl) * 0.5).max(0.0),
         )
     }
 
@@ -162,6 +169,10 @@ impl App {
                 return;
             }
         };
+        // The book is an accessory (background) window, so hover only reaches it
+        // with an always-active tracking area; without this the page-turn arrows
+        // never highlight while another app is focused.
+        ocwin::enable_background_hover(&window);
 
         let surface = self
             .instance
@@ -389,13 +400,17 @@ impl ApplicationHandler<Book> for App {
             }
             WindowEvent::RedrawRequested => self.render(),
             WindowEvent::CursorEntered { .. } => {
-                if let Some(win) = self.win.as_ref() {
-                    win.window.set_cursor(CursorIcon::Grab);
-                    ocwin::raise_to_front(&win.window);
-                }
+                // winit's own tracking rect and the always-active NSTrackingArea
+                // (enable_background_hover) both deliver mouseEntered:, so this can
+                // arrive twice per crossing; act only on the first to avoid a
+                // redundant raise/redraw.
                 if let Some(win) = self.win.as_mut() {
-                    win.hovered = true;
-                    win.window.request_redraw();
+                    if !win.hovered {
+                        win.hovered = true;
+                        win.window.set_cursor(CursorIcon::Grab);
+                        win.window.request_redraw();
+                        ocwin::raise_to_front(&win.window);
+                    }
                 }
             }
             WindowEvent::CursorLeft { .. } => {
