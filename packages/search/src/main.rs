@@ -47,7 +47,7 @@ struct Cli {
 enum Command {
     /// Grep the indexed chunks with a regular expression.
     Grep(GrepArgs),
-    /// Ingest a non-code source (slack, linear) from an export directory.
+    /// Ingest a non-code source (slack, linear, `claude_history`) from a directory.
     Ingest(IngestArgs),
     /// Garbage-collect a non-code source: delete store records absent from the
     /// export (a full-snapshot reconcile, never a window slice).
@@ -58,7 +58,7 @@ enum Command {
 /// these cover the record sources only.
 #[derive(Debug, Args)]
 struct IngestArgs {
-    /// Which source to ingest: slack or linear.
+    /// Which source to ingest: slack, linear, or `claude_history`.
     source: String,
 
     /// Path to the export directory.
@@ -262,19 +262,37 @@ async fn run_ingest(cli: IngestArgs, gc: bool) -> anyhow::Result<()> {
         .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
     let store = MixedbreadStore::from_login(base_url).await?;
     let dir = Path::new(&cli.dir);
-    let source: Source = cli.source.parse()?;
 
-    match source {
-        Source::Linear => {
+    // `source` is an open tag, so dispatch on the string: each record corpus has
+    // its own adapter crate. `code`/`web` are not ingested here, and an unknown
+    // tag fails loudly rather than silently doing nothing.
+    match cli.source.as_str() {
+        "linear" => {
             let adapter = linear_export::LinearExport::open(dir)?;
             run_one_source(&adapter, &store, &store_name, gc).await
         }
-        Source::Slack => {
+        "slack" => {
             let adapter = slack_export::SlackExport::open(dir)?;
             run_one_source(&adapter, &store, &store_name, gc).await
         }
-        Source::Code | Source::Web => anyhow::bail!(
-            "ingest covers record sources (slack, linear); code is indexed by a normal `search`"
+        "claude_history" => {
+            // claude_history is inherently multi-host: many machines upload into
+            // one store, so a single machine's export is a partial view. gc does
+            // a full-snapshot set-difference delete, which from one host would
+            // wipe every other host's records. Refuse it; ingest is additive.
+            if gc {
+                anyhow::bail!(
+                    "gc is not supported for claude_history: it is multi-host, so reconciling against one machine's export would delete other machines' records"
+                );
+            }
+            let adapter = claude_history::ClaudeHistoryExport::open(dir)?;
+            run_one_source(&adapter, &store, &store_name, gc).await
+        }
+        "code" | "web" => anyhow::bail!(
+            "ingest covers record sources (slack, linear, claude_history); code is indexed by a normal `search`"
+        ),
+        other => anyhow::bail!(
+            "no ingest adapter for source {other:?}; known record sources: slack, linear, claude_history"
         ),
     }
 }
@@ -704,7 +722,7 @@ fn render(
 ) -> String {
     // Only local code gets the `./path` prefix; web URLs and record titles
     // (Slack threads, Linear issues) print as-is.
-    let prefix = if hit.source == Source::Code { "./" } else { "" };
+    let prefix = if hit.source.is_code() { "./" } else { "" };
     let path = paint(palette.path, &format!("{prefix}{}", hit.label));
 
     // `start_line` is 0-based and `num_lines` is a line count, so the displayed
@@ -777,7 +795,7 @@ fn render_snippet(
     // parse context and code-highlight renders its own line-number gutter. Only
     // local code has a readable file; web/Slack/Linear hits fall through to a
     // plain gutter over the chunk text.
-    if hit.source == Source::Code
+    if hit.source.is_code()
         && let Some(num) = hit.num_lines
         && let Ok(source) = std::fs::read_to_string(root.join(&hit.label))
     {
@@ -840,7 +858,7 @@ mod tests {
     fn hit(text: &str) -> DisplayHit {
         DisplayHit {
             label: "web://example".to_owned(),
-            source: Source::Web,
+            source: Source::web(),
             start_line: Some(4),
             num_lines: Some(2),
             score: 0.5,

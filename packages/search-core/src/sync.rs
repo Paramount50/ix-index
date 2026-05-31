@@ -83,7 +83,7 @@ pub async fn sync(
     // attribution follow the most recent sync. That is rare (shared content is
     // usually boilerplate) and was already arbitrary under the unfiltered list.
     let scope = Filter::all(vec![
-        Filter::eq(keys::SOURCE, search_meta::Source::Code.as_str()),
+        Filter::eq(keys::SOURCE, search_meta::Source::code().as_str()),
         Filter::eq(keys::REPO, repo.as_str()),
     ]);
     let remote = store.list_external_ids(store_name, Some(&scope)).await?;
@@ -519,7 +519,7 @@ mod tests {
     impl SourceAdapter for FakeSource {
         type Error = FakeError;
         fn source(&self) -> search_meta::Source {
-            search_meta::Source::Linear
+            search_meta::Source::new("linear")
         }
         fn documents(&self) -> impl Iterator<Item = std::result::Result<Document, FakeError>> + Send {
             self.docs.clone().into_iter().map(Ok)
