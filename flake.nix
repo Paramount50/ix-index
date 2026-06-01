@@ -13,7 +13,11 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # Home Manager wired in via its NixOS module for per-tool XDG-shaped
     # config (Nushell, atuin, zoxide, starship, ...). Tracks master so it
