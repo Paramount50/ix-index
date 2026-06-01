@@ -9,9 +9,10 @@ use snafu::Snafu;
 #[snafu(visibility(pub(crate)))]
 #[non_exhaustive]
 pub enum Error {
-    /// A directory under the history root could not be listed.
-    #[snafu(display("failed to list directory {}", path.display()))]
-    ListDir {
+    /// A directory under the history root could not be read (a missing directory
+    /// is not an error; a permission or I/O fault is).
+    #[snafu(display("failed to read directory {}", path.display()))]
+    ReadDir {
         /// Directory that could not be read.
         path: PathBuf,
         /// Underlying I/O error.

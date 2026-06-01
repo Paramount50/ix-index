@@ -7,7 +7,7 @@
 //! [`sink_parquet`] sink. Pass `--mixedbread-store` and/or `--bucket` to enable a
 //! sink, and one or more source flags to choose what to ingest.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context as _;
@@ -86,6 +86,18 @@ struct Cli {
     /// Mixedbread only (code lives in git, not the parquet archive); repeatable.
     #[arg(long = "code-repo")]
     code_repos: Vec<PathBuf>,
+
+    /// Index one user's local history (claude, codex, atuin) by `NAME:HOME`,
+    /// repeatable. One process indexes many users — the fleet runs this as root
+    /// over every account — tagging each user's records with `NAME`. Symlinked
+    /// history paths are skipped so a privileged run cannot be a confused deputy.
+    #[arg(long = "user", value_name = "NAME:HOME")]
+    users: Vec<String>,
+
+    /// Host name to tag `--user` records with. Defaults to the system hostname;
+    /// the fleet module passes the NixOS `networking.hostName`.
+    #[arg(long)]
+    host: Option<String>,
 }
 
 #[tokio::main]
@@ -109,20 +121,33 @@ async fn main() -> anyhow::Result<()> {
     if store.is_none() && parquet.is_none() {
         anyhow::bail!("nothing to do: pass --mixedbread-store and/or --bucket");
     }
+    if !any_source_selected(&cli) {
+        anyhow::bail!(
+            "no sources selected: pass --local, --user NAME:HOME, --claude-dir/--codex-file/--atuin-db/--slack-export/--linear-export/--git-repo, or --code-repo"
+        );
+    }
     let mixedbread = store.as_ref().zip(cli.mixedbread_store.as_deref());
 
     let (indexed, failures) = run_sources(&cli, mixedbread, parquet.as_ref()).await;
 
-    let configured = indexed + failures;
-    if configured == 0 {
-        anyhow::bail!(
-            "no sources selected: pass --local and/or --claude-dir/--codex-file/--atuin-db/--slack-export/--linear-export/--git-repo/--code-repo"
-        );
-    }
     if failures > 0 {
-        anyhow::bail!("{failures} of {configured} source(s) failed; {indexed} succeeded");
+        anyhow::bail!("{failures} of {} source(s) failed; {indexed} succeeded", indexed + failures);
     }
     Ok(())
+}
+
+/// Whether any source flag was given (a config check, independent of how many
+/// records each source ends up producing).
+const fn any_source_selected(cli: &Cli) -> bool {
+    cli.local
+        || cli.claude_dir.is_some()
+        || cli.codex_file.is_some()
+        || cli.atuin_db.is_some()
+        || cli.slack_export.is_some()
+        || cli.linear_export.is_some()
+        || !cli.git_repos.is_empty()
+        || !cli.code_repos.is_empty()
+        || !cli.users.is_empty()
 }
 
 /// Resolve the selected sources and run each one independently (a failure never
@@ -200,7 +225,171 @@ async fn run_sources(
         let result = index_code(&label, repo_dir, mixedbread).await;
         record(&label, result, &mut indexed, &mut failures);
     }
+    if !cli.users.is_empty() {
+        run_users(cli, mixedbread, parquet, &mut indexed, &mut failures).await;
+    }
     (indexed, failures)
+}
+
+/// Run the `--user NAME:HOME` multi-user phase, accumulating into the shared
+/// counters. Split out of [`run_sources`] to keep each function focused.
+async fn run_users(
+    cli: &Cli,
+    mixedbread: Option<(&MixedbreadStore, &str)>,
+    parquet: Option<&sink_parquet::Config>,
+    indexed: &mut usize,
+    failures: &mut usize,
+) {
+    let host = match resolve_host(cli) {
+        Ok(host) => host,
+        Err(error) => {
+            // Without a host tag every claude/codex record would be mislabeled,
+            // so fail the whole multi-user phase rather than emit wrong metadata.
+            // Count it as one phase failure (no per-user work ran).
+            eprintln!("[users] failed to resolve host, skipping all --user sources: {error:#}");
+            *failures += 1;
+            return;
+        }
+    };
+    for spec in &cli.users {
+        match parse_user(spec) {
+            Ok((name, home)) => {
+                index_user(&name, &home, &host, mixedbread, parquet, indexed, failures).await;
+            }
+            Err(error) => {
+                eprintln!("[users] bad --user spec: {error:#}");
+                *failures += 1;
+            }
+        }
+    }
+}
+
+/// Index one user's local agent and shell history (claude, codex, atuin),
+/// reading under `home` and tagging records with `name` and `host`.
+///
+/// Designed for the privileged fleet run. Every history path is resolved with
+/// [`safe_path_under`], which refuses to follow a symlink at any user-controlled
+/// component, so a planted symlink cannot redirect a root read at another
+/// account's files (the claude adapter additionally refuses symlinks inside its
+/// tree). Absent sources are skipped; a parse failure in one source is recorded
+/// but does not abort the others.
+async fn index_user(
+    name: &str,
+    home: &Path,
+    host: &str,
+    mixedbread: Option<(&MixedbreadStore, &str)>,
+    parquet: Option<&sink_parquet::Config>,
+    indexed: &mut usize,
+    failures: &mut usize,
+) {
+    if let Some(claude_dir) = safe_path_under(home, &[".claude", "projects"], true) {
+        let label = format!("claude:{name}");
+        let parquet = parquet.map(|config| user_parquet(config, name));
+        let result = async {
+            let adapter = source_claude::ClaudeHistoryExport::open_with(&claude_dir, host, name)
+                .with_context(|| format!("parsing Claude transcripts for {name} at {}", claude_dir.display()))?;
+            run_source(&label, &adapter, mixedbread, parquet.as_ref()).await
+        }
+        .await;
+        record(&label, result, indexed, failures);
+    }
+
+    if let Some(codex_file) = safe_path_under(home, &[".codex", "history.jsonl"], false) {
+        let label = format!("codex:{name}");
+        let parquet = parquet.map(|config| user_parquet(config, name));
+        let result = async {
+            let adapter = source_codex::CodexHistory::open_with(&codex_file, host, name)
+                .with_context(|| format!("parsing Codex history for {name} at {}", codex_file.display()))?;
+            run_source(&label, &adapter, mixedbread, parquet.as_ref()).await
+        }
+        .await;
+        record(&label, result, indexed, failures);
+    }
+
+    // atuin records its own `host`/`user` in each row, so it self-tags per user
+    // regardless of who runs the process.
+    if let Some(atuin_db) = safe_path_under(home, &[".local", "share", "atuin", "history.db"], false) {
+        let label = format!("shell:{name}");
+        let parquet = parquet.map(|config| user_parquet(config, name));
+        let result = async {
+            let adapter = source_atuin::AtuinHistory::open(&atuin_db)
+                .with_context(|| format!("reading atuin history for {name} at {}", atuin_db.display()))?;
+            run_source(&label, &adapter, mixedbread, parquet.as_ref()).await
+        }
+        .await;
+        record(&label, result, indexed, failures);
+    }
+}
+
+/// Parse a `NAME:HOME` user spec. The name is everything before the first colon;
+/// both parts must be non-empty.
+fn parse_user(spec: &str) -> anyhow::Result<(String, PathBuf)> {
+    let (name, home) =
+        spec.split_once(':').with_context(|| format!("--user must be NAME:HOME, got {spec:?}"))?;
+    anyhow::ensure!(!name.is_empty(), "--user NAME must be non-empty in {spec:?}");
+    anyhow::ensure!(!home.is_empty(), "--user HOME must be non-empty in {spec:?}");
+    // NAME becomes a metadata tag and a `user=<name>` parquet partition segment,
+    // so keep it to a safe charset (no `/` or `=` that could cross partitions).
+    anyhow::ensure!(
+        name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')),
+        "--user NAME must be ascii alphanumeric plus `.`/`_`/`-`, got {name:?}"
+    );
+    Ok((name.to_owned(), PathBuf::from(home)))
+}
+
+/// A per-user parquet config: partition each user's rows under `user=<name>` so
+/// concurrently indexed users never overwrite the one shared per-source file.
+fn user_parquet(config: &sink_parquet::Config, name: &str) -> sink_parquet::Config {
+    sink_parquet::Config {
+        prefix: format!("{}/user={name}", config.prefix),
+        ..config.clone()
+    }
+}
+
+/// Resolve a user-controlled subpath under a trusted `home`, refusing to follow
+/// a symlink at any component. Returns the joined path only if every component in
+/// `rel` is a real (non-symlink) entry — intermediate ones directories, and the
+/// final one matching `want_dir` (a directory) or `!want_dir` (a regular file).
+///
+/// `home` comes from the system user database and is trusted; everything under
+/// it is attacker-controlled when this runs as root over other accounts. lstat'ing
+/// every component (not just the leaf) is what stops a planted symlink — at the
+/// root, an ancestor, or the leaf — from redirecting the read at another
+/// account's files (the confused-deputy class; see ix `history-ship`).
+///
+/// A narrow TOCTOU remains: a component could be swapped for a symlink between
+/// this check and the adapter's open. That residual race matches `history-ship`'s
+/// posture and is tracked for a shared `openat2(RESOLVE_NO_SYMLINKS)` hardening
+/// across both readers.
+fn safe_path_under(home: &Path, rel: &[&str], want_dir: bool) -> Option<PathBuf> {
+    let last = rel.len().checked_sub(1)?;
+    let mut path = home.to_path_buf();
+    for (index, component) in rel.iter().enumerate() {
+        path.push(component);
+        let meta = std::fs::symlink_metadata(&path).ok()?;
+        if meta.file_type().is_symlink() {
+            return None;
+        }
+        let ok = if index == last {
+            if want_dir { meta.is_dir() } else { meta.is_file() }
+        } else {
+            meta.is_dir()
+        };
+        if !ok {
+            return None;
+        }
+    }
+    Some(path)
+}
+
+/// The host name to tag `--user` records with: the `--host` override, else the
+/// system hostname.
+fn resolve_host(cli: &Cli) -> anyhow::Result<String> {
+    if let Some(host) = &cli.host {
+        return Ok(host.clone());
+    }
+    let raw = nix::unistd::gethostname().context("resolving the system host name")?;
+    Ok(raw.to_string_lossy().into_owned())
 }
 
 /// Index one code checkout via search-core's content-addressed reconcile
@@ -271,4 +460,73 @@ async fn run_source<A: SourceAdapter + Sync>(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    #![expect(clippy::expect_used, reason = "tests assert observable filesystem outcomes")]
+
+    use std::path::Path;
+
+    use super::{parse_user, safe_path_under};
+
+    #[test]
+    fn safe_path_accepts_real_nested_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join(".claude").join("projects")).expect("mkdir");
+        assert!(safe_path_under(temp.path(), &[".claude", "projects"], true).is_some());
+    }
+
+    #[test]
+    fn safe_path_rejects_symlinked_leaf() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        std::fs::create_dir_all(home.join(".codex")).expect("mkdir");
+        let secret = home.join("secret");
+        std::fs::write(&secret, b"x").expect("write");
+        std::os::unix::fs::symlink(&secret, home.join(".codex").join("history.jsonl")).expect("symlink");
+        assert!(safe_path_under(home, &[".codex", "history.jsonl"], false).is_none());
+    }
+
+    #[test]
+    fn safe_path_rejects_symlinked_ancestor() {
+        // The privileged threat: a user points an ancestor component at another
+        // tree so the root process reads through it.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path();
+        let victim = home.join("victim");
+        std::fs::create_dir_all(victim.join("projects")).expect("mkdir");
+        std::fs::write(victim.join("projects").join("s.jsonl"), b"{}").expect("write");
+        std::os::unix::fs::symlink(&victim, home.join(".claude")).expect("symlink");
+        assert!(
+            safe_path_under(home, &[".claude", "projects"], true).is_none(),
+            "a symlinked ancestor component must be rejected"
+        );
+    }
+
+    #[test]
+    fn safe_path_missing_is_none() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        assert!(safe_path_under(temp.path(), &[".codex", "history.jsonl"], false).is_none());
+    }
+
+    #[test]
+    fn safe_path_rejects_wrong_kind() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(temp.path().join(".claude").join("projects")).expect("mkdir");
+        // `projects` is a directory, but a file was requested.
+        assert!(safe_path_under(temp.path(), &[".claude", "projects"], false).is_none());
+    }
+
+    #[test]
+    fn parse_user_validates_name_and_spec() {
+        assert!(parse_user("a/b:/home/x").is_err(), "slash in name");
+        assert!(parse_user("a=b:/home/x").is_err(), "equals in name");
+        assert!(parse_user(":/home/x").is_err(), "empty name");
+        assert!(parse_user("alice:").is_err(), "empty home");
+        assert!(parse_user("noseparator").is_err(), "missing colon");
+        let (name, home) = parse_user("alice-1.2_3:/home/alice").expect("valid spec");
+        assert_eq!(name, "alice-1.2_3");
+        assert_eq!(home, Path::new("/home/alice"));
+    }
 }
