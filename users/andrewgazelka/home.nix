@@ -16,6 +16,14 @@
 #     Nothing is spoken;
 #   * the full-screen karma feed overlay it announces onto (`merge-orb-feed`),
 #     which renders both pop kinds and plays their per-kind sounds;
+#   * the CI progress bars (`services.ciBars`, the reusable
+#     packages/bossbar-overlay/ci-bars-home-module.nix), which draw one Minecraft
+#     boss bar per in-flight GitHub Actions run across our repos (green, filled by
+#     elapsed / average-duration; purple while a run is still queued or not yet
+#     picked up by a runner) and clear each as the run finishes. Silent (pr-watch
+#     owns the CI sounds) and a different palette from the ix-downtime outage bars
+#     (red/yellow/blue) so the two never read alike. This module just imports that
+#     component and turns it on with our repos;
 #   * the token-free `/optimize` history scan (`optimize-scan`);
 #   * the shared "play a gentle sound, then speak it detached" helper
 #     (`say-detached`), now used only by the ix-downtime watcher.
@@ -202,9 +210,19 @@ let
         ]
         (builtins.readFile ./scripts/pr-watch.sh);
   };
+
+  # The CI progress bars are a standalone reusable component, not personal glue:
+  # this just composes it (imported below, turned on in config). Anyone can do
+  # the same with `services.ciBars = { enable = true; repos = [ ... ]; }`.
+  ciBarsModule = import ../../packages/bossbar-overlay/ci-bars-home-module.nix {
+    inherit indexPackages portableServicesModule;
+  };
 in
 {
-  imports = [ portableServicesModule ];
+  imports = [
+    portableServicesModule
+    ciBarsModule
+  ];
 
   options.users.andrewgazelka = {
     enable = lib.mkEnableOption "andrewgazelka's personal services (ix-downtime watcher + boss bar overlay)";
@@ -305,6 +323,10 @@ in
         '';
       };
     };
+
+    # CI progress bars are configured through the reusable `services.ciBars`
+    # module (imported above); this module just turns it on with our repos in
+    # `config`. No personal options needed here.
 
     sound.linuxSayCommand = lib.mkOption {
       type = lib.types.str;
@@ -412,5 +434,15 @@ in
         };
       })
     ];
+
+    # Compose the reusable CI progress bars (the `services.ciBars` module imported
+    # above): one boss bar per in-flight Actions run on our repos. Everything else
+    # (script, palette, average-duration logic) lives in that shared component, so
+    # this is the whole personal config for it.
+    services.ciBars = {
+      enable = true;
+      repos = cfg.prWatch.repos;
+      logDir = cfg.logDir;
+    };
   };
 }
