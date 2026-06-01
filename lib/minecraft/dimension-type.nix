@@ -1,25 +1,9 @@
 { lib }:
 let
+  inherit (import ../deep-merge.nix { inherit lib; }) rhs;
+
   defaults = import ./dimension-type-defaults.nix;
   bases = lib.attrNames defaults;
-
-  # True recursive merge: descend whenever both sides are attrsets, otherwise
-  # rhs wins at the leaf. Single-owner construction expressed as a function so
-  # the merge stays local to dimension-type rendering.
-  deepMerge =
-    lhs: rhs:
-    if
-      builtins.isAttrs lhs && builtins.isAttrs rhs && !lib.isDerivation lhs && !lib.isDerivation rhs
-    then
-      let
-        keys = lib.unique (lib.attrNames lhs ++ lib.attrNames rhs);
-        mergeKey =
-          key:
-          if lhs ? ${key} && rhs ? ${key} then deepMerge lhs.${key} rhs.${key} else rhs.${key} or lhs.${key};
-      in
-      lib.genAttrs keys mergeKey
-    else
-      rhs;
 
   # MC dimension-type alignment & range. The 16-block alignment comes from
   # chunk sections; the [-2032, 2031] band and 4064 height cap are Java's
@@ -92,7 +76,7 @@ let
       base = value.base or null;
       overrides = removeAttrs value [ "base" ];
       baseDefaults = if base == null then { } else defaults.${base};
-      merged = deepMerge baseDefaults overrides;
+      merged = rhs baseDefaults overrides;
       withLogical = merged // {
         logical_height = merged.logical_height or (merged.height or null);
       };
@@ -104,6 +88,5 @@ in
     defaults
     bases
     withBase
-    deepMerge
     ;
 }

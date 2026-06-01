@@ -163,6 +163,14 @@ let
   errors = import ./errors.nix { inherit lib; };
 
   /**
+    Recursive attrset merge with two collision policies (`strict` throws,
+    `rhs` wins) plus an N-ary `strictList`. Single sanctioned replacement
+    for hand-rolled deep-merge and the patterns the `no-recursive-update`
+    rule flags. See [`lib/deep-merge.nix`](lib/deep-merge.nix).
+  */
+  deepMerge = import ./deep-merge.nix { inherit lib; };
+
+  /**
     Utilities for option values that are later joined under a runtime
     directory.
 
@@ -340,6 +348,7 @@ let
       buildUvApplication
       buildZigPackage
       cargoUnit
+      deepMerge
       goUnit
       languages
       minecraft

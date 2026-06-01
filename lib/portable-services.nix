@@ -27,6 +27,7 @@ let
     mkOption
     optionalAttrs
     ;
+  inherit (import ./deep-merge.nix { inherit lib; }) rhs;
 
   /**
     Submodule type for a single portable service.
@@ -215,12 +216,7 @@ let
       // optionalAttrs (svc.standardOutPath != null) { StandardOutPath = svc.standardOutPath; }
       // optionalAttrs (svc.standardErrorPath != null) { StandardErrorPath = svc.standardErrorPath; };
     in
-    # Deliberate deep merge: the escape hatch must override generated keys at the
-    # leaf (e.g. add `Service.MemoryMax` without dropping the generated
-    # `Service.ExecStart`). A shallow `//` would replace whole sections, so
-    # recursiveUpdate's leaf-level override is the wanted behavior here, not a bug.
-    # ast-grep-ignore: no-recursive-update
-    lib.recursiveUpdate generated svc.launchd.config;
+    rhs generated svc.launchd.config;
 
   /**
     Render one argv element to a systemd `ExecStart` token.
@@ -302,11 +298,7 @@ let
           null;
     in
     {
-      # Deliberate deep merge: the escape hatch must override generated unit keys
-      # at the leaf (e.g. add `Service.MemoryMax` while keeping the generated
-      # `Service.ExecStart`). A shallow `//` would replace whole sections.
-      # ast-grep-ignore: no-recursive-update
-      service = lib.recursiveUpdate generatedService svc.systemd.service;
+      service = rhs generatedService svc.systemd.service;
       timer = generatedTimer;
     };
 

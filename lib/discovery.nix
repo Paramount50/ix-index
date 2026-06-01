@@ -7,21 +7,11 @@
   ixReturn,
 }:
 let
+  inherit (import ./deep-merge.nix { inherit lib; }) strictList;
+
   listHasPrefix =
     prefix: list:
     builtins.length prefix <= builtins.length list && lib.take (builtins.length prefix) list == prefix;
-
-  mergeNestedAttrs =
-    attrs:
-    lib.zipAttrsWith (
-      name: values:
-      if builtins.all builtins.isAttrs values then
-        mergeNestedAttrs values
-      else if builtins.length values == 1 then
-        builtins.head values
-      else
-        throw "discoverModules: duplicate module output '${name}'"
-    ) attrs;
 
   /**
     Walk a directory tree and return `{ <name> = { path; metadata; }; }`.
@@ -233,7 +223,7 @@ let
         in
         lib.setAttrByPath outputPath entry.path;
     in
-    mergeNestedAttrs (map entryAsTree entries);
+    strictList (map entryAsTree entries);
 
   /**
     Discovered example fleets, built for a given host system. Discovery

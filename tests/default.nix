@@ -3272,6 +3272,54 @@ let
           && !(builtins.elem "click-8.1.7.tar.gz" uvWheelhouseDistributionNames);
         message = "uv wheelhouses should prefer compatible wheels over sdists";
       }
+      {
+        assertion =
+          ix.deepMerge.strict { a = { x = 1; }; b = 2; } { a = { y = 3; }; c = 4; }
+          == { a = { x = 1; y = 3; }; b = 2; c = 4; };
+        message = "deepMerge.strict should recursively union disjoint subtrees";
+      }
+      {
+        assertion =
+          !(builtins.tryEval (
+            builtins.deepSeq (ix.deepMerge.strict { a.b = 1; } { a.b = 2; }) null
+          )).success;
+        message = "deepMerge.strict should throw on a colliding leaf";
+      }
+      {
+        assertion =
+          ix.deepMerge.rhs
+            { Service = { ExecStart = "/run/wrapped"; Restart = "on-failure"; }; }
+            { Service = { Restart = "always"; MemoryMax = "512M"; }; }
+          == {
+            Service = {
+              ExecStart = "/run/wrapped";
+              Restart = "always";
+              MemoryMax = "512M";
+            };
+          };
+        message = "deepMerge.rhs should override leaves while keeping sibling keys at the same path";
+      }
+      {
+        assertion =
+          ix.deepMerge.rhs { pkg = pkgs.hello; } { pkg = pkgs.coreutils; } == { pkg = pkgs.coreutils; };
+        message = "deepMerge.rhs should treat derivations as atomic leaves";
+      }
+      {
+        assertion =
+          !(builtins.tryEval (
+            builtins.deepSeq (ix.deepMerge.strict { pkg = pkgs.hello; } { pkg = pkgs.coreutils; }) null
+          )).success;
+        message = "deepMerge.strict should throw on a derivation collision instead of recursing into it";
+      }
+      {
+        assertion =
+          ix.deepMerge.strictList [
+            { a.x = 1; }
+            { a.y = 2; }
+            { b = 3; }
+          ] == { a = { x = 1; y = 2; }; b = 3; };
+        message = "deepMerge.strictList should fold strict over a list of disjoint trees";
+      }
     ];
 
     languages = [

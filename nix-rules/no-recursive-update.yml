@@ -1,16 +1,21 @@
 id: no-recursive-update
 language: nix
 severity: warning
-message: "lib.recursiveUpdate can silently drop nested attributes. Prefer building the attrset in one place or using mkMerge."
+message: "lib.recursiveUpdate silently replaces at leaf collisions. Use ix.deepMerge.strict (throws on collision) or ix.deepMerge.rhs (rhs wins) from `lib/deep-merge.nix`."
 note: |
-  WHY: recursiveUpdate does a shallow merge at each nesting level — if both sides
-  have an attr at the same path, the second completely replaces the first, silently
-  dropping any nested keys from the first. This is a frequent source of subtle bugs.
-  The // operator has the same problem at the top level.
-  NIXPKGS: Partially — nix.dev best practices warn about // dropping nested attrs
-  and recommend lib.recursiveUpdate as a workaround, but recursiveUpdate itself
-  still silently replaces at leaf conflicts. The real fix is single-owner construction.
-  REPO: Prefer building the full attrset in one place or using lib.mkMerge for
-  NixOS module option merging.
+  WHY: recursiveUpdate recurses into nested attrsets but silently rhs-replaces
+  whenever both sides hit a non-attrset leaf at the same path. That hidden
+  resolution is a frequent source of subtle bugs because the caller cannot tell
+  from the call site whether a collision happened.
+  REPO: Use the named helpers in `lib/deep-merge.nix`:
+    * `ix.deepMerge.strict` throws naming the colliding attr path. Use when
+      two inputs are supposed to contribute disjoint subtrees.
+    * `ix.deepMerge.rhs` keeps the rhs-wins behavior but is explicit about it.
+      Use for layered overrides where the second argument is a deliberate
+      override (vanilla defaults plus user fields, generated unit plus
+      escape-hatch keys).
+    * `ix.deepMerge.strictList` folds `strict` over a list of attrsets.
+  Single-owner attrset construction or `lib.mkMerge` is still preferred where
+  the merge is incidental rather than load-bearing.
 rule:
   pattern: lib.recursiveUpdate $A $B

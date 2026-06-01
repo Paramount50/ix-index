@@ -36,29 +36,7 @@ let
     # `passthru.updateScript` without re-threading `ix` through callPackage.
     writeNushellApplication = ixForPackages.writeNushellApplication pkgs;
   };
-  mergePackageTrees =
-    left: right:
-    lib.foldl' (
-      acc: name:
-      let
-        rightValue = right.${name};
-      in
-      if builtins.hasAttr name acc then
-        let
-          leftValue = acc.${name};
-        in
-        if
-          builtins.isAttrs leftValue
-          && builtins.isAttrs rightValue
-          && !(lib.isDerivation leftValue)
-          && !(lib.isDerivation rightValue)
-        then
-          acc // { ${name} = mergePackageTrees leftValue rightValue; }
-        else
-          throw "packageSetFor: duplicate package attr path segment `${name}`"
-      else
-        acc // { ${name} = rightValue; }
-    ) left (builtins.attrNames right);
+  inherit (import ./deep-merge.nix { inherit lib; }) strictList;
   buildEntry =
     entry:
     let
@@ -67,6 +45,4 @@ let
     lib.callPackageWith autoArgs entry.path { };
   packageTreeFor = entry: lib.setAttrByPath entry.packageSet.attrPath (buildEntry entry);
 in
-lib.foldl' mergePackageTrees { } (
-  map packageTreeFor (packageRegistry.packageSetEntriesFor packageSystem)
-)
+strictList (map packageTreeFor (packageRegistry.packageSetEntriesFor packageSystem))
