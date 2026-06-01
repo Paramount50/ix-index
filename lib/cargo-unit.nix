@@ -57,18 +57,7 @@ let
     sourceOverrides = args.sourceOverrides or { };
     outputHashes = args.outputHashes or { };
     contentAddressed = args.contentAddressed or false;
-    policy =
-      let
-        rawPolicy = args.policy or { };
-        rawCargoAudit = rawPolicy.cargoAudit or { };
-        resolved = rust.resolvePolicy rawPolicy;
-      in
-      resolved
-      // {
-        cargoAudit = resolved.cargoAudit // {
-          enable = rawCargoAudit.enable or true;
-        };
-      };
+    policy = rust.resolvePolicy (args.policy or { });
   };
 
   workspaceRootFor =
