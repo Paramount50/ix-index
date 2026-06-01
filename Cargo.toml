@@ -24,6 +24,7 @@ members = [
   "packages/file-search",
   "packages/git-log-pretty",
   "packages/github-avatar",
+  "packages/indexbench",
   "packages/ix-dev-diagnose",
   "packages/kitty",
   "packages/macos-vm",
@@ -107,6 +108,7 @@ clone-scanner = { path = "packages/clone-detect/scanner" }
 code-highlight = { path = "packages/code-highlight" }
 code-tokenizer = { path = "packages/code-tokenizer" }
 github-avatar = { path = "packages/github-avatar" }
+indexbench = { path = "packages/indexbench" }
 kitty = { path = "packages/kitty" }
 color-eyre = "0.6"
 dashboard-core = { path = "packages/dashboard-core" }
