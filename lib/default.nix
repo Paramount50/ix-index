@@ -323,26 +323,24 @@ let
   appleSdkToolchain = import ./apple-sdk-toolchain.nix;
 
   /**
-    Cross-cutting helpers handed to every module through `specialArgs.ix`.
-    Keep this surface small and stable: anything here is part of the
-    cross-module contract.
+    Helper surface shared by both the per-module `specialArgs.ix`
+    (`ixSpecialArgs`) and the public `index.lib` (`ixReturn`). Listed once
+    here so a new shared helper reaches both surfaces from a single edit;
+    each consumer splices its own extras on top with `//`.
   */
-  ixSpecialArgs = {
+  sharedHelpers = {
     inherit
-      artifacts
       agentContext
-      skills
+      artifacts
       buildGradleFatJar
-      buildRustPackage
       buildJsSite
+      buildLibghosttyVt
       buildNpmVitest
       buildSvelteSite
       buildUvApplication
       buildZigPackage
-      buildLibghosttyVt
       cargoUnit
       goUnit
-      islandsTheme
       languages
       minecraft
       mkBenchSuite
@@ -354,11 +352,21 @@ let
       rustWorkspace
       rustWorkspaceFor
       secrets
+      skills
       systemdHardening
       writeNushellApplication
       writeProcessComposeApplication
       writePythonApplication
       ;
+  };
+
+  /**
+    Cross-cutting helpers handed to every module through `specialArgs.ix`.
+    Keep this surface small and stable: anything here is part of the
+    cross-module contract.
+  */
+  ixSpecialArgs = sharedHelpers // {
+    inherit buildRustPackage islandsTheme;
     packages = packageSetFor pkgs;
   };
 
@@ -404,57 +412,30 @@ let
   # Self-reference (let-bindings are mutually recursive): `exampleFleetsFor`
   # passes `ixReturn` back into examples as `index.lib`. Forced only when
   # an example actually reads from it.
-  ixReturn = {
+  ixReturn = sharedHelpers // {
     inherit
-      system
-      pkgs
-      overlay
-      overlays
-      evalImageConfig
-      mkImage
-      mkFleet
-      mkFleetFor
-      discoverTree
+      appleSdkToolchain
+      bunLockFor
+      cargoUnitFor
       discoverImages
       discoverModules
-      nixosModules
-      portableServices
-      mutableJson
-      exampleFleetsFor
-      artifacts
-      agentContext
-      skills
-      buildGradleFatJar
-      buildJsSite
-      buildNpmVitest
-      buildSvelteSite
-      buildUvApplication
-      buildZigPackage
-      buildLibghosttyVt
-      bunLockFor
-      cargoUnit
-      cargoUnitFor
+      discoverTree
       errors
-      goUnit
+      evalImageConfig
+      exampleFleetsFor
       goUnitFor
-      languages
       macosSdk
-      appleSdkToolchain
-      minecraft
-      mkBenchSuite
-      mkMinecraftLoader
-      mkMinecraftNbtFormat
-      mkMinecraftSyncManaged
+      mkFleet
+      mkFleetFor
+      mkImage
+      nixosModules
+      overlay
+      overlays
       packageSetFor
-      relativePath
-      rustWorkspace
-      rustWorkspaceFor
-      secrets
-      systemdHardening
+      pkgs
+      portableServices
+      system
       uvLockFor
-      writeNushellApplication
-      writeProcessComposeApplication
-      writePythonApplication
       ;
 
     /**

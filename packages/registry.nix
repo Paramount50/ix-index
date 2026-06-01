@@ -45,53 +45,56 @@ let
     ) "${label}: unsupported keys: ${lib.concatStringsSep ", " unknownKeys}";
     value;
 
-  normalizePackageSet =
+  # Optional, system-scoped target descriptor: null/false disables it, true takes
+  # the package id as the selector, and an attrset overrides the named selector
+  # key and/or `systems`. packageSet selects by `attrPath`, flake/overlay by
+  # `attrName`.
+  normalizeTarget =
+    {
+      name,
+      key,
+      default,
+      extraKeys ? [ ],
+    }:
     label: id: value:
     if value == null || value == false then
       null
     else if value == true then
       {
-        attrPath = [ id ];
+        ${key} = default id;
         systems = null;
       }
     else
-      assertKnownKeys "${label}: packageSet" [ "attrPath" "systems" ] value
+      assertKnownKeys "${label}: ${name}" (
+        [
+          key
+          "systems"
+        ]
+        ++ extraKeys
+      ) value
       // {
-        attrPath = value.attrPath or [ id ];
+        ${key} = value.${key} or (default id);
         systems = value.systems or null;
       };
 
-  normalizeFlake =
-    label: id: value:
-    if value == null || value == false then
-      null
-    else if value == true then
-      {
-        attrName = id;
-        systems = null;
-      }
-    else
-      assertKnownKeys "${label}: flake" [ "attrName" "systems" ] value
-      // {
-        attrName = value.attrName or id;
-        systems = value.systems or null;
-      };
+  normalizePackageSet = normalizeTarget {
+    name = "packageSet";
+    key = "attrPath";
+    default = id: [ id ];
+  };
 
-  normalizeOverlay =
-    label: id: value:
-    if value == null || value == false then
-      null
-    else if value == true then
-      {
-        attrName = id;
-        systems = null;
-      }
-    else
-      assertKnownKeys "${label}: overlay" [ "attrName" "build" "systems" ] value
-      // {
-        attrName = value.attrName or id;
-        systems = value.systems or null;
-      };
+  normalizeFlake = normalizeTarget {
+    name = "flake";
+    key = "attrName";
+    default = lib.id;
+  };
+
+  normalizeOverlay = normalizeTarget {
+    name = "overlay";
+    key = "attrName";
+    default = lib.id;
+    extraKeys = [ "build" ];
+  };
 
   normalizePassthruTests =
     label: id: value:
