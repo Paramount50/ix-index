@@ -312,7 +312,8 @@ fn scope_kwargs(
     host: Option<&[String]>,
     project: Option<&[String]>,
 ) -> String {
-    let mut parts: Vec<String> = Vec::new();
+    use std::fmt::Write as _;
+    let mut out = String::new();
     for (key, values) in [
         ("source", source),
         ("user", user),
@@ -320,18 +321,13 @@ fn scope_kwargs(
         ("project", project),
     ] {
         if let Some(values) = values.filter(|values| !values.is_empty()) {
-            parts.push(format!("{key}={}", json!(values)));
+            let _ = write!(out, ", {key}={}", json!(values));
         }
     }
     if let Some(repo) = repo.filter(|repo| !repo.is_empty()) {
-        parts.push(format!("repo={}", json!(repo)));
+        let _ = write!(out, ", repo={}", json!(repo));
     }
-    let mut suffix = String::new();
-    if !parts.is_empty() {
-        suffix.push_str(", ");
-        suffix.push_str(&parts.join(", "));
-    }
-    suffix
+    out
 }
 
 impl McpServer {

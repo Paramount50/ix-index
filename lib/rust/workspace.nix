@@ -6,7 +6,7 @@
   ghostty,
   writeNushellApplication,
   # Cross-compilation leaves, threaded in so `unitsFor { target }` can build a
-  # second unit graph for a non-host triple without `rust-workspace.nix` having
+  # second unit graph for a non-host triple without `workspace.nix` having
   # to reach back into the assembled `ix` surface.
   rustToolchainFor,
   appleSdkToolchain,
@@ -22,9 +22,11 @@ let
   # build script's own link-search does not propagate to the final per-unit
   # link in this graph; see the alsa note below for the same shape). The dylib
   # dir is also a runtime input for the ix-vt tests, which dlopen it.
-  libghosttyVt = (import ./libghostty-vt.nix { inherit lib writeNushellApplication; }) workspacePkgs {
-    ghosttySource = ghostty;
-  };
+  libghosttyVt =
+    (import ../build/libghostty-vt.nix { inherit lib writeNushellApplication; }) workspacePkgs
+      {
+        ghosttySource = ghostty;
+      };
   ghosttyLibDir = "${libghosttyVt}/lib";
   rustPackageFiles =
     packagePath:
@@ -221,7 +223,7 @@ in
 
     `target` is a Rust target triple. `aarch64-apple-darwin` /
     `x86_64-apple-darwin` build through the zig + macOS SDK toolchain (see
-    [`lib/apple-sdk-toolchain.nix`](lib/apple-sdk-toolchain.nix)); other triples
+    [`lib/darwin/apple-sdk-toolchain.nix`](lib/darwin/apple-sdk-toolchain.nix)); other triples
     (e.g. `x86_64-unknown-linux-musl`) build with the ordinary linker and only
     need a toolchain carrying the target `rust-std`. Returns the same shape as
     `units`; select a binary with `ix.cargoUnit.selectBinaryWithTests` or
