@@ -1,5 +1,8 @@
 # ix-mcp
 
+<img width="985" height="1083" alt="Dia 2026-06-03 15 57 22" src="https://github.com/user-attachments/assets/e0815b1a-7126-4ba0-9315-a7db53615266" />
+<img width="2100" height="1540" alt="IMG_7380" src="https://github.com/user-attachments/assets/f7d34718-d44a-441a-9927-d367a725de04" />
+
 A notebook-first MCP server. An AI agent and a human drive **one live Jupyter
 notebook** together: every tool call edits a real `.ipynb` through Jupyter's
 real-time-collaboration layer, so a person who opens the same notebook in
