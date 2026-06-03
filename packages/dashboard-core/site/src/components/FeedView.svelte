@@ -11,10 +11,11 @@
   // The feed: a chronological timeline of panes, newest first. Each block puts the
   // input on the left and its execution/output on the right — for an exec that is
   // source | output. The output is the larger, fuller column; the code is the
-  // supporting one. No per-block title (the code column *is* the input, so a title
-  // taken from the source's first line would just be noise). Non-exec panes have
-  // no input column, so their output spans the block. Click a block to open it
-  // fullscreen.
+  // supporting one. Each block leads with the pane title, which for an exec is the
+  // caller's `intent` (a plain-language statement of what the run is for), so the
+  // feed reads as a list of intents rather than code; the lang/op/session sit
+  // beside it as quiet meta. Non-exec panes have no input column, so their output
+  // spans the block. Click a block to open it fullscreen.
 
   function ledLive(p: Pane): boolean {
     const kind = p.kind ?? 'data';
@@ -81,6 +82,7 @@
         <article class="entry">
           <button class="entry-meta" onclick={() => focusPane(it.key)} title="open fullscreen">
             <span class="entry-led" class:live={ledLive(p)} class:run={ledRun(p)} class:err={ledErr(p)}></span>
+            {#if p.title}<span class="entry-title" title={p.title}>{p.title}</span>{/if}
             <span class="entry-tag">{tag(p)}</span>
             {#if p.subtitle}<span class="entry-sub">{p.subtitle}</span>{/if}
             <span class="entry-spacer"></span>
