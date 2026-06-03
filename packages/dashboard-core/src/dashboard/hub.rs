@@ -99,6 +99,12 @@ fn view_scalars(view: &View) -> Vec<(&'static str, Scalar)> {
             ("lang", Scalar::Str(e.lang.clone())),
             ("running", Scalar::Bool(e.running)),
             ("ok", e.ok.map_or(Scalar::Absent, Scalar::Bool)),
+            (
+                "duration_ms",
+                e.duration_ms.map_or(Scalar::Absent, |ms| {
+                    Scalar::Int(i64::try_from(ms).unwrap_or(i64::MAX))
+                }),
+            ),
         ],
         View::Data(d) => vec![("renderer", Scalar::Str(d.renderer.clone()))],
     }
@@ -607,6 +613,7 @@ mod tests {
                     result: String::new(),
                     running: false,
                     ok: Some(true),
+                    duration_ms: Some(9),
                     trace: Vec::new(),
                 },
             ),
@@ -648,6 +655,7 @@ mod tests {
                 result: String::new(),
                 running: true,
                 ok: None,
+                duration_ms: None,
                 trace: Vec::new(),
             },
         );
@@ -666,6 +674,7 @@ mod tests {
                 result: String::new(),
                 running: false,
                 ok: Some(true),
+                duration_ms: Some(4),
                 trace: vec![ExecTraceLine { line: 1, text: "hi\n".to_owned() }],
             },
         );

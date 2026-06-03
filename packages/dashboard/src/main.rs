@@ -318,6 +318,7 @@ fn demo_panes(tick: u64) -> Vec<Pane> {
             result: String::new(),
             running,
             ok: if running { None } else { Some(true) },
+            duration_ms: if running { None } else { Some(420) },
             // The loop's prints all come from the second source line.
             trace: if running {
                 Vec::new()

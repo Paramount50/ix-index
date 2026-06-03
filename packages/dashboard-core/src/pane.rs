@@ -220,6 +220,11 @@ pub struct ExecView {
     /// a Python exception or a transport failure (timeout, cancel).
     #[serde(default)]
     pub ok: Option<bool>,
+    /// Wall-clock the call took, in milliseconds, set when it finishes. `None`
+    /// while running, or for a finish path with no measured start. The frontend
+    /// shows it instead of an age so a row reads as "how long it took".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
     /// Inline-trace execution: each chunk of captured stdout paired with the
     /// 1-based `source` line that emitted it, in emission order, so the view can
     /// render output beside the line that produced it. This is the "inline
@@ -372,6 +377,7 @@ mod tests {
                         result: String::new(),
                         running: false,
                         ok: Some(true),
+                        duration_ms: Some(12),
                         trace: Vec::new(),
                     },
                 ),
@@ -402,6 +408,7 @@ mod tests {
                 result: String::new(),
                 running: true,
                 ok: None,
+                duration_ms: None,
                 trace: Vec::new(),
             },
         );

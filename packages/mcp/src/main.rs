@@ -195,7 +195,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Evaluate a Python expression in a persistent session. Pass a one-line `intent` describing what the call is for; it titles the run's dashboard card. Top-level await works (e.g. `await client.get(url)`); the session keeps one event loop, so async clients and pools created in one call stay usable in later calls. Times out after 60s by default; pass `timeout_secs` to allow longer. On timeout or a client cancel the call returns an error and the worker is restarted, so a hung cell can't wedge the session (session state is lost on restart)."
+        description = "Evaluate a Python expression in a persistent session. Pass a one-line present-continuous `intent` (e.g. \"counting rows in the parquet\") describing what the call is doing; it titles the run's dashboard card. Top-level await works (e.g. `await client.get(url)`); the session keeps one event loop, so async clients and pools created in one call stay usable in later calls. Times out after 60s by default; pass `timeout_secs` to allow longer. On timeout or a client cancel the call returns an error and the worker is restarted, so a hung cell can't wedge the session (session state is lost on restart)."
     )]
     async fn python_eval(
         &self,
@@ -215,7 +215,7 @@ impl McpServer {
     }
 
     #[tool(
-        description = "Execute Python statements in a persistent session. Pass a one-line `intent` describing what the call is for; it titles the run's dashboard card. Top-level await works (e.g. `await pool.fetch(sql)`); the session keeps one event loop, so async resources created in one call stay usable in later calls. Times out after 60s by default; pass `timeout_secs` to allow longer. On timeout or a client cancel the call returns an error and the worker is restarted, so a hung cell can't wedge the session (session state is lost on restart)."
+        description = "Execute Python statements in a persistent session. Pass a one-line present-continuous `intent` (e.g. \"building the join index\") describing what the call is doing; it titles the run's dashboard card. Top-level await works (e.g. `await pool.fetch(sql)`); the session keeps one event loop, so async resources created in one call stay usable in later calls. Times out after 60s by default; pass `timeout_secs` to allow longer. On timeout or a client cancel the call returns an error and the worker is restarted, so a hung cell can't wedge the session (session state is lost on restart)."
     )]
     async fn python_exec(
         &self,
@@ -489,9 +489,10 @@ struct SessionRequest {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EvalRequest {
-    /// One short, human-readable line stating what this call is for (e.g. "count
-    /// rows in the orders parquet"). Shown as the run's dashboard card title so
-    /// the board reads as a list of intents, not raw code. Required.
+    /// One short present-continuous phrase for what this call is doing, e.g.
+    /// "counting rows in the orders parquet" (not "count rows"). Shown as the
+    /// run's dashboard card title so the board reads as a live list of actions,
+    /// not raw code. Required.
     intent: String,
     expression: String,
     session_id: Option<String>,
@@ -503,9 +504,10 @@ struct EvalRequest {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ExecRequest {
-    /// One short, human-readable line stating what this call is for (e.g. "load
-    /// the CSV and build the join index"). Shown as the run's dashboard card
-    /// title so the board reads as a list of intents, not raw code. Required.
+    /// One short present-continuous phrase for what this call is doing, e.g.
+    /// "loading the CSV and building the join index" (not "load the CSV"). Shown
+    /// as the run's dashboard card title so the board reads as a live list of
+    /// actions, not raw code. Required.
     intent: String,
     source: String,
     session_id: Option<String>,

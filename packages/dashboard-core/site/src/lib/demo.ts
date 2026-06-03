@@ -12,7 +12,7 @@ export function seedDemo(): void {
     // Inline-trace: a traced exec — each printed line's output shown inline beside it.
     [`demo${SEP}files`]: {
       kind: 'exec',
-      title: 'list files',
+      title: 'listing tracked files',
       subtitle: 'exec · demo',
       lang: 'python',
       source:
@@ -29,24 +29,26 @@ export function seedDemo(): void {
       ]),
       running: false,
       ok: true,
+      duration_ms: 1240,
       created_at: now - 3000,
     },
     // Auto-detected JSON output, syntax-highlighted.
     [`demo${SEP}json`]: {
       kind: 'exec',
-      title: 'status',
+      title: 'checking dashboard status',
       subtitle: 'eval · demo',
       lang: 'python',
       source: 'import json\njson.dumps({"service": "dashboard", "ok": True, "panes": 13})',
       result: '{"service": "dashboard", "ok": true, "panes": 13, "nested": {"a": [1, 2, 3]}}',
       running: false,
       ok: true,
+      duration_ms: 38,
       created_at: now - 9000,
     },
     // An error: prints before failing, traceback below the trace; red LED.
     [`demo${SEP}boom`]: {
       kind: 'exec',
-      title: 'oops',
+      title: 'indexing into a list',
       subtitle: 'exec · demo',
       lang: 'python',
       source: 'x = [1, 2, 3]\nprint("before the error")\nprint(x[10])',
@@ -56,6 +58,7 @@ export function seedDemo(): void {
       trace: JSON.stringify([{ line: 2, text: 'before the error\n' }]),
       running: false,
       ok: false,
+      duration_ms: 5,
       created_at: now - 20000,
     },
     'demo-term': {

@@ -27,6 +27,7 @@ fn exec_pane() -> Pane {
             result: String::new(),
             running: false,
             ok: Some(true),
+            duration_ms: Some(7),
             trace: Vec::new(),
         },
     )

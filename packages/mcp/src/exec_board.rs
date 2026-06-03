@@ -17,8 +17,10 @@
     reason = "lock the pane set, reconcile it under the guard, then drop the guard before publishing: the same guard-then-extract pattern dashboard-core allows for its shared locks"
 )]
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow};
 use dashboard_core::{ExecTraceLine, ExecView, Pane, PaneSink, Publisher, View, socket_path};
@@ -63,6 +65,10 @@ pub struct ExecBoard {
     sink: PaneSink,
     panes: Mutex<Vec<Pane>>,
     seq: AtomicU64,
+    // Monotonic start instant per in-flight pane id, set on `start` and consumed
+    // on the first finish to stamp the run's wall-clock duration. A monotonic
+    // `Instant` (not `SystemTime`) so a clock adjustment can't skew the measure.
+    started: Mutex<HashMap<String, Instant>>,
 }
 
 impl ExecBoard {
@@ -79,6 +85,7 @@ impl ExecBoard {
             sink,
             panes: Mutex::new(Vec::new()),
             seq: AtomicU64::new(0),
+            started: Mutex::new(HashMap::new()),
         })
     }
 
@@ -97,6 +104,7 @@ impl ExecBoard {
     ) -> String {
         let n = self.seq.fetch_add(1, Ordering::Relaxed);
         let id = format!("{session}/{n}");
+        self.started.lock().insert(id.clone(), Instant::now());
         let mut pane = Pane::exec(
             &id,
             ExecView {
@@ -107,6 +115,7 @@ impl ExecBoard {
                 result: String::new(),
                 running: true,
                 ok: None,
+                duration_ms: None,
                 trace: Vec::new(),
             },
         );
@@ -195,6 +204,7 @@ impl ExecBoard {
     /// pane (e.g. a long-running loop that ran to the timeout) and surface the
     /// error as the pane's stderr, so the live output is not erased on failure.
     pub fn finish_error(&self, id: &str, error: &str) {
+        let duration_ms = self.take_duration_ms(id);
         {
             let mut panes = self.panes.lock();
             if let Some(View::Exec(view)) =
@@ -203,9 +213,19 @@ impl ExecBoard {
                 error.clone_into(&mut view.stderr);
                 view.running = false;
                 view.ok = Some(false);
+                view.duration_ms = duration_ms;
             }
         }
         self.publish();
+    }
+
+    /// Take the run's start instant and return its elapsed wall-clock in
+    /// milliseconds, or `None` if the id was never recorded (already finished, or
+    /// a pane that predates this board). Removing the entry keeps the map bounded
+    /// by in-flight calls and makes a second finish for the same id a no-op.
+    fn take_duration_ms(&self, id: &str) -> Option<u64> {
+        let started = self.started.lock().remove(id)?;
+        u64::try_from(started.elapsed().as_millis()).ok()
     }
 
     fn finish(
@@ -217,6 +237,7 @@ impl ExecBoard {
         ok: bool,
         trace: Vec<ExecTraceLine>,
     ) {
+        let duration_ms = self.take_duration_ms(id);
         {
             let mut panes = self.panes.lock();
             if let Some(View::Exec(view)) = panes
@@ -229,6 +250,7 @@ impl ExecBoard {
                 view.result = result;
                 view.running = false;
                 view.ok = Some(ok);
+                view.duration_ms = duration_ms;
                 view.trace = trace;
             }
         }

@@ -30,6 +30,9 @@ export interface PaneRecord {
   running?: boolean;
   ok?: boolean;
   lang?: string;
+  // exec-only: wall-clock the run took, in milliseconds, set when it finishes. The
+  // feed shows this instead of an age so a row reads as "how long it took".
+  duration_ms?: number;
   // Inline-trace execution: a JSON-encoded array of `{line, text}` (the hub stores
   // it as canonical text like the data body, so the frontend parses it). Each
   // entry pairs a captured stdout chunk with the 1-based source line that emitted

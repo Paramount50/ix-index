@@ -67,6 +67,18 @@ export function humanAge(createdMs: number | undefined, refMs: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// A compact run-duration label ("420ms", "1.3s", "9.8s", "1m4s") for how long an
+// exec took, so the feed can show duration in place of an age.
+export function humanDuration(ms: number | undefined): string {
+  if (ms == null || ms < 0) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = ms / 1000;
+  if (s < 10) return `${s.toFixed(1)}s`;
+  if (s < 60) return `${Math.round(s)}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m${Math.round(s % 60)}s`;
+}
+
 // A wall-clock label for a timeline position.
 export function humanClock(ms: number): string {
   if (!ms) return '—';

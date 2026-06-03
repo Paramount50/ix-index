@@ -361,50 +361,99 @@ body {
    captured output on the right. The output is the larger, fuller column; the code
    is the supporting one. Click a block's meta row to open it fullscreen. */
 .feed { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--bg); }
-/* A centered, comfortable-width reading column; wide code/output scrolls within
-   its own block rather than stretching the column. */
-.feed-col { max-width: 1000px; margin: 0 auto; padding: 0 clamp(8px, 2vw, 20px); }
 .feed-empty {
   height: 100%; display: grid; place-content: center;
   color: var(--ink-faint); font-family: var(--mono); font-size: 13px;
 }
 
-.entry { padding: 8px 0 16px; }
-/* Thin meta row above the block: status LED, a small tag (lang/kind), optional
-   subtitle, age. No title — the code column is the input, so a source-derived
-   title would just restate the minor thing. The row is a button (opens
-   fullscreen) but reads as a label. */
-.entry-meta {
-  display: flex; align-items: baseline; gap: 8px; width: 100%;
+/* The feed is an activity timeline: status dots threaded on one continuous rail,
+   the intent beside each, in a centered reading column. */
+.feed-rail {
+  list-style: none; margin: 0 auto; max-width: 860px;
+  padding: 10px clamp(8px, 2vw, 20px) 48px;
+}
+
+/* DOT_X keeps the rail line, the dot, and the detail indent aligned: the dot
+   column is 10px wide after 8px of row padding, so its centre sits at 13px. */
+.entry { position: relative; }
+.entry::before {
+  content: ""; position: absolute; left: 13px; top: 0; bottom: 0;
+  width: 1px; background: var(--edge);
+}
+.entry:first-child::before { top: 17px; }
+.entry:last-child::before { bottom: auto; height: 17px; }
+
+.entry-row {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: baseline; column-gap: 12px; width: 100%;
   font: inherit; text-align: left; color: var(--ink);
-  background: none; border: 0; padding: 4px 2px 6px; cursor: pointer;
+  background: none; border: 0; cursor: pointer; padding: 7px 8px;
 }
-.entry-meta:hover .entry-tag { color: var(--ink); }
-/* The intent (pane title) leads the block; it shrinks and ellipsizes before the
-   quieter lang/op/session meta beside it. */
+.entry-row:hover { background: light-dark(rgba(0, 0, 0, 0.045), rgba(255, 255, 255, 0.05)); }
+/* Keyboard selection (j/k): a steadier tint than hover, plus a brighter caret. */
+.entry.selected > .entry-row { background: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.08)); }
+.entry.selected > .entry-row .entry-chev,
+.entry.selected > .entry-row .entry-title { color: var(--ink); }
+
+.entry-dot {
+  grid-column: 1; align-self: center; justify-self: center; z-index: 1;
+  width: 9px; height: 9px; border-radius: 50%; background: var(--ink-faint);
+}
+.entry-dot.live { background: var(--live); }
+.entry-dot.err { background: var(--dead); }
+.entry-dot.run { background: light-dark(#d68a00, #e5c07b); animation: led-pulse 1.1s ease-in-out infinite; }
+
 .entry-title {
-  flex: 0 1 auto; min-width: 0;
-  font-size: 12.5px; color: var(--ink);
+  grid-column: 2; min-width: 0; font-size: 13px; color: var(--ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.entry-led {
-  flex: none; align-self: center;
-  width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint);
+.entry.err .entry-title { color: light-dark(#c4314b, #f0a0ad); }
+
+/* Right-aligned meta group: an optional running badge, the age, then the caret. */
+.entry-meta {
+  grid-column: 3; display: flex; align-items: baseline; gap: 10px;
 }
-.entry-led.live { background: var(--live); }
-.entry-led.err { background: var(--dead); }
-.entry-led.run { background: light-dark(#d68a00, #e5c07b); animation: led-pulse 1.1s ease-in-out infinite; }
-.entry-tag { flex: none; font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
-.entry-sub {
-  flex: 0 1 auto; min-width: 0;
-  font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.entry-now {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  color: light-dark(#d68a00, #e5c07b); text-transform: uppercase;
 }
-.entry-spacer { flex: 1 1 auto; }
 .entry-age {
-  flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
 }
+.entry-chev {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-faint); width: 0.8em;
+}
+.entry-row:hover .entry-chev { color: var(--ink-dim); }
+
+/* The expanded body aligns under the intent (dot column + gap = 22px). */
+.entry-detail { margin: 2px 0 4px 22px; padding-right: 8px; }
+/* The `code` toggle inside an expanded entry: a quiet bordered chip. */
+.entry-code-toggle {
+  display: inline-block; margin: 6px 0 0;
+  font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim);
+  background: none; border: 1px solid var(--edge); border-radius: 0;
+  padding: 1px 6px; cursor: pointer; line-height: 1.4;
+}
+.entry-code-toggle:hover { color: var(--ink); border-color: var(--ink-faint); }
+.entry-code-toggle.on { color: var(--ink); border-color: var(--ink-faint); background: var(--edge); }
+/* The revealed source sits below the output, set apart as a quieter slab. */
+.entry-code-reveal { margin-top: 6px; border-style: dashed; }
+
+/* Compact parsed failure shown by default for an errored run: the message, then
+   the source line(s) it came from. No box; it reads as a quiet annotation. */
+.entry-fail { display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
+.fail-msg {
+  font-family: var(--mono); font-size: 12px;
+  color: light-dark(#c4314b, #f0a0ad); white-space: pre-wrap; word-break: break-word;
+}
+.fail-frame { display: flex; align-items: baseline; gap: 10px; font-family: var(--mono); font-size: 12px; }
+.fail-line {
+  flex: none; min-width: 1.6em; text-align: right;
+  color: var(--ink-faint); font-variant-numeric: tabular-nums;
+}
+.fail-line::before { content: "line "; color: var(--ink-faint); }
+.fail-src { color: var(--ink-dim); white-space: pre; overflow: hidden; text-overflow: ellipsis; }
 
 /* The block: a flat bordered box. Split blocks lay the code and output columns
    side by side with a divider; the output column is the wider one. */
