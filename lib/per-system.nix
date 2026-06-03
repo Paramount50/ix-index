@@ -498,13 +498,20 @@ let
         exampleFleets = healthCheckExampleFleets;
         exampleNames = lib.attrNames exampleFleets;
       };
+
+  # Shared between `packages` and the `image-<name>` checks so blast-radius
+  # (which only diffs `.#checks.x86_64-linux`) catches image fanouts via the
+  # check drvPath shift. The `base` image is omitted: its config is just
+  # `ix.image.name`/`tag`, and any base-profile change already fans out into
+  # every discovered image.
+  discoveredImages = ix.discoverImages {
+    root = paths.images;
+    inherit (tests) imageTests;
+  };
 in
 {
   packages =
-    (ix.discoverImages {
-      root = paths.images;
-      inherit (tests) imageTests;
-    })
+    discoveredImages
     // {
       base =
         let
@@ -527,7 +534,6 @@ in
             };
           };
         };
-
       health-checks = healthChecks.dag;
       health-checks-zellij = healthChecks.zellij;
       inherit check lint site;
@@ -658,20 +664,26 @@ in
         );
         site-test = siteTests.all;
       };
-      # A rust check key is `<prefix>-<testName>`, where `prefix` defaults to
-      # `rust-<id>` but a crate may override it in its `package.nix` (e.g.
-      # `ix-fleet` uses `ix-fleet`). So the rust keys are not guaranteed to be
-      # `rust-`-prefixed, and a stray override colliding with an explicit check
-      # name would otherwise be silently swallowed by the `//` merge. Assert the
-      # two key sets are disjoint so such a collision fails loudly instead.
-      # Forcing `rustChecks`' keys realizes the cargo-unit test manifest (IFD);
-      # that is acceptable because evaluating the `checks` set at all (what CI
-      # and `nix flake check` do) already enumerates those keys.
-      checkNameCollisions = lib.intersectLists (lib.attrNames explicitChecks) (lib.attrNames rustChecks);
+      # One check per image OCI archive, built by nix-fast-build in step 1 of
+      # `.#check`. Without this, `.#packages` carries the image derivations
+      # but `.#checks` does not, so blast-radius under-reports any change
+      # that rebuilds every image because the drvPath shift never reaches a
+      # check. The `eval` aggregate at tests/default.nix:3890 only closes
+      # over per-image `extraScript` text, not `config.system.build.toplevel`,
+      # so it stays stable across semantic edits to shared image libs.
+      imageChecks = lib.mapAttrs' (n: v: lib.nameValuePair "image-${n}" v) discoveredImages;
+      # Rust crate prefixes can be overridden in `package.nix` and image
+      # names are user-chosen, so a stray collision with an explicit check
+      # would otherwise be silently swallowed by the `//` merge. Two pairwise
+      # intersections cover all three pairs because every offending name is
+      # in at least two sets.
+      checkNameCollisions =
+        lib.intersectLists (lib.attrNames explicitChecks) (lib.attrNames rustChecks)
+        ++ lib.intersectLists (lib.attrNames imageChecks) (lib.attrNames (explicitChecks // rustChecks));
     in
     assert lib.assertMsg (checkNameCollisions == [ ])
-      "checks: rust check name(s) collide with explicit checks: ${lib.concatStringsSep ", " checkNameCollisions}";
-    explicitChecks // rustChecks
+      "checks: duplicate names across explicit/rust/image sets: ${lib.concatStringsSep ", " checkNameCollisions}";
+    explicitChecks // rustChecks // imageChecks
   );
 
   formatter = pkgs.nixfmt;
