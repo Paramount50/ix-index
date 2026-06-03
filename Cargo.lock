@@ -984,6 +984,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
+name = "claude-stories"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "clap",
+ "color-eyre",
+ "git2",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "clone-cli"
 version = "0.1.0"
 dependencies = [
@@ -5537,18 +5552,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "skill-lint"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "ignore",
- "serde",
- "serde_json",
- "serde_norway",
-]
-
-[[package]]
 name = "simd-adler32"
 version = "0.3.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5610,6 +5613,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05e40b6cf54d988dc1a2223531b969c9a9e30906ad90ef64890c27b4bfbb46ea"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "skill-lint"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "ignore",
+ "serde",
+ "serde_json",
+ "serde_norway",
 ]
 
 [[package]]
