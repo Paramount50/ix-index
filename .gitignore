@@ -1,4 +1,6 @@
 # Nix
+.jupyter/
+.ipynb_checkpoints/
 result
 result-*
 .direnv/
