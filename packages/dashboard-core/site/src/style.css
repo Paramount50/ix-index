@@ -360,39 +360,40 @@ body {
    block is input | output side by side — for an exec, source on the left and its
    captured output on the right. The output is the larger, fuller column; the code
    is the supporting one. Click a block's meta row to open it fullscreen. */
-.feed { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--bg); }
+/* Master-detail: a fixed timeline list on the left, a detail panel on the right,
+   each scrolling on its own. */
+.feed { flex: 1 1 auto; min-height: 0; display: flex; background: var(--bg); }
 .feed-empty {
-  height: 100%; display: grid; place-content: center;
+  flex: 1 1 auto; display: grid; place-content: center;
   color: var(--ink-faint); font-family: var(--mono); font-size: 13px;
 }
 
-/* The feed is an activity timeline: status dots threaded on one continuous rail,
-   the intent beside each, in a centered reading column. */
-.feed-rail {
-  list-style: none; margin: 0 auto; max-width: 860px;
-  padding: 10px clamp(8px, 2vw, 20px) 48px;
+/* Left list: status dots threaded on one continuous rail, the intent beside each
+   and its duration on the right. Selecting a row drives the detail panel. */
+.feed-list {
+  flex: 0 0 clamp(260px, 30%, 380px); min-width: 0; overflow: auto;
+  border-right: 1px solid var(--edge);
+  list-style: none; margin: 0; padding: 8px 6px 40px;
 }
 
-/* DOT_X keeps the rail line, the dot, and the detail indent aligned: the dot
-   column is 10px wide after 8px of row padding, so its centre sits at 13px. */
+/* The dot column is 10px wide after 8px of row padding, so its centre (and the
+   rail) sit at 13px from the entry's left edge. */
 .entry { position: relative; }
 .entry::before {
   content: ""; position: absolute; left: 13px; top: 0; bottom: 0;
   width: 1px; background: var(--edge);
 }
-.entry:first-child::before { top: 17px; }
-.entry:last-child::before { bottom: auto; height: 17px; }
+.entry:first-child::before { top: 16px; }
+.entry:last-child::before { bottom: auto; height: 16px; }
 
 .entry-row {
   display: grid; grid-template-columns: 10px minmax(0, 1fr) auto;
-  align-items: baseline; column-gap: 12px; width: 100%;
+  align-items: baseline; column-gap: 10px; width: 100%;
   font: inherit; text-align: left; color: var(--ink);
   background: none; border: 0; cursor: pointer; padding: 7px 8px;
 }
 .entry-row:hover { background: light-dark(rgba(0, 0, 0, 0.045), rgba(255, 255, 255, 0.05)); }
-/* Keyboard selection (j/k): a steadier tint than hover, plus a brighter caret. */
-.entry.selected > .entry-row { background: light-dark(rgba(0, 0, 0, 0.07), rgba(255, 255, 255, 0.08)); }
-.entry.selected > .entry-row .entry-chev,
+.entry.selected > .entry-row { background: light-dark(rgba(0, 0, 0, 0.08), rgba(255, 255, 255, 0.09)); }
 .entry.selected > .entry-row .entry-title { color: var(--ink); }
 
 .entry-dot {
@@ -404,31 +405,41 @@ body {
 .entry-dot.run { background: light-dark(#d68a00, #e5c07b); animation: led-pulse 1.1s ease-in-out infinite; }
 
 .entry-title {
-  grid-column: 2; min-width: 0; font-size: 13px; color: var(--ink);
+  grid-column: 2; min-width: 0; font-size: 13px; color: var(--ink-dim);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .entry.err .entry-title { color: light-dark(#c4314b, #f0a0ad); }
 
-/* Right-aligned meta group: an optional running badge, the age, then the caret. */
-.entry-meta {
-  grid-column: 3; display: flex; align-items: baseline; gap: 10px;
-}
 .entry-now {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  grid-column: 3; font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
   color: light-dark(#d68a00, #e5c07b); text-transform: uppercase;
 }
 .entry-age {
-  font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
+  grid-column: 3; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint);
   font-variant-numeric: tabular-nums;
 }
-.entry-chev {
-  font-family: var(--mono); font-size: 10px; color: var(--ink-faint); width: 0.8em;
-}
-.entry-row:hover .entry-chev { color: var(--ink-dim); }
 
-/* The expanded body aligns under the intent (dot column + gap = 22px). */
-.entry-detail { margin: 2px 0 4px 22px; padding-right: 8px; }
-/* The `code` toggle inside an expanded entry: a quiet bordered chip. */
+/* Right detail panel: header (dot + intent), a meta line, then the body. */
+.feed-detail {
+  flex: 1 1 auto; min-width: 0; overflow: auto;
+  padding: 16px clamp(12px, 2vw, 24px) 48px;
+}
+.detail-empty {
+  color: var(--ink-faint); font-family: var(--mono); font-size: 13px; padding: 24px 4px;
+}
+.detail-head { display: flex; align-items: center; gap: 9px; }
+.detail-title {
+  font-size: 15px; color: var(--ink); min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.detail-title.err { color: light-dark(#c4314b, #f0a0ad); }
+.detail-meta {
+  margin: 3px 0 14px 18px;
+  font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+}
+.detail-body .entry-fail { margin-bottom: 10px; }
+
+/* The `code` toggle in the detail panel: a quiet bordered chip. */
 .entry-code-toggle {
   display: inline-block; margin: 6px 0 0;
   font-family: var(--mono); font-size: 10.5px; color: var(--ink-dim);
