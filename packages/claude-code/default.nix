@@ -12,18 +12,36 @@
   gnupg,
   writeText,
   binName ? "claude",
-  # Start every session in bypass-permissions mode by default. We run a trusted
-  # config inside disposable sandboxes (ix guest VMs, the dev image, throwaway
-  # checkouts) where a per-tool approval dialog buys nothing and only stalls an
-  # agent that has nowhere unsafe to go. Folded into `settingsDefaults` below so
-  # it rides the same `--settings` layer as the other defaults; a consumer turns
-  # it off with `claude-code.override { dangerouslySkipPermissions = false; }`.
-  # This only flips the default mode: the upstream uid-0 guard still refuses
-  # bypass for an unsandboxed root user (no IS_SANDBOX=1 is baked here, since a
-  # bare host genuinely is not a sandbox), so it is a no-op exactly where it
-  # would be unsafe. Sandboxed-root consumers (e.g. the dev image) keep their own
-  # IS_SANDBOX=1 wrapper and managed-settings layer.
+  # Default posture: start every session in bypass-permissions mode. We run a
+  # trusted config inside disposable sandboxes (ix guest VMs, the dev image,
+  # throwaway checkouts) where a per-tool approval dialog buys nothing and only
+  # stalls an agent that has nowhere unsafe to go. The upstream uid-0 guard still
+  # refuses bypass for an unsandboxed root user (no IS_SANDBOX=1 is baked here,
+  # since a bare host genuinely is not a sandbox), so it is a no-op exactly where
+  # it would be unsafe; sandboxed-root consumers (e.g. the dev image) keep their
+  # own IS_SANDBOX=1 wrapper and managed-settings layer. Turn it off with
+  # `claude-code.override { dangerouslySkipPermissions = false; }`.
   dangerouslySkipPermissions ? true,
+  # Opt-in alternative posture: confine the agent to the index MCP server (the
+  # Jupyter/python surface) and nothing else. `default` permission mode keeps the
+  # permission layer live, so the bare-name deny rules below strip every built-in
+  # tool (Bash, Read, Edit, Write, ...) from the model's context, while the allow
+  # rule lets the index MCP run without a prompt. Whatever the agent needs (shell,
+  # file IO, HTTP) it does through python in the kernel. `bypassPermissions`
+  # cannot express this (it skips the permission layer entirely, so deny rules are
+  # silently ignored) and `dontAsk` is intentionally avoided. Takes PRECEDENCE
+  # over `dangerouslySkipPermissions` when both are set, since bypass would void
+  # the deny rules. Enable with `claude-code.override { restrictToIndexMcp = true; }`.
+  restrictToIndexMcp ? false,
+  # Permission rules naming the index MCP server's tools, used when
+  # restrictToIndexMcp is set. A bare `mcp__index` matches every tool the server
+  # named `index` provides; the wildcard form is belt-and-suspenders. Override
+  # when the server is registered under a different name (e.g. home-manager's
+  # plugin delivery exposes it as `mcp__plugin_<plugin>_index`).
+  indexMcpAllow ? [
+    "mcp__index"
+    "mcp__index__*"
+  ],
   # Only the flake package set injects the Nushell writer; the overlay eval
   # context does not. The updater is a maintainer-facing flake output, so the
   # overlay build of `pkgs.claude-code` simply omits `passthru.updateScript`.
@@ -81,18 +99,64 @@ let
   # prepend ours and silently shadow a user's `--settings`.
   #   cleanupPeriodDays: keep transcripts + the wrapper's --debug logs ~1yr for
   #     the optimize analysis and troubleshooting (CLI default 30).
-  #   permissions.defaultMode + skipDangerousModePermissionPrompt (only when
-  #     `dangerouslySkipPermissions`): start in bypass mode and pre-accept the
-  #     one-time dangerous-mode warning. Both keys are required: managed/flag
-  #     bypass alone does not suppress that warning. skipDangerousModePermission-
-  #     Prompt is honored in every scope except *project* (a guard against
-  #     untrusted repos), so it takes effect from this flagSettings layer. Same
-  #     two keys the dev image (images/dev/development-base) enforces via managed
-  #     settings; see its comment for the full rationale.
+  #   permissions.{allow,deny} (only when `restrictToIndexMcp`, opt-in): confine
+  #     the agent to the index MCP server and strip every built-in tool from
+  #     context. Arrays concat across layers and a deny at any scope wins, so a
+  #     downstream user/project/local settings file cannot un-deny these; the
+  #     only un-lock is dropping the nix `restrictToIndexMcp = true` override.
+  #     Caveat: a managed `bypassPermissions` skips the whole permission layer, so
+  #     these deny rules would be inert under one.
+  #   permissions.defaultMode + skipDangerousModePermissionPrompt (the default,
+  #     unless `restrictToIndexMcp` takes precedence): start in bypass mode and
+  #     pre-accept the one-time dangerous-mode warning. Both keys are
+  #     required: managed/flag bypass alone does not suppress that warning.
+  #     skipDangerousModePermissionPrompt is honored in every scope except
+  #     *project* (a guard against untrusted repos), so it takes effect from this
+  #     flagSettings layer. Same two keys the dev image
+  #     (images/dev/development-base) enforces via managed settings; see its
+  #     comment for the full rationale.
+  #
+  # Bare tool names as deny rules remove the built-in tool from the model's
+  # context entirely (per the permissions docs), not merely gate it behind a
+  # prompt, so the agent never sees a shell/file/web/subagent tool. Read-only Bash
+  # (`cat`, `ls`, ...) is otherwise always allowed in every mode, so denying bare
+  # `Bash` is what actually closes the shell.
+  deniedBuiltinTools = [
+    "Agent"
+    "Bash"
+    "BashOutput"
+    "Edit"
+    "ExitPlanMode"
+    "Glob"
+    "Grep"
+    "KillShell"
+    "ListMcpResources"
+    "NotebookEdit"
+    "PowerShell"
+    "Read"
+    "ReadMcpResource"
+    "Skill"
+    "SlashCommand"
+    "Task"
+    "TodoWrite"
+    "WebFetch"
+    "WebSearch"
+    "Write"
+  ];
+
   settingsDefaults = {
     cleanupPeriodDays = 365;
   }
-  // lib.optionalAttrs dangerouslySkipPermissions {
+  // lib.optionalAttrs restrictToIndexMcp {
+    permissions = {
+      allow = indexMcpAllow;
+      deny = deniedBuiltinTools;
+    };
+  }
+  # restrictToIndexMcp takes precedence: bypass would skip the permission layer
+  # and void its deny rules, so the two never co-set `permissions` (a shallow //
+  # merge would otherwise clobber allow/deny with defaultMode).
+  // lib.optionalAttrs (dangerouslySkipPermissions && !restrictToIndexMcp) {
     permissions.defaultMode = "bypassPermissions";
     skipDangerousModePermissionPrompt = true;
   };
