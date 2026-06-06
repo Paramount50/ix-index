@@ -10,7 +10,7 @@
   socat,
   nix,
   gnupg,
-  writeText,
+  formats,
   binName ? "claude",
   # Default posture: start every session in bypass-permissions mode. We run a
   # trusted config inside disposable sandboxes (ix guest VMs, the dev image,
@@ -158,9 +158,9 @@ let
     permissions.defaultMode = "bypassPermissions";
     skipDangerousModePermissionPrompt = true;
   };
-  settingsDefaultsFile = writeText "claude-code-default-settings.json" (
-    builtins.toJSON settingsDefaults
-  );
+  settingsDefaultsFile =
+    (formats.json { }).generate "claude-code-default-settings.json"
+      settingsDefaults;
 
   inherit (stdenv.hostPlatform) system;
   target =

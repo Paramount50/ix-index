@@ -50,40 +50,35 @@ let
     };
   };
   dashboardSiteHtml = "${dashboardSite}/share/dashboard-site/index.html";
-  rustPackageFiles =
-    packagePath:
-    lib.fileset.intersection (lib.fileset.gitTracked packagePath) (
-      lib.fileset.unions [
-        (packagePath + "/Cargo.toml")
-        (packagePath + "/src")
-        (lib.fileset.maybeMissing (packagePath + "/benches"))
-        (lib.fileset.maybeMissing (packagePath + "/build.rs"))
-        (lib.fileset.maybeMissing (packagePath + "/tests"))
-        (lib.fileset.maybeMissing (packagePath + "/templates"))
-      ]
-    );
-  src = lib.fileset.toSource {
-    inherit root;
-    fileset = lib.fileset.intersection (lib.fileset.gitTracked root) (
-      lib.fileset.unions (
-        [
-          (root + "/Cargo.toml")
-          (root + "/Cargo.lock")
-          (rustPackageFiles (paths.modules + "/services/resource-monitor/stats-writer"))
-        ]
-        ++ map (entry: rustPackageFiles entry.path) packageRegistry.rustWorkspaceEntries
-      )
-    );
-  };
+  src =
+    let
+      rustPackageFiles =
+        packagePath:
+        lib.fileset.intersection (lib.fileset.gitTracked packagePath) (
+          lib.fileset.unions [
+            (packagePath + "/Cargo.toml")
+            (packagePath + "/src")
+            (lib.fileset.maybeMissing (packagePath + "/benches"))
+            (lib.fileset.maybeMissing (packagePath + "/build.rs"))
+            (lib.fileset.maybeMissing (packagePath + "/tests"))
+            (lib.fileset.maybeMissing (packagePath + "/templates"))
+          ]
+        );
+    in
+    lib.fileset.toSource {
+      inherit root;
+      fileset = lib.fileset.intersection (lib.fileset.gitTracked root) (
+        lib.fileset.unions (
+          [
+            (root + "/Cargo.toml")
+            (root + "/Cargo.lock")
+            (rustPackageFiles (paths.modules + "/services/resource-monitor/stats-writer"))
+          ]
+          ++ map (entry: rustPackageFiles entry.path) packageRegistry.rustWorkspaceEntries
+        )
+      );
+    };
   cargoLock = root + "/Cargo.lock";
-
-  # `cargo` cfg-excludes platform-gated deps per target, so an Apple-Silicon or
-  # Intel macOS unit graph never sees `alsa-sys`; gate the ALSA plumbing on the
-  # *target* OS rather than the build host so a Linux→macOS cross build does not
-  # drag Linux audio inputs into a Darwin graph.
-  targetIsLinux =
-    target:
-    if target == null then workspacePkgs.stdenv.hostPlatform.isLinux else lib.hasInfix "-linux-" target;
 
   # `vmkit` links libkrun for its Linux-guest backend, a different libkrun per
   # host. nixpkgs only provides `libkrun-efi` when the *build host* is
@@ -120,29 +115,6 @@ let
   };
   libkrunLinuxLibDir = "${libkrunLinux}/lib64";
 
-  # The Apple cross toolchain (zig cc + macOS SDK), or null for host/musl/Linux
-  # targets that build with the ordinary linker.
-  appleToolchainFor =
-    target:
-    if target != null && lib.hasSuffix "-apple-darwin" target then
-      appleSdkToolchain {
-        appleSdk = macosSdk { pkgs = workspacePkgs; };
-        inherit lib target;
-        pkgs = workspacePkgs;
-      }
-    else
-      null;
-
-  # rust-overlay toolchain carrying the cross target's `rust-std`. The native
-  # graph keeps `cargo-unit`'s default (nixpkgs cargo + rustc).
-  crossRustToolchain =
-    target:
-    rustToolchainFor workspacePkgs {
-      channel = "stable";
-      version = "latest";
-      targets = [ target ];
-    };
-
   # One workspace-wide unit graph for every repo-owned Rust crate. Each
   # crate's `default.nix` picks its binary and test targets out of the native
   # graph via `ix.cargoUnit.selectBinaryWithTests`, so the unit graph + vendor
@@ -154,7 +126,35 @@ let
       target ? null,
     }:
     let
-      appleToolchain = appleToolchainFor target;
+      # `cargo` cfg-excludes platform-gated deps per target, so an Apple-Silicon
+      # or Intel macOS unit graph never sees `alsa-sys`; gate the ALSA plumbing on
+      # the *target* OS rather than the build host so a Linux→macOS cross build
+      # does not drag Linux audio inputs into a Darwin graph.
+      targetIsLinux =
+        if target == null then workspacePkgs.stdenv.hostPlatform.isLinux else lib.hasInfix "-linux-" target;
+      # A build script's `rustc-link-search` does not reach the final per-unit link
+      # in this graph, so a linked native lib's directory is added to the link search
+      # here directly, plus an rpath entry so the resulting binary resolves the shared
+      # object at runtime without `LD_LIBRARY_PATH` (the `-L` alone only covers link
+      # time). Harmless for crates that never reference the lib: they keep no
+      # DT_NEEDED/load command for it.
+      linkSearchWithRpath = dir: [
+        "-L"
+        "native=${dir}"
+        "-C"
+        "link-arg=-Wl,-rpath,${dir}"
+      ];
+      # The Apple cross toolchain (zig cc + macOS SDK), or null for host/musl/Linux
+      # targets that build with the ordinary linker.
+      appleToolchain =
+        if target != null && lib.hasSuffix "-apple-darwin" target then
+          appleSdkToolchain {
+            appleSdk = macosSdk { pkgs = workspacePkgs; };
+            inherit lib target;
+            pkgs = workspacePkgs;
+          }
+        else
+          null;
       isCross = target != null;
     in
     (cargoUnitFor workspacePkgs).buildWorkspace (
@@ -206,7 +206,7 @@ let
         # every unit's rustc link search directly so the final binary link resolves
         # it. Harmless for crates that never reference `libasound`.
         nativeBuildInputs =
-          lib.optional (targetIsLinux target) workspacePkgs.pkg-config
+          lib.optional targetIsLinux workspacePkgs.pkg-config
           ++ lib.optionals (appleToolchain != null) appleToolchain.runtimeInputs;
         env = {
           # ix-vt-sys's build script reads this to emit the libghostty-vt link
@@ -216,7 +216,7 @@ let
           # Set workspace-wide; only dashboard-core reads it.
           IX_DASHBOARD_SITE_HTML = dashboardSiteHtml;
         }
-        // lib.optionalAttrs (targetIsLinux target) {
+        // lib.optionalAttrs targetIsLinux {
           PKG_CONFIG_PATH = "${workspacePkgs.alsa-lib.dev}/lib/pkgconfig";
         }
         // lib.optionalAttrs buildHostIsAarch64Darwin {
@@ -233,44 +233,22 @@ let
           VMKIT_LINK_LIBKRUN = "1";
         }
         // lib.optionalAttrs (appleToolchain != null) appleToolchain.env;
-        extraRustcArgs = [
-          # The libghostty-vt search path for the final per-unit link. A build
-          # script's `rustc-link-search` does not reach the final binary link in
-          # this graph, so the directory is added directly here (same shape as the
-          # alsa-lib path below).
-          "-L"
-          "native=${ghosttyLibDir}"
-          # Embed an rpath to the libghostty-vt store path so the linked binaries
-          # (the ix-vt test binaries cargo-unit executes, and any future consumer)
-          # resolve `libghostty-vt.so` at runtime without `LD_LIBRARY_PATH`. The
-          # `-L` above only covers link time. Harmless for crates that never load it
-          # because the binary keeps no `DT_NEEDED` entry for the lib.
-          "-C"
-          "link-arg=-Wl,-rpath,${ghosttyLibDir}"
-        ]
-        ++ lib.optionals (targetIsLinux target) [
-          "-L"
-          "native=${workspacePkgs.alsa-lib}/lib"
-        ]
-        ++ lib.optionals buildHostIsAarch64Darwin [
-          # vmkit links `-lkrun` (libkrun-efi). Its build script emits the `-l`, but
-          # the search path and rpath must be added here because a build script's
-          # link-search does not reach the final unit link (same shape as the
-          # alsa-lib and libghostty-vt paths above). Harmless for crates that never
-          # reference libkrun, which keep no load command for it.
-          "-L"
-          "native=${libkrunEfiLibDir}"
-          "-C"
-          "link-arg=-Wl,-rpath,${libkrunEfiLibDir}"
-        ]
-        ++ lib.optionals (buildHostIsLinux && !isCross) [
-          # vmkit links `-lkrun` (classic libkrun) on a Linux host. Same rationale
-          # as the libkrun-efi branch above; nixpkgs installs libkrun into `lib64`.
-          "-L"
-          "native=${libkrunLinuxLibDir}"
-          "-C"
-          "link-arg=-Wl,-rpath,${libkrunLinuxLibDir}"
-        ];
+        # ix-vt-sys links libghostty-vt and the ix-vt test binaries dlopen it, so
+        # its lib dir needs both a link search and a runtime rpath.
+        extraRustcArgs =
+          linkSearchWithRpath ghosttyLibDir
+          ++ lib.optionals targetIsLinux [
+            # `alsa-sys`'s build script emits `-lasound`; only the search path is
+            # added here (libasound resolves at runtime via the system loader, so
+            # no rpath like the libghostty-vt / libkrun dirs below).
+            "-L"
+            "native=${workspacePkgs.alsa-lib}/lib"
+          ]
+          # vmkit links `-lkrun`: libkrun-efi on an aarch64-darwin host, classic
+          # libkrun (installed under `lib64`) on a Linux host. Its build script
+          # emits the `-l`; the search path and rpath are added here.
+          ++ lib.optionals buildHostIsAarch64Darwin (linkSearchWithRpath libkrunEfiLibDir)
+          ++ lib.optionals (buildHostIsLinux && !isCross) (linkSearchWithRpath libkrunLinuxLibDir);
         # The native graph runs every policy check once across the whole
         # workspace (selected package outputs expose these as explicit tests).
         # A cross graph is a pure build artifact, so it skips policy to avoid
@@ -297,7 +275,13 @@ let
       }
       // lib.optionalAttrs isCross {
         inherit target;
-        rustToolchain = crossRustToolchain target;
+        # rust-overlay toolchain carrying the cross target's `rust-std`. The
+        # native graph keeps `cargo-unit`'s default (nixpkgs cargo + rustc).
+        rustToolchain = rustToolchainFor workspacePkgs {
+          channel = "stable";
+          version = "latest";
+          targets = [ target ];
+        };
         extraRustcArgsForPlatform =
           if appleToolchain != null then appleToolchain.rustcArgsForPlatform else (_platform: [ ]);
       }
