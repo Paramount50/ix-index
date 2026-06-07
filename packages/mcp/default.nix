@@ -368,11 +368,46 @@ let
       vmkitModule
     ];
 
+  # htpy: build HTML in plain Python (`div(class_="x")[ ... ]`), auto-escaping
+  # every text node and attribute via markupsafe. Bundled so a session — and the
+  # `view` renderer — can compose dashboard HTML without hand-rolling f-strings,
+  # which is exactly where escaping is forgotten (the dtype-header XSS this
+  # package set just had to patch). Not in nixpkgs; pure Python, one dep
+  # (markupsafe). https://htpy.dev
+  htpyModule =
+    let
+      pname = "htpy";
+      version = "26.5.1";
+    in
+    pkgs.python3.pkgs.buildPythonPackage {
+      inherit pname version;
+      pyproject = true;
+      src = pkgs.fetchPypi {
+        inherit pname version;
+        hash = "sha256-Q6NlwfxnAJTaeBuSOIMBkznOwDE5fWHV/l+OLyJ4tj4=";
+      };
+      # setuptools-scm reads the version from the sdist's PKG-INFO, but pin it so
+      # the build never depends on a .git that the sdist does not carry.
+      env.SETUPTOOLS_SCM_PRETEND_VERSION = version;
+      build-system = [
+        pkgs.python3.pkgs.setuptools
+        pkgs.python3.pkgs.setuptools-scm
+      ];
+      # typing-extensions is only a dep below 3.13 (htpy's own marker); the
+      # pinned interpreter is 3.13, so it is conditional rather than always-on.
+      dependencies = [
+        pkgs.python3.pkgs.markupsafe
+      ]
+      ++ lib.optional (lib.versionOlder pkgs.python3.pythonVersion "3.13") pkgs.python3.pkgs.typing-extensions;
+      pythonImportsCheck = [ "htpy" ];
+      doCheck = false;
+    };
+
   # The interpreter the wrapper pins. Sessions build their venv from this with
   # `--system-site-packages`, so `tui`, `search`, `fff`, `exa_py`, numpy, polars
-  # (incl. Postgres via psycopg + SQLAlchemy), duckdb, httpx, and playwright are
-  # importable by default while an in-session `pip install` still writes to the
-  # per-session venv.
+  # (incl. Postgres via psycopg + SQLAlchemy), duckdb, httpx, htpy, and playwright
+  # are importable by default while an in-session `pip install` still writes to
+  # the per-session venv.
   mcpPython = pkgs.python3.withPackages (
     ps:
     [
@@ -397,6 +432,9 @@ let
       # async via asyncssh/playwright/tui but had no way to call a REST API). Sync
       # `httpx.get(...)` and `async with httpx.AsyncClient()` both work.
       ps.httpx
+      # htpy: compose HTML in Python with automatic escaping (see the module
+      # definition above). The preferred way to build any dashboard markup.
+      htpyModule
       # exa-py: the official Exa (exa.ai) SDK, so a session can run neural web
       # search, get page contents, and `answer(...)` over the live web with no
       # install step (`from exa_py import Exa`). It is a thin client over the Exa
@@ -536,6 +574,8 @@ let
       '';
 
   tuiBundled = importTest "tui" "import tui; print('tui-ok', tui.__version__)";
+  # htpy must import and auto-escape: a `<` in a text node comes out as `&lt;`.
+  htpyBundled = importTest "htpy" "import htpy; print('htpy-ok' if '&lt;' in str(htpy.div['<']) else 'htpy-bad')";
   searchBundled = importTest "search" "import search; print('search-ok', search.__version__)";
 
   # End-to-end through the bundled `fff` ctypes module: index a temp tree, wait
@@ -1197,6 +1237,27 @@ let
     out = view.df_html(lsdf)
     assert "<table" in out and "rows" in out and "tabular-nums" in out, out[:120]
 
+    # Nested List(Struct)/Struct cells render as boxed sub-tables, not a
+    # truncated str(value): the inner field values must reach the HTML.
+    nested = pl.DataFrame({"host": ["h1"]}).with_columns(
+        mounts=pl.lit([{"mount": "/data", "pct": 91}], dtype=pl.List(pl.Struct({"mount": pl.String, "pct": pl.Int64})))
+    )
+    nout = view.df_html(nested)
+    assert "/data" in nout and ">91<" in nout, nout[:200]
+    # A nested cell is a real sub-table (outer + inner), not a truncated repr.
+    assert nout.count("<table") >= 2 and "[{" not in nout, nout[:200]
+
+    # A struct field name is attacker-controllable (any frame built from
+    # untrusted data); it must be HTML-escaped both in the column-header dtype
+    # string and in the nested sub-table, never injected as live markup.
+    evil = pl.DataFrame({"x": [1]}).with_columns(
+        rec=pl.lit({"<img src=x>": 1}, dtype=pl.Struct({"<img src=x>": pl.Int64}))
+    )
+    eout = view.df_html(evil)
+    # The `not in` clause is the S1 regression guard: it fails on the unfixed
+    # header that interpolated the dtype string raw.
+    assert "<img src=x>" not in eout and "&lt;img src=x&gt;" in eout, eout[:300]
+
     c = view.cat(base + "/default.nix", lines=(1, 3))
     assert isinstance(c, view.Code)
     assert repr(c).count("\n") <= 3
@@ -1556,6 +1617,7 @@ package.overrideAttrs (old: {
     tests = {
       inherit
         tuiBundled
+        htpyBundled
         searchBundled
         fffBundled
         dataLibsBundled
