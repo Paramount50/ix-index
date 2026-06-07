@@ -2,7 +2,8 @@
   import type { SvelteSet } from 'svelte/reactivity';
   import Self from '$components/BuildTree.svelte';
   import { formatDuration, splitDerivation } from '$lib/format';
-  import type { BuildTree } from '$lib/build-tree';
+  import { durationLabel, whereLabel } from '$lib/build-row';
+  import { ROOT_SENTINEL, type BuildTree } from '$lib/build-tree';
   import type { BuildNode } from '$lib/types';
 
   type Props = {
@@ -13,6 +14,9 @@
     now: number;
     selectedActivityId: number | null;
     onselect: (activityId: number | null) => void;
+    /// Keyboard cursor: the row vim navigation currently sits on, highlighted
+    /// independently of the click selection that drives the log filter.
+    cursor: string | null;
     /// Vertical-line flags for each ancestor column (true = ancestor has a
     /// following sibling, so its column keeps a `│`). Empty for roots.
     guideLines: boolean[];
@@ -32,26 +36,31 @@
     now,
     selectedActivityId,
     onselect,
+    cursor,
     guideLines,
     isLast,
     isRoot,
     ancestors
   }: Props = $props();
 
+  const isCommandRoot = $derived(drv === ROOT_SENTINEL);
   const node = $derived(tree.nodeByDrv.get(drv));
   const parts = $derived(splitDerivation(drv));
   const children = $derived((tree.childrenByDrv.get(drv) ?? []).filter((dep) => !ancestors.has(dep)));
   const isCollapsed = $derived(collapsed.has(drv));
+  const isCursor = $derived(drv === cursor);
   const childGuideLines = $derived(isRoot ? [] : [...guideLines, !isLast]);
   const childAncestors = $derived(new Set([...ancestors, drv]));
 
-  function elapsedMs(build: BuildNode): number {
-    return Math.max(0, (build.stoppedAtMs ?? now) - build.startedAtMs);
-  }
-
-  function whereLabel(host: string | null): string {
-    return host === null || host.length === 0 ? 'local' : host;
-  }
+  /// Elapsed wall time for the whole build: live while anything runs or waits,
+  /// frozen at the last finish once everything is terminal.
+  const rootElapsed = $derived.by((): string => {
+    const { startedAtMs, stoppedAtMs, running, planned } = tree.summary;
+    if (startedAtMs === null) return '';
+    const inFlight = running > 0 || planned > 0;
+    const end = inFlight || stoppedAtMs === null ? now : stoppedAtMs;
+    return formatDuration(Math.max(0, end - startedAtMs));
+  });
 
   function toggleSelect(build: BuildNode): void {
     if (build.activityId === null) return;
@@ -59,7 +68,33 @@
   }
 </script>
 
-{#if node !== undefined}
+{#if isCommandRoot}
+  {@const summary = tree.summary}
+  <div class="activity-row root-row" class:cursor={isCursor}>
+    <button
+      type="button"
+      class="twirl"
+      class:hidden={children.length === 0}
+      aria-label={isCollapsed ? 'expand all' : 'collapse all'}
+      aria-expanded={children.length === 0 ? undefined : !isCollapsed}
+      tabindex={children.length === 0 ? -1 : 0}
+      onclick={() => {
+        ontoggle(drv);
+      }}
+    >
+      {children.length === 0 ? '' : isCollapsed ? '▸' : '▾'}
+    </button>
+    <span class="root-cmd" title={tree.command}>{tree.command.length > 0 ? tree.command : 'build'}</span>
+    <span class="root-stats">
+      {#if summary.failed > 0}<span class="stat failed">{summary.failed} failed</span>{/if}
+      {#if summary.running > 0}<span class="stat running">{summary.running} running</span>{/if}
+      <span class="stat done" title="succeeded / total">
+        {summary.succeeded}<span class="stat-sep">/</span>{summary.total}
+      </span>
+    </span>
+    <span class="activity-dur">{rootElapsed}</span>
+  </div>
+{:else if node !== undefined}
   {@const selected = node.activityId !== null && node.activityId === selectedActivityId}
   {@const clickable = node.activityId !== null}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -69,6 +104,7 @@
     class:planned={node.status === 'planned'}
     class:clickable
     class:selected
+    class:cursor={isCursor}
     role={clickable ? 'button' : undefined}
     tabindex={clickable ? 0 : undefined}
     aria-pressed={clickable ? selected : undefined}
@@ -82,12 +118,10 @@
       }
     }}
   >
-    {#if !isRoot}
-      <span class="guides" aria-hidden="true"
-        >{#each guideLines as line, level (level)}<span class="guide">{line ? '│' : ' '}</span
-          >{/each}<span class="guide connector">{isLast ? '└' : '├'}</span></span
-      >
-    {/if}
+    <span class="guides" aria-hidden="true"
+      >{#each guideLines as line, level (level)}<span class="guide">{line ? '│' : ' '}</span
+        >{/each}<span class="guide connector">{isLast ? '└' : '├'}</span></span
+    >
     <button
       type="button"
       class="twirl"
@@ -104,7 +138,9 @@
     </button>
     <span class="state" data-state={node.status} title={node.status}></span>
     <span class="drv activity-drv" title={drv}>
-      <span class="drv-hash">{parts.hash}</span><span class="drv-name">{parts.name}</span>
+      <span class="drv-name">{parts.name}</span>{#if parts.version.length > 0}<span
+          class="drv-version">{parts.version}</span
+        >{/if}
     </span>
     {#if node.status !== 'planned'}
       <span
@@ -121,24 +157,25 @@
     {#if isCollapsed && children.length > 0}
       <span class="subtree-count">+{String(children.length)}</span>
     {/if}
-    <span class="activity-dur">{node.status === 'planned' ? '' : formatDuration(elapsedMs(node))}</span>
+    <span class="activity-dur">{durationLabel(node, now)}</span>
   </div>
+{/if}
 
-  {#if !isCollapsed}
-    {#each children as childDrv, index (childDrv)}
-      <Self
-        drv={childDrv}
-        {tree}
-        {collapsed}
-        {ontoggle}
-        {now}
-        {selectedActivityId}
-        {onselect}
-        guideLines={childGuideLines}
-        isLast={index === children.length - 1}
-        isRoot={false}
-        ancestors={childAncestors}
-      />
-    {/each}
-  {/if}
+{#if (isCommandRoot || node !== undefined) && !isCollapsed}
+  {#each children as childDrv, index (childDrv)}
+    <Self
+      drv={childDrv}
+      {tree}
+      {collapsed}
+      {ontoggle}
+      {now}
+      {selectedActivityId}
+      {onselect}
+      {cursor}
+      guideLines={childGuideLines}
+      isLast={index === children.length - 1}
+      isRoot={false}
+      ancestors={childAncestors}
+    />
+  {/each}
 {/if}
