@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS executions (
     output      TEXT NOT NULL DEFAULT '',
     result      TEXT,
     error       TEXT,
-    outputs     TEXT NOT NULL DEFAULT '[]'
+    outputs     TEXT NOT NULL DEFAULT '[]',
+    bindings    TEXT NOT NULL DEFAULT '{}'
 );
 CREATE INDEX IF NOT EXISTS executions_started ON executions (started_at);
 
@@ -64,7 +65,24 @@ def connect(path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(_SCHEMA)
+    _migrate(conn)
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns introduced after a store may have first been created. ``CREATE
+    TABLE IF NOT EXISTS`` never alters an existing table, so a store written by an
+    older build is missing newer columns; add each idempotently."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(executions)")}
+    if "bindings" not in have:
+        try:
+            conn.execute("ALTER TABLE executions ADD COLUMN bindings TEXT NOT NULL DEFAULT '{}'")
+        except sqlite3.OperationalError:
+            # The kernel and the dashboard open the store from two processes at
+            # startup, so both can see the column missing and race to add it; a
+            # duplicate-column error here means the other won, which is fine. This
+            # is a logical error, not SQLITE_BUSY, so busy_timeout does not cover it.
+            pass
 
 
 def start(conn: sqlite3.Connection, *, id: str, name: str, code: str, started_at: float) -> None:
@@ -98,11 +116,12 @@ def finish(
     result: str | None,
     error: str | None,
     outputs: list | None = None,
+    bindings: dict | None = None,
 ) -> None:
     conn.execute(
-        "UPDATE executions SET status = ?, ended_at = ?, output = ?, result = ?, error = ?, outputs = ? "
-        "WHERE id = ?",
-        (status, ended_at, output, result, error, json.dumps(outputs or []), id),
+        "UPDATE executions SET status = ?, ended_at = ?, output = ?, result = ?, error = ?, "
+        "outputs = ?, bindings = ? WHERE id = ?",
+        (status, ended_at, output, result, error, json.dumps(outputs or []), json.dumps(bindings or {}), id),
     )
 
 
@@ -112,7 +131,7 @@ def recent(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
     # Running jobs sort first so a long-running job is never dropped by the limit
     # (a finished-jobs backlog could otherwise push it past LIMIT); then newest.
     rows = conn.execute(
-        "SELECT id, name, code, status, started_at, ended_at, output, result, error, outputs "
+        "SELECT id, name, code, status, started_at, ended_at, output, result, error, outputs, bindings "
         "FROM executions ORDER BY (status = 'running') DESC, started_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
@@ -120,6 +139,7 @@ def recent(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
     for r in rows:
         d = dict(r)
         d["outputs"] = json.loads(d.get("outputs") or "[]")
+        d["bindings"] = json.loads(d.get("bindings") or "{}")
         out.append(d)
     return out
 
