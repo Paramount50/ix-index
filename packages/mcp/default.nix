@@ -655,6 +655,14 @@ let
     # map() is the grep -> CodeMap convenience (type only; avoids a scan race).
     assert isinstance(fff.map("fn main", root), fff.CodeMap)
 
+    # The public search surface takes `path=` (consistent with `view`), not `root=`.
+    import inspect as _inspect
+
+    for _fn in (fff.find, fff.grep, fff.afind, fff.agrep, fff.map, fff.amap):
+        _params = _inspect.signature(_fn).parameters
+        assert "path" in _params and "root" not in _params, (_fn.__name__, list(_params))
+    assert isinstance(fff.grep("find me on this line", path=root), fff.GrepResult)
+
     print("fff-ok", fff.__version__)
   '';
   fffBundled =
@@ -731,8 +739,13 @@ let
   serverTools = importTest "server" (
     "import asyncio; from ix_notebook_mcp.tools import mcp; "
     + "names = sorted(t.name for t in asyncio.run(mcp.list_tools())); "
-    + "expected = {'python_exec','kernel_trace'}; "
+    + "expected = {'python_exec','read','kernel_trace'}; "
     + "assert set(names) == expected, ('tool surface drifted: %r' % (names,)); "
+    + "from ix_notebook_mcp import registry; instr = mcp._mcp_server.instructions; "
+    + "assert 'root=' not in instr, 'a parameter/signature leaked into the instructions'; "
+    + "assert '(query:' not in instr and '(path:' not in instr, 'a signature leaked into the instructions'; "
+    + "missing = [m.name for m in registry.MODULES if ('`' + m.name + '`') not in instr]; "
+    + "assert not missing, ('registry modules missing from instructions: %r' % (missing,)); "
     + "print('server-ok', len(names))"
   );
 
@@ -1205,6 +1218,29 @@ let
         mcp = outputs.to_mcp([{"output_type": "execute_result", "data": res_bundle, "metadata": {}}])
         texts = [c.text for c in mcp if getattr(c, "text", None) is not None]
         assert texts == ["just-text"], texts
+
+        # Result DWIM: a bare value renders like Result.of (no user_html boilerplate).
+        # A dict becomes a table -- a valid text/html string, not a raw dict that
+        # breaks nbformat -- and its keys reach the model text.
+        dwim_job = await run("Result({'alpha': 1, 'beta': 2})", budget=3.0, name="dwim")
+        await dwim_job.task
+        dwim_row = conn.execute(
+            "SELECT status, outputs FROM executions WHERE id = ?", (dwim_job.id,)
+        ).fetchone()
+        assert dwim_row["status"] == "done", dwim_row["status"]
+        dwim_bundle = [out["data"] for out in json.loads(dwim_row["outputs"])][-1]
+        assert isinstance(dwim_bundle.get("text/html"), str) and dwim_bundle["text/html"], dwim_bundle
+        assert "alpha" in dwim_bundle.get("text/plain", "") and "beta" in dwim_bundle["text/plain"], dwim_bundle
+
+        # Multiple values are ALL shown (not silently collapsed to the first).
+        multi_job = await run("Result(True, [1, 2, 3])", budget=3.0, name="multi")
+        await multi_job.task
+        multi_row = conn.execute(
+            "SELECT status, outputs FROM executions WHERE id = ?", (multi_job.id,)
+        ).fetchone()
+        assert multi_row["status"] == "done", multi_row["status"]
+        multi_text = [out["data"].get("text/plain", "") for out in json.loads(multi_row["outputs"])][-1]
+        assert "True" in multi_text and "[1, 2, 3]" in multi_text, ("multi-value dropped a value", multi_text)
 
 
     asyncio.run(main())

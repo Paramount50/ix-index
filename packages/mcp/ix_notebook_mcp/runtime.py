@@ -41,6 +41,9 @@ import time
 import traceback
 import types
 import uuid
+from collections.abc import Mapping
+
+from . import registry
 
 _ix_current: contextvars.ContextVar = contextvars.ContextVar("ix_current_job", default=None)
 
@@ -312,7 +315,6 @@ class Job:
         return head + ("\n" + out if out else "")
 
 
-@dataclasses.dataclass
 class Result:
     """Split a cell's final value into a human view and a model view.
 
@@ -342,9 +344,32 @@ class Result:
     text as a fallback for plain hosts.
     """
 
-    user_html: str
-    llm_result: str = ""
-    llm_images: list = dataclasses.field(default_factory=list)
+    # Construct it however reads best. Pass the value(s) you want shown and it
+    # does the right thing: `Result(x)` renders x richly for the human and hands
+    # you its repr (exactly like `Result.of`), and `Result(a, b, ...)` shows each
+    # value (so you never lose one to a silent positional). For full control give
+    # the keywords, which always win: `Result(user_html=..., llm_result=...,
+    # llm_images=[...])`.
+    def __init__(self, *values, user_html=None, llm_result=None, llm_images=None):
+        if user_html is not None:
+            self.user_html = user_html
+            self.llm_result = llm_result if llm_result is not None else ""
+            self.llm_images = list(llm_images) if llm_images else []
+            return
+        if not values:
+            # Result() / a text- or images-only Result built from keywords.
+            self.user_html = ""
+            self.llm_result = llm_result if llm_result is not None else ""
+            self.llm_images = list(llm_images) if llm_images else []
+            return
+        built = (
+            Result.of(values[0], llm_result=llm_result)
+            if len(values) == 1
+            else _result_from_values(values, llm_result=llm_result)
+        )
+        self.user_html = built.user_html
+        self.llm_result = built.llm_result
+        self.llm_images = list(llm_images) if llm_images else built.llm_images
 
     @classmethod
     def text(cls, value, *, html: str | None = None) -> "Result":
@@ -370,12 +395,24 @@ class Result:
         the frame as compact, untruncated CSV (the human still gets the styled
         HTML table), so a wide or long-stringed frame is never clipped to the
         agent the way the boxed text repr clips it. Override with ``llm_result``."""
+        value = _as_frame_if_tabular(value)
         if llm_result is not None:
             text_view = llm_result
         elif _is_polars_df(value):
             text_view = _df_llm_text(value)
         else:
             text_view = _safe_repr(value)
+        if _is_polars_df(value):
+            # A frame (incl. a dict/records value coerced above) renders as the
+            # dashboard's styled table directly -- a table for the human, compact
+            # CSV for you -- and works even without the IPython display formatter.
+            try:
+                import view as _view
+
+                return cls(user_html=_view.df_html(value), llm_result=text_view)
+            except Exception:
+                user = f'<pre class="ix-result">{_escape_html(text_view)}</pre>'
+                return cls(user_html=user, llm_result=text_view)
         bundle = _result_bundle(value)
         data = (bundle or {}).get("data", {})
         if "text/html" in data:
@@ -402,6 +439,44 @@ class Result:
         # Plain-text fallback (the stored result repr, non-rich hosts): the model
         # view, never the HTML.
         return self.llm_result or ""
+
+
+def _as_frame_if_tabular(value):
+    """A mapping (a config dict, counts) or a list of mappings (records) is
+    tabular: render it as a polars frame -- a styled table for the human, compact
+    CSV for you -- rather than a raw dict/list repr. Anything else is returned
+    unchanged. Keeps `Result({...})` from shoving a dict under text/html (invalid)
+    and from collapsing to a bare repr."""
+    try:
+        import polars as pl
+    except Exception:
+        return value
+    if isinstance(value, Mapping) and value:
+        return pl.DataFrame(
+            {"key": [str(k) for k in value], "value": [_safe_repr(v) for v in value.values()]}
+        )
+    if isinstance(value, (list, tuple)) and value and all(isinstance(x, Mapping) for x in value):
+        try:
+            return pl.DataFrame(list(value))
+        except Exception:
+            return value
+    return value
+
+
+def _result_from_values(values, *, llm_result=None):
+    """Render several values as one Result: each value's rich view stacked for the
+    human (so `Result(a, b)` shows BOTH, never just the first), their reprs joined
+    for you. `llm_result` overrides the joined model text."""
+    items = [Result.of(v) for v in values]
+    user_html = "".join(
+        f'<div class="ix-result-item" data-ix-index="{i}">{item.user_html}</div>'
+        for i, item in enumerate(items)
+    )
+    text = llm_result if llm_result is not None else chr(10).join(item.llm_result for item in items)
+    images: list = []
+    for item in items:
+        images.extend(item.llm_images)
+    return Result(user_html=user_html, llm_result=text, llm_images=images)
 
 
 class Resource:
@@ -1202,9 +1277,12 @@ def _escape_html(text: str) -> str:
 
 
 # Bundled modules an agent should be able to discover without grepping source.
-_API_MODULES = ("fff", "view", "nix", "fleet", "search", "tui", "worktree")
+# The discoverable surface is declared once in `registry`; both these catalog
+# lists and the startup pre-import below derive from it, so adding a module there
+# is the only edit needed (see registry.py).
+_API_MODULES = registry.module_names()
 # Always-present namespace builtins (no import needed); see install().
-_API_BUILTINS = ("Result", "cells", "jobs", "history", "resources", "register_resource", "sh", "api", "DASHBOARD_URL")
+_API_BUILTINS = registry.builtin_names()
 
 
 def _api_rows() -> list[dict]:
@@ -1644,7 +1722,7 @@ def install(user_ns: dict | None = None) -> None:
     # are already imported at startup (01-ix-polars installs view's renderer, which
     # imports fff), so binding them here costs nothing; heavier modules (nix,
     # fleet, search) stay import-on-demand to keep the namespace lean.
-    for _mod_name in ("fff", "view"):
+    for _mod_name in registry.preimport_names():
         try:
             target[_mod_name] = __import__(_mod_name)
         except Exception:

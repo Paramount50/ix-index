@@ -9,10 +9,10 @@ index; this module loads the `fff-c` cdylib (`packages/fff` emits it next to the
     import fff
 
     # one-shot helpers keep a cached, file-watching index per directory:
-    for hit in fff.find("picker", root=".").hits:
+    for hit in fff.find("picker", path=".").hits:
         print(hit.path, hit.frecency)
 
-    for m in fff.grep("fn main", root=".").matches:
+    for m in fff.grep("fn main", path=".").matches:
         print(f"{m.path}:{m.line_number}: {m.line}")
 
     # or hold an instance for repeated queries against one tree:
@@ -872,24 +872,24 @@ def _cached(root) -> FileFinder:
         return ff
 
 
-def find(query: str, root=".", *, limit: int = 100) -> SearchResult:
-    """Fuzzy file search over `root`, reusing a cached watched index."""
-    return _cached(root).search(query, limit=limit)
+def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
+    """Fuzzy file search over `path`, reusing a cached watched index."""
+    return _cached(path).search(query, limit=limit)
 
 
-def grep(query: str, root=".", *, mode: str = "plain", limit: int = 50) -> GrepResult:
-    """Content grep over `root`, reusing a cached watched (content-indexed) index."""
-    return _cached(root).grep(query, mode=mode, limit=limit)
+def grep(query: str, path=".", *, mode: str = "plain", limit: int = 50) -> GrepResult:
+    """Content grep over `path`, reusing a cached watched (content-indexed) index."""
+    return _cached(path).grep(query, mode=mode, limit=limit)
 
 
-async def afind(query: str, root=".", *, limit: int = 100) -> SearchResult:
+async def afind(query: str, path=".", *, limit: int = 100) -> SearchResult:
     """Async fuzzy file search: runs off the event loop (non-blocking)."""
-    return await asyncio.to_thread(find, query, root, limit=limit)
+    return await asyncio.to_thread(find, query, path, limit=limit)
 
 
-async def agrep(query: str, root=".", *, mode: str = "plain", limit: int = 50) -> GrepResult:
+async def agrep(query: str, path=".", *, mode: str = "plain", limit: int = 50) -> GrepResult:
     """Async content grep: runs off the event loop (non-blocking)."""
-    return await asyncio.to_thread(grep, query, root, mode=mode, limit=limit)
+    return await asyncio.to_thread(grep, query, path, mode=mode, limit=limit)
 
 
 import html as _html_mod
@@ -975,14 +975,14 @@ class CodeMap:
         )
 
 
-def map(query: str, root=".", *, mode: str = "plain", limit: int = 200) -> CodeMap:
+def map(query: str, path=".", *, mode: str = "plain", limit: int = 200) -> CodeMap:
     """Content grep grouped into a :class:`CodeMap`: hits per file with
     definitions ranked first. A glanceable answer to "where is X defined and
     used?" built straight on :func:`grep`."""
-    return CodeMap(query, grep(query, root, mode=mode, limit=limit).matches)
+    return CodeMap(query, grep(query, path, mode=mode, limit=limit).matches)
 
 
-async def amap(query: str, root=".", *, mode: str = "plain", limit: int = 200) -> CodeMap:
+async def amap(query: str, path=".", *, mode: str = "plain", limit: int = 200) -> CodeMap:
     """Async :func:`map`: the same code map, off the event loop."""
-    res = await agrep(query, root, mode=mode, limit=limit)
+    res = await agrep(query, path, mode=mode, limit=limit)
     return CodeMap(query, res.matches)

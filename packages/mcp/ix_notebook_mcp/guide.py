@@ -10,11 +10,29 @@ the per-tool overview from the registry, so nothing restates a tool by hand).
 
 from __future__ import annotations
 
+from . import registry
+
 
 def compose(*parts: str) -> str:
     """Join guidance fragments into a single space-separated block, collapsing each
     fragment's incidental whitespace so callers can pick any subset in any order."""
     return " ".join(" ".join(part.split()) for part in parts if part)
+
+
+def modules_index() -> str:
+    """The bundled-module index for the instructions, generated from `registry`
+    so a module is named in exactly one place and NO signature is ever copied into
+    prose (the exact signatures come from `api()` / `help()`). Adding a module to
+    the registry lists it here for free."""
+    preimported = ", ".join(f"`{name}`" for name in registry.preimport_names())
+    mods = "; ".join(f"`{m.name}` \u2014 {m.tagline}" for m in registry.MODULES)
+    libs = ", ".join(f"`{name}`" for name in registry.LIBRARIES)
+    return (
+        f"Bundled tooling, no install step: {preimported} are pre-bound in the namespace (use them "
+        "with no import; an explicit `import` returns the same object), the others you `import` "
+        "once and reuse. Each module's exact signatures come from `api('<name>')` / "
+        f"`help(<name>.<fn>)`, never from here. Modules: {mods}. Also import-ready: {libs}."
+    )
 
 
 # --- shared rules: reused by the kernel guide AND by tool descriptions ---
@@ -71,11 +89,23 @@ INTRO = (
 )
 
 DISCOVER = (
-    "Call `api()` (always in the namespace, no import) to list every helper you have — the kernel "
-    "builtins (`Result`, `cells`, `jobs`, `sh`, plus `fff` and `view`, all bound with no import) "
-    "and each bundled module's functions with "
-    "signatures and summaries — or `api('grep')` to filter; reach for it instead of guessing "
-    "names or grepping source."
+    "`api()` is your reference (always in the namespace, no import): it lists every helper — the "
+    "kernel builtins and each bundled module's public surface — with its live signature and a "
+    "one-line summary. Call `api()` to see what exists, `api('grep')` to filter by name/summary/"
+    "module, and `help(fff.grep)` for a function's full doc. Take a name or a parameter from "
+    "`api()` / `help()` rather than guessing: these instructions deliberately never restate "
+    "signatures (so they cannot drift from the code), which makes the catalog the source of truth."
+)
+
+NO_SHELL = (
+    "Never shell out for what the bundled helpers already do — no `ls`/`cat`/`grep`/`find`/`rg`/"
+    "`fd` via bash, `sh`, or `asyncio.create_subprocess_exec`, and no one-off search or listing "
+    "helper. `fff` finds files and greps content, `view` lists directories and shows files, and "
+    "both return polars frames you compose `.filter`/`.sort`/`.group_by`/`.head` on (or "
+    "syntax-highlighted views) — so the human gets a styled table and you get a clean frame "
+    "rather than an unstyled text dump. To list a directory use `view.ls`/`view.tree`, never "
+    "`os.walk` or `ls`; to edit, `view.edit(path, old, new)`, never blind. For meaning-based "
+    "recall across a corpus, `import search`."
 )
 
 VERIFY = (
@@ -88,27 +118,6 @@ VERIFY = (
     "in the source' is not 'the tab switches on screen'."
 )
 
-MODULES = (
-    "Bundled modules need no install step. `fff` (async file search/grep) and `view` are already "
-    "bound in the namespace, so use them with no import (an explicit `import fff` returns the same "
-    "object); the rest you `import` once and reuse: `tui`, "
-    "`exa_py`, `google_auth`, `fleet` (async polars SSH fan-out across hosts: `await "
-    "fleet.read_ndjson(hosts, path)` or `await fleet.scan(hosts, cmd)`; pass "
-    "`username=`/`connect_timeout=` through to asyncssh, and note that `on_error='collect'` waits "
-    "out each unreachable host's full TCP timeout before dropping it, so set a short "
-    "`connect_timeout` to fail fast), `nix` (run a nix build and get its internal-json as polars "
-    "+ a live build-DAG: `await nix.build('.#foo')` -> `.events`/`.activities` frames, `.tree()`; "
-    "and `await nix.attrs()` catalogs the flake's buildable attrs as a polars frame, so you stop "
-    "guessing attr paths), `sh` (when you must shell out: `out = await sh('gh run list')` runs on "
-    "the loop and returns an Output that IS a Result, so the dashboard shows the command's ANSI "
-    "color as HTML while you get `.text`/`.code`/`.ok` with escape codes stripped), "
-    "`worktree` (do risky or parallel work on a throwaway branch in its own checked-out tree, "
-    "so the main tree is never disturbed: `wt = await worktree.add('my-fix')`, edit through "
-    "`wt / 'path'`, `await wt.build('.#mcp')` stages + nix-builds it, `await wt.commit(msg)`, "
-    "`await wt.remove()`; `worktree.list()` is a DataFrame), numpy, "
-    "polars, duckdb, httpx, matplotlib, playwright,"
-)
-
 HTML = (
     "htpy (build HTML in Python with `div(class_='x')[...]`; it auto-escapes every text node and "
     "attribute, so use it instead of f-string HTML, which is where escaping gets forgotten; an "
@@ -118,22 +127,6 @@ HTML = (
     "light-only colors), so it follows the viewer's OS theme — the dashboard is dark by default."
 )
 
-VIEW = (
-    "Prefer these over shelling out, and never reach for a subprocess to do them: `view.ls(path)` "
-    "/ `view.tree(path)` list a directory as a polars DataFrame you can `.filter` / `.sort` "
-    "(`view.tree` prunes noise — anything the repo's `.gitignore` ignores, plus a denylist of heavy "
-    "dirs like node_modules / target / dist — so a project's structure is not buried under vendored "
-    "or generated files; an ignored dir collapses to one row, an ignored file drops, and `all=True` "
-    "shows everything; `view.ls` stays flat instead and adds an `ignored` column flagging the "
-    "git-ignored entries rather than dropping them) "
-    "(never `ls` — not via bash, `sh`, or `asyncio.create_subprocess_exec`, and never paste a raw "
-    "`ls -la` dump at the human), `view.grep` / `view.find` search as DataFrames, "
-    "`view.cat/read/head/json/diff` return a syntax-highlighted view, and `view.edit(path, old, "
-    "new)` applies a change and returns it as a highlighted diff (never edit blind). Shelling out "
-    "to `ls` / `cat` / `grep` / `find` is always wrong here — you throw away the table and the "
-    "highlighting and dump unstyled text the human has to read."
-)
-
 POLARS = (
     "Prefer polars for any tabular data: return a DataFrame (or `Result.of(df)`) and the human "
     "gets the styled HTML table for free while you get the frame as compact, untruncated CSV — so "
@@ -141,19 +134,6 @@ POLARS = (
     "`pl`; pandas is not bundled. Even key/value data — environment variables, a config dict, "
     "counts — is tabular: return a two-column DataFrame, never a `\\n`-joined string or a printed "
     "dict."
-)
-
-SEARCH = (
-    "To find files or code, use `fff` with polars — never shell out to "
-    "`rg`/`grep`/`fd`/`find`/`ls`/`mgrep`, and never write a one-off search helper. "
-    "`fff.find(query)` (typo-tolerant, frecency-ranked file find) and `fff.grep(pattern)` (SIMD "
-    "content grep), plus async `fff.afind`/`fff.agrep`, return a result whose `.df` is a polars "
-    "DataFrame: do the whole search by composing the polars API on it (`.filter`, `.sort`, "
-    "`.group_by`, `.join`, `.head`) rather than extra functions, and it renders as the styled "
-    "HTML table for free. `view.grep/find/tree/ls` return the same polars frames for a quick "
-    "listing. `fff.map(pattern)` groups hits into a foldable code map with definitions ranked "
-    "first, for “where is X defined and used?”. For meaning-based recall across a corpus, `import "
-    "search`."
 )
 
 RESULT_SPLIT = (
