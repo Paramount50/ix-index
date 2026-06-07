@@ -27,9 +27,53 @@ import html as _html
 import json as _json
 import os
 import pathlib
+import subprocess
 from datetime import datetime
 
 import polars as pl
+
+# Heavy, rarely-relevant directories `tree` collapses (lists but does not descend
+# into) unless ``all=True``: dependency installs, build output, vendored code, and
+# caches. Dotted dirs (.git, .venv, .svelte-kit, ...) are already skipped by the
+# hidden-entry rule, so this names only the non-dotted offenders that otherwise
+# bury a project's real structure under thousands of files.
+_NOISE_DIRS = frozenset(
+    {
+        "node_modules",
+        "target",
+        "build",
+        "dist",
+        "out",
+        "result",
+        "vendor",
+        "venv",
+        "coverage",
+        "__pycache__",
+    }
+)
+
+
+def _git_ignored(root: pathlib.Path, rels: list[str]) -> set[str]:
+    """The subset of ``rels`` (paths relative to ``root``) that git ignores, via
+    ``git check-ignore``. Empty when ``root`` is not a git work tree or git is
+    unavailable, so callers fall back to the static :data:`_NOISE_DIRS` denylist.
+    Never raises: ignore-pruning is best-effort and must not break a listing."""
+    if not rels:
+        return set()
+    try:
+        proc = subprocess.run(
+            ["git", "check-ignore", "--stdin", "-z"],
+            input="\0".join(rels) + "\0",
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    # exit 0 = some ignored, 1 = none, 128 = not a repo: all non-fatal here.
+    return {p for p in proc.stdout.split("\0") if p}
+
 
 __all__ = [
     "ls",
@@ -469,7 +513,12 @@ def tree(
     """A recursive listing to ``depth`` as a DataFrame (depth, name, path, kind).
 
     ``name`` is indented by depth for a tree shape; ``path`` is relative to the
-    root so results stay sortable/filterable.
+    root so results stay sortable/filterable. Noise is pruned: anything the repo's
+    ``.gitignore`` ignores (when ``path`` is in a git work tree), plus a static
+    denylist of heavy dirs (``node_modules``, ``target``, ``dist``, ...) so it
+    still works outside git. An ignored directory is listed as one collapsed row
+    (suffixed ``/…``) but not descended into; an ignored file is dropped. Pass
+    ``all=True`` to include hidden + ignored entries and walk everything.
     """
     root = pathlib.Path(path)
     rows = []
@@ -483,19 +532,33 @@ def tree(
             )
         except OSError:
             return
+        ignored = (
+            set()
+            if all
+            else _git_ignored(root, [str(p.relative_to(root)) for p in entries])
+        )
         for p in entries:
             if not all and p.name.startswith("."):
                 continue
-            kind = "dir" if p.is_dir() else "file"
+            is_dir = p.is_dir()
+            rel = str(p.relative_to(root))
+            # Prune noise: anything .gitignore ignores, plus the static denylist
+            # of heavy dirs (so it still works outside a git repo). An ignored DIR
+            # is shown as one collapsed row (structure stays visible) but not
+            # walked; an ignored FILE (build artifact, .env, ...) is dropped.
+            noisy = not all and (rel in ignored or (is_dir and p.name in _NOISE_DIRS))
+            if noisy and not is_dir:
+                continue
+            collapsed = noisy and is_dir
             rows.append(
                 {
                     "depth": level,
-                    "name": ("  " * level) + p.name,
-                    "path": str(p.relative_to(root)),
-                    "kind": kind,
+                    "name": ("  " * level) + p.name + ("/\u2026" if collapsed else ""),
+                    "path": rel,
+                    "kind": "dir" if is_dir else "file",
                 }
             )
-            if p.is_dir():
+            if is_dir and not collapsed:
                 walk(p, level + 1)
 
     walk(root, 0)

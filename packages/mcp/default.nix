@@ -859,6 +859,14 @@ let
         assert w.status == "error", w.status
         assert "asyncio.to_thread" in w.error and "Traceback" not in w.error, w.error
 
+        # A cell that prints but returns no Result fails the Result contract, and
+        # the error now shows what it printed (stdout never reaches the model), so
+        # a printing agent gets an actionable nudge instead of a silent dead end.
+        p = await run("print('hello-from-stdout')", budget=1.0, name="printed")
+        assert p.status == "error", p.status
+        assert "printed to stdout" in p.error, p.error
+        assert "hello-from-stdout" in p.error, p.error
+
     asyncio.run(main())
     # api(): a discoverable catalog of kernel builtins + bundled modules.
     cat = ns["api"]()
@@ -867,12 +875,94 @@ let
     filt = ns["api"]("cells")
     assert 1 <= filt.height <= cat.height, (filt.height, cat.height)
 
+    # fff and view are pre-bound in the namespace (no import needed), the way
+    # Result/cells/jobs/sh are, so fff.grep(...) / view.tree(...) just work.
+    assert callable(getattr(ns.get("fff"), "grep", None)), ns.get("fff")
+    assert callable(getattr(ns.get("view"), "tree", None)), ns.get("view")
+
+    # Result.llm_images downscale a large raster to <= _IMAGE_MAX_DIM on its
+    # longest edge before base64-encoding it for the model (Pillow is present via
+    # matplotlib), so a full-page screenshot does not cost vision tokens at full
+    # resolution.
+    import base64 as _b64
+    import io as _io
+
+    from PIL import Image as _Image
+
+    _buf = _io.BytesIO()
+    _Image.new("RGB", (3000, 1500), (10, 20, 30)).save(_buf, format="PNG")
+    _coerced = runtime._coerce_image(_buf.getvalue())
+    assert _coerced is not None, _coerced
+    _w, _h = _Image.open(_io.BytesIO(_b64.b64decode(_coerced["data"]))).size
+    assert max(_w, _h) <= runtime._IMAGE_MAX_DIM, (_w, _h, runtime._IMAGE_MAX_DIM)
+
+    # outputs.text() renders an over-cap block as a head+tail preview (not a
+    # one-sided clip) with paging guidance, and honours IX_MCP_MAX_RESULT_CHARS.
+    import importlib as _il
+    import os as _os
+
+    from ix_notebook_mcp import outputs as _outputs
+
+    _os.environ["IX_MCP_MAX_RESULT_CHARS"] = "1000"
+    _il.reload(_outputs)
+    _blk = _outputs.text("HEAD" + ("z" * 5000) + "TAIL").text
+    assert _blk.startswith("HEAD") and _blk.endswith("TAIL"), _blk[:40]
+    assert "output too large" in _blk and len(_blk) < 2000, len(_blk)
+    _os.environ.pop("IX_MCP_MAX_RESULT_CHARS", None)
+    _il.reload(_outputs)
+
+    # view.tree lists but does not descend into heavy dirs (node_modules, ...)
+    # unless all=True, so a project's structure is not buried under vendored files.
+    import pathlib as _pl
+    import tempfile as _tf
+
+    import view as _view
+
+    _root = _tf.mkdtemp()
+    _pl.Path(_root, "src").mkdir()
+    _pkg = _pl.Path(_root, "node_modules", "pkg")
+    _pkg.mkdir(parents=True)
+    (_pkg / "index.js").write_text("x")
+    _collapsed = _view.tree(_root, depth=3)
+    _walked = _view.tree(_root, depth=3, all=True)
+    assert _walked.height > _collapsed.height, (_collapsed.height, _walked.height)
+    _names = _collapsed["name"].to_list()
+    assert any("node_modules" in n for n in _names), _names
+    assert not any("index.js" in n for n in _names), _names
+
+    # .gitignore-aware pruning (git is on PATH in this sandbox): a dir the repo
+    # ignores but that is NOT in the static denylist still collapses, and an
+    # ignored file drops entirely.
+    import shutil as _shutil
+    import subprocess as _sub
+
+    if _shutil.which("git"):
+        _g = _tf.mkdtemp()
+        _pl.Path(_g, "src").mkdir()
+        _gen = _pl.Path(_g, "generated")
+        _gen.mkdir()
+        (_gen / "big.py").write_text("x")
+        (_pl.Path(_g) / "debug.log").write_text("x")
+        (_pl.Path(_g) / ".gitignore").write_text("generated/" + chr(10) + "*.log" + chr(10))
+        _sub.run(["git", "init", "-q"], cwd=_g, check=True)
+        _gi = _view.tree(_g, depth=3)["name"].to_list()
+        assert any("generated" in n for n in _gi), _gi
+        assert not any("big.py" in n for n in _gi), _gi
+        assert not any("debug.log" in n for n in _gi), _gi
+        assert any("src" in n for n in _gi), _gi
+
     print("runtime-ok")
   '';
   runtimeSmoke =
     pkgs.runCommand "ix-mcp-runtime-smoke"
       {
-        nativeBuildInputs = [ mcpPython ];
+        # git is on PATH so the view.tree .gitignore-pruning assertion can init a
+        # throwaway repo; without it that path falls back to the denylist (still
+        # covered by the no-git case in the same test).
+        nativeBuildInputs = [
+          mcpPython
+          pkgs.git
+        ];
         strictDeps = true;
       }
       ''
