@@ -41,10 +41,12 @@ import asyncio
 import ctypes
 import json
 import os
+import shutil
 import sys
+import tempfile
 import threading
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 __all__ = [
@@ -873,73 +875,117 @@ def _cached(root) -> FileFinder:
 
 
 def _split_path(path) -> tuple[str, str | None]:
-    """Resolve a search `path` into an indexable directory root and an optional
-    single-file scope.
+    """Split a search `path` into a directory root and an optional single-file
+    name.
 
-    fff-c indexes a directory tree; a lone file as the root scans no content (it
-    reports one file but builds no content index, so every grep returns zero).
-    When `path` is a file, root the index at its parent directory and return the
-    file's name (its path relative to that root), so the caller can scope results
-    to just that file. A directory passes through unscoped.
+    A leading ``~`` is expanded, so ``"~/.zshrc"`` works the same as the
+    explicitly expanded path. When `path` is a file, return its parent directory
+    and basename; the single-file case is then served by :func:`_isolated_file_finder`
+    (fff-c can't content-index a lone file as a root, and its indexer skips
+    dotfiles and ignored paths). A directory passes through unscoped.
     """
-    fspath = os.fspath(path)
+    fspath = os.path.expanduser(os.fspath(path))
     if os.path.isfile(fspath):
         absolute = os.path.abspath(fspath)
         return os.path.dirname(absolute), os.path.basename(absolute)
     return fspath, None
 
 
-def _grep_one_file(ff: FileFinder, query: str, relpath: str, *, mode: str, limit: int) -> GrepResult:
-    """Grep a single file via a finder rooted at its directory.
+def _is_unindexable_root(directory: str) -> bool:
+    """True for directories fff-c refuses to index as a base: the filesystem
+    root and the user's home directory.
 
-    fff returns whole files per page (matches are file-grouped, and `limit` is a
-    soft cap that stops only after a file completes), so the target's matches
-    arrive together in the page whose window reaches it. Page by `file_offset`
-    until that file appears; there is no pre-filter `limit` hole because we never
-    truncate before finding it. Returns empty when the file has no match.
+    Indexing either walks an enormous tree and floods the file watcher, so fff-c
+    rejects them up front (mirrors the `dirs::home_dir()` / `parent()` check in
+    fff-core's ``FilePicker::new``).
     """
-    file_offset = 0
-    while True:
-        page = ff.grep(query, mode=mode, limit=limit, file_offset=file_offset, max_matches_per_file=limit)
-        hits = [m for m in page.matches if m.path == relpath][:limit]
-        if hits:
-            return GrepResult(
-                matches=hits,
-                total_matched=len(hits),
-                total_files_searched=1,
-                next_file_offset=0,
-            )
-        if page.next_file_offset in (0, file_offset):
-            return GrepResult(matches=[], total_matched=0, total_files_searched=0, next_file_offset=0)
-        file_offset = page.next_file_offset
+    resolved = os.path.abspath(directory)
+    if os.path.dirname(resolved) == resolved:  # filesystem root ("/", "C:\\")
+        return True
+    home = os.path.abspath(os.path.expanduser("~"))
+    return os.path.normcase(resolved) == os.path.normcase(home)
+
+
+def _refuse_unindexable_dir(root: str) -> "FffError":
+    """A clear, actionable error for a bare home / fs-root *directory*.
+
+    Indexing the whole of ``$HOME`` or ``/`` is the one case fff genuinely won't
+    serve. Pre-empt fff-c's terse "consider smaller per-project directories"
+    (whose suggestion nudges toward shelling out to ``grep``) with guidance that
+    keeps you on the fast in-process tool: name a file or a scoped subdir.
+    """
+    resolved = os.path.abspath(root)
+    what = "filesystem root" if os.path.dirname(resolved) == resolved else "home directory"
+    return FffError(
+        f"refusing to index the {what} ({resolved}) whole: it would walk a huge "
+        "tree and flood the file watcher. Search a specific file (e.g. "
+        "'~/.zshrc') or a scoped subdirectory (e.g. '~/.config/nvim') instead."
+    )
+
+
+def _isolated_file_finder(abspath: str, tmp: str, *, content_indexing: bool) -> "FileFinder":
+    """A finder over a throwaway directory holding only a copy of ``abspath``.
+
+    An explicitly named file can't always be searched in place: fff-c can't
+    content-index a lone file as its root, its indexer skips dotfiles and
+    ignored paths, and the file may sit under a ``$HOME``/``/`` that fff won't
+    index at all. So copy it into ``tmp`` under a *visible* name (leading dots
+    stripped — the indexer ignores hidden files) and index that one-file tree:
+    fff's real engine then runs over it (every grep mode, match ranges,
+    definitions, binary detection). ``copy2`` preserves size and mtime. Results
+    come back keyed by the copy's name, so callers remap them to the real one.
+    """
+    copy_name = os.path.basename(abspath).lstrip(".") or "file"
+    shutil.copy2(abspath, os.path.join(tmp, copy_name))
+    ff = FileFinder(tmp, watch=False, content_indexing=content_indexing)
+    ff.wait_for_scan(10_000)
+    return ff
 
 
 def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
     """Fuzzy file search over `path`, reusing a cached watched index.
 
-    `path` may be a directory (searched whole) or a single file (matched on its
-    own, by rooting the index at its parent directory).
+    `path` may be a directory (searched whole) or a single file (searched on its
+    own, in an isolated one-file index so even a dotfile or a file directly under
+    `$HOME`/`/` is matched). A bare `~`/`/` *directory* is refused with guidance
+    toward a file or a scoped subdirectory.
     """
     root, only = _split_path(path)
-    result = _cached(root).search(query, limit=limit)
     if only is None:
-        return result
-    hits = [h for h in result.hits if h.path == only][:limit]
+        if _is_unindexable_root(root):
+            raise _refuse_unindexable_dir(root)
+        return _cached(root).search(query, limit=limit)
+    with tempfile.TemporaryDirectory(prefix="ix-fff-file-") as tmp:
+        with _isolated_file_finder(os.path.join(root, only), tmp, content_indexing=False) as ff:
+            result = ff.search(query, limit=limit)
+    hits = [replace(h, path=only, name=only) for h in result.hits][:limit]
     return SearchResult(hits=hits, total_matched=len(hits), total_files=len(hits))
 
 
 def grep(query: str, path=".", *, mode: str = "plain", limit: int = 50) -> GrepResult:
     """Content grep over `path`, reusing a cached watched (content-indexed) index.
 
-    `path` may be a directory (grepped whole) or a single file: a lone file
-    cannot be content-indexed as a root, so it is grepped by rooting the index at
-    its parent directory and scoping the result to that file.
+    `path` may be a directory (grepped whole) or a single file. A single file is
+    grepped in an isolated one-file index, so it works even for a dotfile (which
+    the indexer skips in place) or a file directly under `$HOME`/`/` (which fff
+    won't index whole). A bare `~`/`/` *directory* is refused with guidance
+    toward a file or a scoped subdirectory.
     """
     root, only = _split_path(path)
-    ff = _cached(root)
     if only is None:
-        return ff.grep(query, mode=mode, limit=limit)
-    return _grep_one_file(ff, query, only, mode=mode, limit=limit)
+        if _is_unindexable_root(root):
+            raise _refuse_unindexable_dir(root)
+        return _cached(root).grep(query, mode=mode, limit=limit)
+    with tempfile.TemporaryDirectory(prefix="ix-fff-file-") as tmp:
+        with _isolated_file_finder(os.path.join(root, only), tmp, content_indexing=True) as ff:
+            result = ff.grep(query, mode=mode, limit=limit)
+    matches = [replace(m, path=only, name=only) for m in result.matches]
+    return GrepResult(
+        matches=matches,
+        total_matched=result.total_matched,
+        total_files_searched=result.total_files_searched,
+        next_file_offset=0,
+    )
 
 
 async def afind(query: str, path=".", *, limit: int = 100) -> SearchResult:

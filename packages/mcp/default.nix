@@ -663,14 +663,39 @@ let
         assert "path" in _params and "root" not in _params, (_fn.__name__, list(_params))
     assert isinstance(fff.grep("find me on this line", path=root), fff.GrepResult)
 
-    # A single file as `path` is grepped on its own (fff-c cannot content-index a
-    # lone file as a root, so the helpers root at its parent and scope to it).
+    # A single file as `path` is grepped on its own, in an isolated one-file
+    # index: fff-c cannot content-index a lone file as a root, and its indexer
+    # skips dotfiles and ignored paths, so the helper copies the target into a
+    # throwaway visible-named tree and remaps matches back to its real name.
     main_rs = os.path.join(root, "src", "main.rs")
     one = fff.grep("find me on this line", path=main_rs)
     assert {m.path for m in one.matches} == {"main.rs"}, f"file grep not scoped: {one.matches!r}"
     assert fff.grep("no such content anywhere", path=main_rs).matches == [], "empty file grep should be empty"
     assert any(h.path == "main.rs" for h in fff.find("main", path=main_rs).hits), "file find missed it"
     assert fff.map("find me on this line", path=main_rs).by_file, "file map should group the hit"
+
+    # Regression guard for indexable-inc/index#890: a dotfile, and a file
+    # directly under $HOME, are both greppable even though fff's indexer skips
+    # hidden files in place and refuses to index $HOME whole.
+    dotfile = os.path.join(root, ".env")
+    with open(dotfile, "w") as fh:
+        fh.write("SECRET=find me on this line\n")
+    assert fff.grep("find me on this line", path=dotfile).matches, "dotfile grep found nothing"
+
+    home_file = os.path.join(os.environ["HOME"], ".zshrc")
+    with open(home_file, "w") as fh:
+        fh.write("export FIND_ME=1\n")
+    home_hit = fff.grep("FIND_ME", path=home_file)
+    assert {m.path for m in home_hit.matches} == {".zshrc"}, f"home dotfile grep: {home_hit.matches!r}"
+    assert any(h.path == ".zshrc" for h in fff.find("zshrc", path=home_file).hits), "home dotfile find missed it"
+
+    # A bare home / fs-root *directory* is refused with actionable guidance —
+    # never silently, and never with a message that nudges toward shelling out.
+    try:
+        fff.grep("anything", path=os.environ["HOME"])
+        raise AssertionError("expected a refusal for the bare home directory")
+    except fff.FffError as exc:
+        assert "subdirectory" in str(exc), f"unhelpful home-dir error: {exc}"
 
     print("fff-ok", fff.__version__)
   '';
