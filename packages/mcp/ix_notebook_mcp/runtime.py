@@ -1189,6 +1189,24 @@ def _normalize_bundle(data: dict, metadata: dict | None = None) -> dict:
         elif len(value) > _MAX_TEXT_BUNDLE:
             value = value[:_MAX_TEXT_BUNDLE] + "\n... [truncated]"
         out[mime] = value
+    # Carry the model-facing view (IX_LLM_MIME: the exact llm_result text plus the
+    # downscaled llm_images) so the dashboard's raw-LLM toggle can show precisely
+    # what the agent received, not just the human HTML. Stored JSON-encoded (the
+    # dashboard's data map is string-valued); each image is already size-bounded,
+    # so cap the whole only as a guard, dropping images (never the text) if huge.
+    llm = data.get(IX_LLM_MIME)
+    if isinstance(llm, dict):
+        # Clip the text to the same cap as every other text mime so a huge
+        # llm_result can never bypass it into SQLite or each dashboard poll, and
+        # the raw view matches the model's own clipped text. Drop the images
+        # (never the text) if the whole still exceeds the image cap.
+        text = llm.get("text", "")
+        if len(text) > _MAX_TEXT_BUNDLE:
+            text = text[:_MAX_TEXT_BUNDLE] + "\n... [truncated]"
+        encoded = json.dumps({"text": text, "images": llm.get("images", [])})
+        if len(encoded) > _MAX_IMAGE_BUNDLE:
+            encoded = json.dumps({"text": text, "images": []})
+        out[IX_LLM_MIME] = encoded
     return {"data": out, "metadata": metadata or {}}
 
 

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { RichOutput } from '$lib/types';
+  import { type RichOutput, type LlmView, IX_LLM_MIME } from '$lib/types';
+  import { view } from '$lib/view.svelte';
   let { output }: { output: RichOutput } = $props();
 
   const data = $derived(output.data ?? {});
@@ -10,9 +11,42 @@
   const html = $derived(data['text/html']);
   const markdown = $derived(data['text/markdown']);
   const plain = $derived(data['text/plain']);
+
+  // The raw model-facing view, when the header toggle is on: the exact text and
+  // images the agent received. IX_LLM_MIME carries both (text plus downscaled
+  // images) when a Result had images; otherwise text/plain is the model's text.
+  const llm = $derived.by((): LlmView => {
+    const encoded = data[IX_LLM_MIME];
+    if (encoded) {
+      try {
+        const parsed = JSON.parse(encoded) as LlmView;
+        if (typeof parsed.text === 'string' && Array.isArray(parsed.images)) return parsed;
+      } catch {
+        // Fall through to the text/image fallback below.
+      }
+    }
+    // No IX_LLM_MIME: the model still received this bundle's text/plain and any
+    // image mimes (a bare plot or screenshot), so reflect those, not just text.
+    return {
+      text: plain ?? (html && !png ? '[HTML output; see the dashboard]' : ''),
+      images: [
+        ...(png ? [{ mime: 'image/png', data: png }] : []),
+        ...(jpeg ? [{ mime: 'image/jpeg', data: jpeg }] : []),
+      ],
+    };
+  });
 </script>
 
-{#if png}
+{#if view.rawLLM}
+  <!-- What the LLM actually saw: its concise text and any images it was sent. -->
+  {#if llm.text}<pre class="res">{llm.text}</pre>{/if}
+  {#each llm.images as img, i (i)}
+    <img class="img" src={`data:${img.mime};base64,${img.data}`} alt="" />
+  {/each}
+  {#if !llm.text && llm.images.length === 0}
+    <pre class="res dim">(no model output)</pre>
+  {/if}
+{:else if png}
   <img class="img" src={`data:image/png;base64,${png}`} alt="" />
 {:else if jpeg}
   <img class="img" src={`data:image/jpeg;base64,${jpeg}`} alt="" />
@@ -47,5 +81,9 @@
   }
   pre.res {
     color: var(--text);
+  }
+  pre.dim {
+    color: var(--faint);
+    font-style: italic;
   }
 </style>
