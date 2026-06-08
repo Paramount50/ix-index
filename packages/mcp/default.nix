@@ -1433,6 +1433,24 @@ let
 
     assert "BadFrame" in runtime.Result.of(_BadFrame()).llm_result
 
+    # A plain string is rendered as output, not a Python literal: the model gets
+    # it verbatim with terminal escapes stripped (no `\n` / `\x1b` repr noise),
+    # and the human gets the same text as an HTML <pre>, escaped, with no raw
+    # control bytes. This is the read-tool treatment for a streamed Result.
+    s = runtime.Result.of("line1\nline2\n\x1b[0;32mgreen\x1b[0m")
+    assert s.llm_result == "line1\nline2\ngreen", repr(s.llm_result)
+    assert "\x1b" not in s.user_html and s.user_html.startswith("<pre"), s.user_html[:80]
+    # A short string carries no surrounding repr quotes.
+    assert runtime.Result.of("hello").llm_result == "hello"
+    # HTML metacharacters are escaped for the human, verbatim for the model.
+    esc = runtime.Result.of("a <b> & c")
+    assert esc.llm_result == "a <b> & c" and "&lt;b&gt;" in esc.user_html, esc.user_html
+    # An explicit llm_result still overrides the verbatim model text.
+    assert runtime.Result.of("raw", llm_result="override").llm_result == "override"
+    # The shared ANSI stripper lives in the runtime (the bundled `sh` helper
+    # imports it rather than keeping a second copy).
+    assert runtime._strip_ansi("\x1b[31mx\x1b[0m") == "x"
+
 
     async def main():
         # A DataFrame result is stored with its text/html bundle.
@@ -2022,6 +2040,11 @@ let
         assert "color" in html.lower(), html[:200]
         # An Output IS a Result, so ending a cell with it satisfies the contract.
         assert isinstance(colored, Result), type(colored)
+        # The ANSI helpers are the runtime's single implementation, imported
+        # here rather than duplicated in the sh module.
+        from ix_notebook_mcp import runtime as _rt
+
+        assert sh._strip_ansi is _rt._strip_ansi and sh._ansi_to_html is _rt._ansi_to_html
 
         # argv form, and a non-zero exit is surfaced (not swallowed).
         failed = await sh.sh(["false"], cwd=".")

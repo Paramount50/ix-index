@@ -70,7 +70,8 @@ BLOCKING = (
     "CPU-bound numpy op) freezes the WHOLE kernel: every other job and even your own next "
     "status-check cell stall behind it until it returns. So a blocking call MUST be made "
     "non-blocking: wrap it in `await asyncio.to_thread(...)`, or prefer the async API (`fff`, "
-    "`httpx`, `asyncio.create_subprocess_exec`), and run anything slow as a background job you "
+    "`httpx`, and the bundled `sh(cmd, cwd=...)` to shell out instead of `subprocess.run`), and run "
+    "anything slow as a background job you "
     "poll, never inline."
 )
 

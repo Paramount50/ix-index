@@ -55,25 +55,21 @@ __version__ = "0.1.0"
 # module still imports and `_repr_html_`/`__repr__` carry the rendering.
 try:
     from ix_notebook_mcp.runtime import Result as _ResultBase
+    from ix_notebook_mcp.runtime import _ansi_to_html, _strip_ansi
 
     _HAS_RESULT = True
 except Exception:  # pragma: no cover - exercised only outside the kernel
+    # Standalone (`import sh` with no kernel): degrade gracefully. The canonical
+    # ANSI handling lives in the runtime; without it, strip nothing and merely
+    # escape for HTML rather than reimplement the escape grammar here.
     _ResultBase = object
     _HAS_RESULT = False
 
-# Strip the terminal escape families a CLI actually emits, not just CSI color.
-# With FORCE_COLOR forced on, tools like `gh`/`eza`/`ls` emit OSC-8 hyperlinks
-# and charset-reset (`ESC ( B`) around their output; matching CSI alone would
-# leak the `\x1b` bytes of those into the model's text. Order matters: the
-# string-terminated families (OSC/DCS) come before the single-final forms so an
-# introducer is never half-matched.
-_ANSI = re.compile(
-    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC string, BEL- or ST-terminated
-    r"|\x1b[P^_X][^\x1b]*\x1b\\"  # DCS/PM/APC/SOS string, ST-terminated
-    r"|\x1b\[[0-9;?]*[ -/]*[@-~]"  # CSI (color, cursor, mode)
-    r"|\x1b[()*+#%][@-~]"  # charset designation / selection (e.g. ESC ( B)
-    r"|\x1b[@-Z\\-_a-z=>]"  # remaining solo Fe/Fs escapes (RIS, keypad, ...)
-)
+    def _strip_ansi(text: str) -> str:
+        return text
+
+    def _ansi_to_html(text: str) -> str:
+        return _html.escape(text)
 
 # Environment that asks well-behaved CLIs to emit SGR color even though their
 # stdout is a pipe, not a TTY. PAGER=cat keeps a tool that auto-pages (git, gh)
@@ -88,10 +84,6 @@ _COLOR_ENV = {
 }
 
 _MONO = "ui-monospace,SFMono-Regular,Menlo,monospace"
-
-
-def _strip_ansi(text: str) -> str:
-    return _ANSI.sub("", text)
 
 
 class ShellError(RuntimeError):
@@ -176,19 +168,6 @@ class Output(_ResultBase):
 
     def _repr_html_(self) -> str:
         return self._render_html()
-
-
-def _ansi_to_html(raw: str) -> str:
-    """Render ANSI SGR color to inline-styled HTML, or escape plain text if the
-    ``ansi2html`` converter is unavailable."""
-    try:
-        from ansi2html import Ansi2HTMLConverter
-    except ImportError:
-        # The converter is not installed (module used outside the bundled
-        # interpreter): show the escape-stripped text rather than control bytes.
-        return _html.escape(_strip_ansi(raw))
-    conv = Ansi2HTMLConverter(inline=True, scheme="osx", dark_bg=True)
-    return conv.convert(raw, full=False)
 
 
 def _terminate(proc: asyncio.subprocess.Process) -> None:

@@ -36,6 +36,7 @@ import inspect
 import json
 import os
 import pathlib
+import re
 import sys
 import time
 import traceback
@@ -407,6 +408,18 @@ class Result:
                 user_html=value.user_html,
                 llm_result=value.llm_result if llm_result is None else llm_result,
                 llm_images=value.llm_images,
+            )
+        if isinstance(value, str):
+            # A plain string is output, not a Python literal: hand the model the
+            # string verbatim with terminal escapes stripped, so captured CLI /
+            # ``--help`` / log text reads as itself instead of an escaped `repr`
+            # full of ``\n`` and ``\x1b`` noise, and show the human the same text
+            # with its ANSI color rendered to HTML. This is the read-tool
+            # treatment for a streamed Result.
+            text_view = llm_result if llm_result is not None else _strip_ansi(value)
+            return cls(
+                user_html=f'<pre class="ix-result">{_ansi_to_html(value)}</pre>',
+                llm_result=text_view,
             )
         if _is_multi_rich(value):
             # A tuple/list that carries a rich element (a DataFrame, a figure, a
@@ -1049,6 +1062,38 @@ def _safe_repr(value) -> str:
         return repr(value)
     except Exception:
         return f"<unreprable {type(value).__name__}>"
+
+
+# Terminal-escape (ANSI) handling, shared by the Result renderer here and the
+# bundled `sh` helper (which imports these). A CLI emits not only SGR color but
+# OSC-8 hyperlinks, charset resets, and cursor moves; captured output must reach
+# the model as readable text with all of that removed, and reach the human as
+# that same text with its color rendered to HTML. One implementation, two
+# consumers. Order matters: the string-terminated families (OSC/DCS) come before
+# the single-final forms so an introducer is never half-matched.
+_ANSI = re.compile(
+    r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC string, BEL- or ST-terminated
+    r"|\x1b[P^_X][^\x1b]*\x1b\\"  # DCS/PM/APC/SOS string, ST-terminated
+    r"|\x1b\[[0-9;?]*[ -/]*[@-~]"  # CSI (color, cursor, mode)
+    r"|\x1b[()*+#%][@-~]"  # charset designation / selection (e.g. ESC ( B)
+    r"|\x1b[@-Z\\-_a-z=>]"  # remaining solo Fe/Fs escapes (RIS, keypad, ...)
+)
+
+
+def _strip_ansi(text: str) -> str:
+    """``text`` with every terminal escape sequence removed."""
+    return _ANSI.sub("", text)
+
+
+def _ansi_to_html(text: str) -> str:
+    """Render the ANSI SGR color in ``text`` to inline-styled, HTML-escaped
+    markup. Falls back to escaped, escape-stripped text when the ``ansi2html``
+    converter is unavailable (so it never leaks raw control bytes)."""
+    try:
+        from ansi2html import Ansi2HTMLConverter
+    except Exception:
+        return _escape_html(_strip_ansi(text))
+    return Ansi2HTMLConverter(inline=True, scheme="osx", dark_bg=True).convert(text, full=False)
 
 
 # How many rows of a DataFrame the model-facing text carries. The human's HTML
