@@ -53,6 +53,11 @@ pub enum Error {
          or a Linux host without access to /dev/kvm)"
     ))]
     Libkrun { op: String, code: i32 },
+    // gvproxy networking is macOS-only (the Linux path uses TSI +
+    // krun_set_port_map, surfacing as a `Libkrun` op error like other calls).
+    #[cfg(target_os = "macos")]
+    #[snafu(display("guest networking via gvproxy: {source}"))]
+    Net { source: crate::net::Error },
     // Only the stub `boot_linux` constructs this; gate it to the same cfg so a
     // `have_libkrun` build (where the stub is absent) does not carry an unused
     // variant (a binary crate lints unused enum variants as dead code).
@@ -91,6 +96,12 @@ unsafe extern "C" {
         read_only: bool,
     ) -> i32;
 
+    // macOS: route the guest NIC through a gvproxy unixgram (vfkit) socket. TSI
+    // needs a patched guest kernel the EFI guest lacks, so gvproxy is how an EFI
+    // guest gets a network (and host<->guest port forwarding, via gvproxy's API).
+    #[cfg(target_os = "macos")]
+    fn krun_set_gvproxy_path(ctx_id: u32, c_path: *mut c_char) -> i32;
+
     // Linux / classic libkrun: boot the bundled kernel against a rootfs dir and
     // run an exec command as the guest init.
     #[cfg(target_os = "linux")]
@@ -104,6 +115,13 @@ unsafe extern "C" {
         argv: *const *const c_char,
         envp: *const *const c_char,
     ) -> i32;
+
+    // Linux: TSI is the default backend (the libkrunfw kernel supports it), so
+    // outbound works with no setup and inbound host->guest ports are exposed with
+    // a "host:guest" map. (Under a userspace proxy this returns -ENOTSUP, which is
+    // why the macOS path uses gvproxy's API instead.)
+    #[cfg(target_os = "linux")]
+    fn krun_set_port_map(ctx_id: u32, port_map: *const *const c_char) -> i32;
 }
 
 #[cfg(all(have_libkrun, target_os = "macos"))]
@@ -145,13 +163,19 @@ pub struct BootLinux {
     pub gpu: bool,
     pub cpus: u8,
     pub memory_mib: u32,
+    /// Attach a guest network interface and forward host->guest ports. `None`
+    /// keeps libkrun's no-interface default; `Some` gives the guest outbound
+    /// access and exposes the listed ports back to the host (gvproxy on a macOS
+    /// host, TSI port-map on Linux). See [`crate::net`].
+    pub net: Option<crate::net::Net>,
     /// Capture the guest serial console to this file instead of inheriting the
     /// process stdio. `krun_start_enter` takes over the process, so a file is how
     /// a background/lockstep caller reads the console after the VM stops.
     pub console_file: Option<PathBuf>,
-    /// Stop the VM and exit after this long (a watchdog, so a background
-    /// invocation never hangs).
-    pub timeout: Duration,
+    /// Stop the VM and exit after this long. `None` runs until the guest powers
+    /// off (the persistent-server case); `Some` is a watchdog so a background
+    /// invocation never hangs.
+    pub timeout: Option<Duration>,
 }
 
 #[cfg(have_libkrun)]
@@ -313,6 +337,56 @@ fn set_payload(ctx: u32, boot: &BootLinux) -> Result<Vec<CString>, Error> {
     Ok(keep)
 }
 
+/// Attach the guest NIC and host->guest forwards on a macOS host via gvproxy
+/// (see [`crate::net`]). Returns the running proxy plus the path `CString`, which
+/// must outlive `krun_start_enter`. `Ok(None)` when `boot.net` is `None`.
+#[cfg(all(have_libkrun, target_os = "macos"))]
+fn set_net_macos(
+    ctx: u32,
+    boot: &BootLinux,
+) -> Result<Option<(crate::net::Proxy, CString)>, Error> {
+    let Some(net) = &boot.net else {
+        return Ok(None);
+    };
+    let proxy = crate::net::Proxy::start(net).map_err(|source| Error::Net { source })?;
+    let path_c = cstr(&proxy.vfkit_socket().to_string_lossy())?;
+    // Safety: the path pointer is valid for the call and krun copies it; the API
+    // takes `*mut` but does not mutate the string.
+    unsafe {
+        check(
+            "krun_set_gvproxy_path",
+            krun_set_gvproxy_path(ctx, path_c.as_ptr().cast_mut()),
+        )?;
+    }
+    Ok(Some((proxy, path_c)))
+}
+
+/// Expose host->guest ports on a Linux host (TSI backend). Outbound needs no
+/// setup; the map exposes inbound ports as `"host:guest"` strings. A no-op when
+/// `boot.net` is `None` or carries no forwards.
+#[cfg(all(have_libkrun, target_os = "linux"))]
+fn set_net_linux(ctx: u32, boot: &BootLinux) -> Result<(), Error> {
+    let Some(net) = &boot.net else {
+        return Ok(());
+    };
+    if net.forwards.is_empty() {
+        return Ok(());
+    }
+    let entries: Vec<CString> = net
+        .forwards
+        .iter()
+        .map(|f| cstr(&format!("{}:{}", f.host, f.guest)))
+        .collect::<Result<_, _>>()?;
+    let mut ptrs: Vec<*const c_char> = entries.iter().map(|c| c.as_ptr()).collect();
+    ptrs.push(std::ptr::null());
+    // Safety: a NULL-terminated array of pointers valid for the call; krun copies
+    // what it needs.
+    unsafe {
+        check("krun_set_port_map", krun_set_port_map(ctx, ptrs.as_ptr()))?;
+    }
+    Ok(())
+}
+
 /// Stub for builds without the libkrun backend (e.g. a Linux->darwin cross
 /// build, where libkrun-efi is unavailable). Returns a typed error rather than
 /// silently doing nothing, so a caller learns the backend was not compiled in.
@@ -334,12 +408,15 @@ pub fn boot_linux(boot: &BootLinux) -> Result<(), Error> {
 
     // The watchdog ends the process if the guest hangs; the console has streamed
     // by then. Spawned before krun_start_enter, which never returns.
-    let timeout = boot.timeout;
-    std::thread::spawn(move || {
-        std::thread::sleep(timeout);
-        eprintln!("vmkit: timeout reached, stopping");
-        std::process::exit(0);
-    });
+    // A watchdog bounds a background invocation so it never hangs; `None` runs the
+    // guest until it powers off (the persistent-server case).
+    if let Some(timeout) = boot.timeout {
+        std::thread::spawn(move || {
+            std::thread::sleep(timeout);
+            eprintln!("vmkit: timeout reached, stopping");
+            std::process::exit(0);
+        });
+    }
 
     // Safety: every pointer passed below outlives its call (the CStrings live to
     // the end of this function, and krun copies what it needs); krun_start_enter
@@ -361,6 +438,13 @@ pub fn boot_linux(boot: &BootLinux) -> Result<(), Error> {
         // Host-specific payload (firmware+disk on macOS, rootfs+exec on Linux).
         // The returned CStrings stay alive until after krun_start_enter.
         let _payload = set_payload(ctx, boot)?;
+
+        // Guest networking. The keepalive (gvproxy proxy + path CString on macOS)
+        // must outlive krun_start_enter; bind it for the rest of the function.
+        #[cfg(target_os = "macos")]
+        let _net = set_net_macos(ctx, boot)?;
+        #[cfg(target_os = "linux")]
+        set_net_linux(ctx, boot)?;
         if boot.gpu {
             check(
                 "krun_set_gpu_options2",

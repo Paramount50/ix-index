@@ -56,3 +56,49 @@ On **macOS**, libkrun needs `com.apple.security.hypervisor` on the running proce
 - **GPU and Rosetta are mutually exclusive per VM.** Rosetta translation for Linux guests is a Virtualization.framework API ([`VZLinuxRosettaDirectoryShare`](https://developer.apple.com/documentation/virtualization/vzlinuxrosettadirectoryshare)), so a libkrun VM can never run x86_64 binaries through Rosetta, and a VZ VM never gets the GPU. Pick the backend by workload. Today the choice is theoretical on the Rosetta side: no `vmkit` path wires Rosetta into its VZ Linux guests (`boot-linux-gui`, `drive-linux`), so adding it is work on the VZ paths.
 - **macOS-guest paths are aarch64-darwin only.** libkrun-efi is packaged only for Apple Silicon, and the macOS-guest boot path is exercised only there. The Linux-host backend covers `aarch64-linux` and `x86_64-linux`.
 - **The guest shape differs by host.** On macOS a guest is an EFI disk (its own kernel/bootloader); on Linux a guest is a rootfs directory run under libkrun's bundled kernel. The `--disk` flag exists only on macOS, `--root`/`-- <cmd>` only on Linux.
+
+## Guest networking
+
+By default libkrun gives the guest no network interface and uses its TSI
+(transparent socket impersonation) backend. TSI needs a TSI-aware guest kernel:
+libkrun's bundled `libkrunfw` kernel (the Linux-host path) has it, a stock NixOS
+kernel booted from an EFI disk (the macOS-host path) does not. So `vmkit` wires
+network two ways, the same host split as the rest of `src/linuxkrun.rs`, behind
+`--net` / `--port HOST:GUEST` (see `src/net.rs`):
+
+- **Linux host** (classic libkrun + libkrunfw): TSI. Outbound works with no
+  setup; inbound host->guest ports are exposed with `krun_set_port_map` (a list
+  of `"host:guest"` strings).
+- **macOS host** (libkrun-efi + stock guest kernel): `gvproxy`
+  (gvisor-tap-vsock), the same userspace proxy krunkit/podman-machine use.
+  `vmkit` spawns gvproxy on a temp unix socket, attaches the guest NIC with
+  `krun_set_gvproxy_path`, and POSTs each forward to gvproxy's HTTP control API
+  (`/services/forwarder/expose`). gvproxy NATs outbound and forwards inbound.
+  `krun_set_port_map` is TSI-only (`-ENOTSUP` under a proxy), so forwarding goes
+  through gvproxy's API instead. gvproxy is resolved from `IX_VMKIT_GVPROXY`
+  (a Nix store path) or `gvproxy` on `PATH`.
+
+gvproxy puts the guest on `192.168.127.0/24` (gateway `.1`, guest `.2` via DHCP),
+so a macOS-host guest image must DHCP its NIC. A forward `--port 3200:3200` makes
+the guest's `:3200` reachable on the host's `:3200`, bound on all host
+interfaces (so the VM is reachable like a normal server, the way an OrbStack
+machine is).
+
+```sh
+# macOS host: boot a NixOS EFI disk, give it outbound net, expose its :3200.
+vmkit boot-linux --disk ./nox-server.raw --port 3200:3200 --timeout-secs 0
+```
+
+`--timeout-secs 0` disables the watchdog so the VM runs until it powers off: the
+persistent-server case (e.g. hosting `nox-server`). With a non-zero timeout the
+watchdog still bounds a background, capture-then-stop invocation.
+
+### Status
+
+The networking + persistent-serve plumbing in `vmkit` is in place (`src/net.rs`,
+`--net`/`--port`/`--timeout-secs 0`). The remaining piece for a turnkey
+`nox-server` host is a NixOS `raw-efi` guest image that DHCPs its NIC and runs
+`nox-server --http-port 3200` as a systemd service (model: `vz-linux-guest`,
+plus `networking.useDHCP = true` and the `nox-server` aarch64-linux package as a
+service). End-to-end (guest reaches the internet via gvproxy, host reaches
+`guest:3200`) is the validation that closes this out.

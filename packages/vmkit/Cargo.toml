@@ -26,6 +26,11 @@ clap = { version = "4", features = ["derive"] }
 snafu = "0.8"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# gvproxy lifecycle for the libkrun guest NIC (see src/net.rs): a temp dir for
+# its unix sockets, and `libc::atexit`/`kill` to tear gvproxy down when
+# `krun_start_enter` `exit()`s the process without unwinding.
+tempfile = "3"
+libc = "0.2"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-virtualization = "0.3"

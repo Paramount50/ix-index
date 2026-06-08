@@ -509,6 +509,8 @@ def boot_linux(
     memory_mib: int = 1024,
     seconds: int = 20,
     timeout: float | None = None,
+    net: bool = False,
+    ports: "Sequence[tuple[int, int]] | None" = None,
 ) -> str:
     """Boot an aarch64 Linux guest headlessly from a raw EFI-bootable ``disk``
     via libkrun (Hypervisor.framework), returning the guest serial console
@@ -543,6 +545,12 @@ def boot_linux(
         ]
         if gpu:
             argv.append("--gpu")
+        # Guest networking: --net for outbound, --port HOST:GUEST per forward
+        # (a forward implies outbound too). gvproxy backs this on macOS.
+        if net or ports:
+            argv.append("--net")
+        for host_port, guest_port in ports or []:
+            argv += ["--port", f"{host_port}:{guest_port}"]
         try:
             result = subprocess.run(
                 argv, capture_output=True, text=True, check=False, timeout=deadline
