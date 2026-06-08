@@ -202,23 +202,33 @@ class Job:
     def output(self) -> str:
         return "".join(self._buf)
 
+    @property
+    def pageable(self) -> str:
+        """The text the paging helpers (`tail`/`head`/`slice`/`lines`/`grep`)
+        operate on: this job's captured stdout, or -- when the cell printed
+        nothing and its bulk is the returned value (a `Result`, or `sh()` output,
+        whose text lives in the result, not stdout) -- the result's model-facing
+        text. So the paging the over-cap notice advertises reaches a big returned
+        value just as it reaches a big `print()`, never an empty buffer."""
+        return self.output or _result_text(self)
+
     def tail(self, n: int = 2000) -> str:
-        """Last ``n`` chars of this job's captured output."""
-        return self.output[-n:]
+        """Last ``n`` chars of this job's output (stdout, else its result text)."""
+        return self.pageable[-n:]
 
     def head(self, n: int = 2000) -> str:
-        """First ``n`` chars of this job's captured output."""
-        return self.output[:n]
+        """First ``n`` chars of this job's output (stdout, else its result text)."""
+        return self.pageable[:n]
 
     def slice(self, start: int = 0, end: int | None = None) -> str:
-        """A character window ``output[start:end]``, for paging a large output a
+        """A character window ``pageable[start:end]``, for paging a large output a
         chunk at a time after `grep`/`lines` locates the region."""
-        return self.output[start:end]
+        return self.pageable[start:end]
 
     def lines(self, start: int = 0, end: int | None = None) -> str:
         """Output lines ``[start:end]`` (0-based, ``end`` exclusive), numbered to
         match `grep`'s line numbers so you can jump straight to a region."""
-        numbered = self.output.splitlines()
+        numbered = self.pageable.splitlines()
         return "\n".join(f"{i}: {numbered[i]}" for i in range(*slice(start, end).indices(len(numbered))))
 
     def grep(
@@ -239,7 +249,7 @@ class Job:
         import re as _re
 
         rx = _re.compile(pattern, _re.IGNORECASE if ignore_case else 0)
-        src = self.output.splitlines()
+        src = self.pageable.splitlines()
         keep: list[int] = []
         seen: set[int] = set()
         matches = 0
@@ -409,6 +419,15 @@ class Result:
                 llm_result=value.llm_result if llm_result is None else llm_result,
                 llm_images=value.llm_images,
             )
+        image_mime = _image_bytes_mime(value)
+        if image_mime is not None:
+            # Raw PNG/JPEG bytes (e.g. `await page.screenshot()`): show the human
+            # the inline image and hand the model a real image block, not the
+            # ~50k-char byte repr that would blow the result cap.
+            img = _coerce_image(value)
+            user = f'<img alt="" src="data:{img["mime"]};base64,{img["data"]}" />'
+            note = llm_result if llm_result is not None else f"[{image_mime} image, {len(bytes(value))} bytes]"
+            return cls(user_html=user, llm_result=note, llm_images=[value])
         if isinstance(value, str):
             # A plain string is output, not a Python literal: hand the model the
             # string verbatim with terminal escapes stripped, so captured CLI /
@@ -908,6 +927,9 @@ def _is_displayable(value) -> bool:
     those still fail the contract, to keep pushing key/value data toward a
     DataFrame and confirmations toward ``Result.ok``.
     """
+    if _image_bytes_mime(value) is not None:
+        # Raw image bytes (a screenshot) know how to render: as an inline image.
+        return True
     if value is None or isinstance(
         value, (str, bytes, bool, int, float, complex, dict, list, tuple, set, frozenset)
     ):
@@ -1189,6 +1211,19 @@ def _encode_image_b64(b64: str, mime: str) -> dict:
     except (ValueError, base64.binascii.Error):
         return {"mime": mime, "data": b64}
     return _encode_image_bytes(raw, mime)
+
+
+def _image_bytes_mime(value) -> str | None:
+    """The image mime of raw ``bytes``/``bytearray`` by magic number (PNG or
+    JPEG), else None. Lets a bare ``await page.screenshot()`` -- which returns raw
+    image bytes -- auto-render as an image instead of dumping a ~50k-char repr."""
+    if isinstance(value, (bytes, bytearray)):
+        head = bytes(value[:8])
+        if head.startswith(b"\x89PNG\r\n\x1a\n"):
+            return "image/png"
+        if head[:3] == b"\xff\xd8\xff":
+            return "image/jpeg"
+    return None
 
 
 def _coerce_image(value) -> dict | None:
