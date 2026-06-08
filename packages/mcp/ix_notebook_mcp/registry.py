@@ -66,8 +66,10 @@ MODULES: tuple[Module, ...] = (
     Module(
         "browser",
         "drive a running browser over CDP with Playwright (connects to the standard debug port "
-        "9222 by default); `browser.read()` is a cheap text/elements readout, `browser.shot()` "
-        "renders a screenshot inline",
+        "9222 by default); `browser.vdom()` returns a clean, filtered virtual DOM -- a "
+        "machine-readable map of where every control, landmark and heading is (role, name, box, "
+        "CSS selector) -- so you can act without a screenshot; `browser.read()` is a lighter "
+        "text-first readout and `browser.shot()` renders a screenshot inline",
     ),
 )
 

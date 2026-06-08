@@ -2503,8 +2503,10 @@ let
     # reuse one instance instead of spawning a new window each time.
     assert browser.DEFAULT_ENDPOINT == "http://127.0.0.1:9222", browser.DEFAULT_ENDPOINT
     assert browser.DEFAULT_APP == "Dia", browser.DEFAULT_APP
-    for fn in ("get_or_create_browser", "connect", "context", "page", "goto", "shot", "close"):
+    for fn in ("get_or_create_browser", "connect", "context", "page", "goto", "shot", "read", "vdom", "close"):
         assert callable(getattr(browser, fn)), fn
+    # `vdom()` returns a Vdom: a clean, filtered, machine-readable map of the page.
+    assert isinstance(browser.Vdom, type), browser.Vdom
 
     udd = browser._default_user_data_dir("Dia")
     assert udd.endswith(".cdp-dia-profile"), udd
@@ -2561,6 +2563,143 @@ let
         mkdir -p "$out"
       '';
 
+  # The clean-vdom contract, exercised against a real (headless) browser. Unlike
+  # the launch smoke above, `vdom()` only reads the DOM, so it can run headless on
+  # a `data:` fixture with no display and no network: it asserts the filtering
+  # (hidden / aria-hidden pruned), the wrapper-chain collapse, that every kept node
+  # has geometry and a CSS selector that actually resolves, and that the
+  # interactive_only / viewport_only lean modes behave.
+  browserVdomTestPy = pkgs.writeText "ix-mcp-browser-vdom-test.py" ''
+    import asyncio
+    import sys
+
+    import browser
+    from playwright.async_api import async_playwright
+
+    # A fixture page exercising the cleaning rules: landmarks, a collapsible wrapper
+    # chain, hidden + aria-hidden subtrees, a named image, and a form. Served as a
+    # data: URL so the test needs no network and no on-screen window.
+    FIXTURE = (
+        "data:text/html," + (
+            "<html><head><title>Fixture</title></head><body>"
+            "<header><a id='home' href='/'><img alt='Logo'></a>"
+            "<nav><a href='/a'>Alpha</a><a href='/b'>Beta</a></nav></header>"
+            "<main><h1>Heading</h1><p>Visible paragraph text.</p>"
+            "<div><div><div><button id='go' onclick='void 0'>Click me</button></div></div></div>"
+            "<form><input type='search' placeholder='Find'><button type='submit'>Go</button></form>"
+            "<div style='display:none'><a href='/hidden'>Hidden</a></div>"
+            "<span aria-hidden='true'><a href='/aria'>AriaHidden</a></span>"
+            "</main></body></html>"
+        )
+    )
+
+
+    def names(flat):
+        return {n.get("name") for n in flat if not n.get("group")}
+
+
+    def by_tag(flat, tag):
+        return [n for n in flat if n.get("tag") == tag and not n.get("group")]
+
+
+    async def main():
+        pw = await async_playwright().start()
+        b = await pw.chromium.launch(
+            headless=True, args=["--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage"]
+        )
+        ctx = await b.new_context(viewport={"width": 1000, "height": 800})
+        pg = await ctx.new_page()
+        await pg.goto(FIXTURE)
+
+        v = await browser.vdom(pg)
+
+        # It is the documented type, with the page's identity captured.
+        assert isinstance(v, browser.Vdom), type(v)
+        assert v.title == "Fixture", v.title
+        assert v.viewport.get("w") == 1000, v.viewport
+
+        ns = names(v.flat)
+        # Hidden (display:none) and aria-hidden subtrees are pruned entirely.
+        assert "Hidden" not in ns, ns
+        assert "AriaHidden" not in ns, ns
+        # Landmarks, heading, controls and the named image survive.
+        assert any(n.get("role") == "banner" for n in v.flat), "banner landmark missing"
+        assert any(n.get("role") == "navigation" for n in v.flat), "nav landmark missing"
+        assert any(n.get("role") == "main" for n in v.flat), "main landmark missing"
+        assert any(n.get("role") == "heading" and n.get("name") == "Heading" for n in v.flat), ns
+        assert "Logo" in ns, ("named image missing", ns)
+        assert any(n.get("name") == "Alpha" and n.get("interactive") for n in v.flat), ns
+
+        # The triple-nested wrapper <div><div><div> around the button is collapsed:
+        # the button is reached without a chain of empty group nodes above it.
+        btn = next(n for n in v.flat if n.get("tag") == "button" and n.get("name") == "Click me")
+        assert btn["depth"] <= 2, ("wrapper chain not collapsed", btn["depth"])
+
+        # Every kept node carries a usable on-screen box and a working CSS selector.
+        for n in v.flat:
+            if n.get("group"):
+                continue
+            assert n.get("w", 0) > 0 and n.get("h", 0) > 0, ("no geometry", n)
+            sel = n.get("selector")
+            assert sel, ("no selector", n)
+            assert await pg.query_selector(sel) is not None, ("selector did not resolve", sel)
+
+        # Refs are dense and 1-based; node(ref) round-trips; df/json agree on counts.
+        refs = [n["ref"] for n in v.flat if not n.get("group")]
+        assert refs == list(range(1, len(refs) + 1)), refs
+        assert v.node(refs[-1]) is not None
+        n_real = len(refs)
+        assert v.df.height == len(v.flat), (v.df.height, len(v.flat))
+        assert v.df.filter(v.df["interactive"]).height >= 4  # 4 links + 2 buttons + 1 field
+
+        # The compact glance is bounded and self-describes; the full map lives in .df.
+        txt = repr(v)
+        assert "Fixture" in txt and "nodes" in txt, txt[:200]
+
+        # interactive_only drops body text but keeps the controls.
+        vi = await browser.vdom(pg, interactive_only=True)
+        nsi = names(vi.flat)
+        assert "Visible paragraph text." not in nsi, nsi
+        assert any(n.get("name") == "Alpha" for n in vi.flat), nsi
+
+        # viewport_only keeps only on-screen nodes (all fixture nodes are on screen,
+        # so it must still find the controls -- and never error).
+        vvp = await browser.vdom(pg, viewport_only=True)
+        assert any(n.get("interactive") for n in vvp.flat), "viewport_only lost controls"
+
+        await b.close()
+        await pw.stop()
+        print("vdom-ok", browser.__version__, n_real, "nodes")
+
+
+    asyncio.run(main())
+  '';
+  browserVdomSmoke =
+    pkgs.runCommand "ix-mcp-browser-vdom-smoke"
+      {
+        nativeBuildInputs = [ mcpPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        # `vdom()` launches a (headless) browser, so point Playwright at the bundled
+        # browser bundle -- the bare mcpPython has no wrapper to set this (only the
+        # `ix-mcp` entrypoint does).
+        export PLAYWRIGHT_BROWSERS_PATH=${lib.escapeShellArg playwrightBrowsers}
+        ${lib.getExe mcpPython} ${browserVdomTestPy} >stdout 2>stderr || {
+          echo "ix-mcp browser vdom smoke failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        grep -q '^vdom-ok' stdout || {
+          echo "ix-mcp browser vdom smoke did not confirm the clean vdom:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
+
   screenBundled = importTest "screen" "import screen; print('screen-ok', all(callable(getattr(screen, n)) for n in ('capture', 'click', 'write', 'press', 'key_down', 'key_up', 'apps', 'frontmost', 'launch', 'activate', 'terminate', 'accessibility_trusted')))";
   vmkitBundled = importTest "vmkit" "import vmkit; print('vmkit-ok', callable(vmkit.boot_linux), callable(vmkit.drive), callable(vmkit.screenshot))";
 in
@@ -2593,6 +2732,7 @@ package.overrideAttrs (old: {
         shSmoke
         worktreeSmoke
         browserSmoke
+        browserVdomSmoke
         ;
       site = dashboardSite;
     }
