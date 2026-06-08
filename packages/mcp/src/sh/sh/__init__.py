@@ -29,6 +29,21 @@ The :class:`Output` also exposes the parts programmatically::
     out.text     # combined stdout+stderr, escape codes stripped
     out.raw      # the same, with the original ANSI color preserved
     out.cmd      # the command that was run
+    out.lines()  # out.text split into lines
+    out.json()   # parse out.text as one JSON document
+    out.jsonl()  # parse out.text as JSON Lines (one value per line)
+
+For a command that emits structured output, decode it straight into a polars
+DataFrame without a hand-written ``json.loads``::
+
+    import polars as pl
+    prs = (await sh("gh pr list --json number,title,state", cwd=".")).json()
+    pl.DataFrame(prs)
+    # JSON Lines (cargo --message-format json, nix --log-format internal-json) -> .jsonl()
+    msgs = (await sh("cargo build --message-format json", cwd=".")).jsonl()
+
+``json``/``jsonl`` raise :class:`ShellError` when the command failed, so a broken
+``gh ... --json`` surfaces its real error instead of a confusing decode failure.
 
 An ``Output`` also behaves like its text for the common string operations
 (``out[-4000:]``, ``out + "..."``, ``"error" in out``, ``len(out)``,
@@ -50,6 +65,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import html as _html
+import json as _json
 import os
 import re
 import shlex
@@ -168,6 +184,38 @@ class Output(_ResultBase):
     def lines(self) -> list[str]:
         """The escape-stripped output split into lines (trailing newline dropped)."""
         return self.text.splitlines()
+
+    def json(self):
+        """Parse the command's output (``.text``) as a single JSON document.
+
+        For a tool with a JSON mode (``gh ... --json``, ``cargo metadata``,
+        ``nix eval --json``): ``(await sh(...)).json()`` hands back the decoded
+        Python value, ready for ``pl.DataFrame(...)``. Raises :class:`ShellError`
+        if the command exited non-zero (so the real failure surfaces, not a
+        :class:`json.JSONDecodeError` over an error message), and
+        :class:`json.JSONDecodeError` if the output is not valid JSON.
+
+        Note that ``.text`` is the merged stdout+stderr stream (see ``.stdout``):
+        a command that writes diagnostics to stderr will interleave them with the
+        JSON and fail to decode, so silence it (``2>/dev/null``) or capture stderr
+        separately (``2>err.txt``) when the tool is chatty on success.
+        """
+        if not self.ok:
+            raise ShellError(self)
+        return _json.loads(self.text)
+
+    def jsonl(self) -> list:
+        """Parse the output (``.text``) as JSON Lines: one value per non-empty line.
+
+        For tools that stream line-delimited JSON (``cargo --message-format
+        json``, ``nix ... --log-format internal-json``). Same non-zero guard as
+        :meth:`json`; blank lines are skipped. As with :meth:`json`, ``.text`` is
+        the merged stdout+stderr stream, so a non-JSON diagnostic line will raise
+        :class:`json.JSONDecodeError`; redirect stderr away if the tool emits one.
+        """
+        if not self.ok:
+            raise ShellError(self)
+        return [_json.loads(line) for line in self.text.splitlines() if line.strip()]
 
     def _render_text(self) -> str:
         body = self.text
