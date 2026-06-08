@@ -82,11 +82,22 @@ enum Command {
         /// is rejected at parse time rather than silently clamped.
         #[arg(long, default_value_t = 1024)]
         memory_mib: u32,
+        /// Forward a host TCP port to the guest, `HOST:GUEST`, repeatable (e.g.
+        /// `--port 3200:3200`). Implies `--net`; the guest service is reached on
+        /// the host at HOST. On macOS forwarding is done by gvproxy, on Linux by
+        /// libkrun's TSI port map.
+        #[arg(long = "port", value_name = "HOST:GUEST")]
+        ports: Vec<String>,
+        /// Give the guest outbound network even with no `--port` forwards. A guest
+        /// NIC (gvproxy on macOS, TSI on Linux) that NATs to the host network.
+        #[arg(long)]
+        net: bool,
         /// Capture the guest serial console to this file instead of the process's
         /// stdout (useful for a background/lockstep caller).
         #[arg(long)]
         console_file: Option<std::path::PathBuf>,
-        /// Stop the VM and exit after this many seconds.
+        /// Stop the VM and exit after this many seconds; `0` runs until the guest
+        /// powers off (the persistent-server case).
         #[arg(long, default_value_t = 20)]
         timeout_secs: u64,
     },
@@ -376,17 +387,25 @@ fn dispatch_linux(command: Command) -> Result<(), linuxkrun::Error> {
             gpu,
             cpus,
             memory_mib,
+            ports,
+            net,
             console_file,
             timeout_secs,
-        } => linuxkrun::boot_linux(&linuxkrun::BootLinux {
-            root,
-            exec,
-            gpu,
-            cpus,
-            memory_mib,
-            console_file,
-            timeout: Duration::from_secs(timeout_secs),
-        }),
+        } => {
+            let net = build_net(net, &ports)
+                .map_err(|message| linuxkrun::Error::Setup { message })?;
+            let timeout = (timeout_secs != 0).then(|| Duration::from_secs(timeout_secs));
+            linuxkrun::boot_linux(&linuxkrun::BootLinux {
+                root,
+                exec,
+                gpu,
+                cpus,
+                memory_mib,
+                net,
+                console_file,
+                timeout,
+            })
+        }
     }
 }
 
@@ -396,10 +415,39 @@ fn main() -> ExitCode {
     ExitCode::FAILURE
 }
 
+/// Build the optional guest network from the `--net` / `--port` flags. `--net`
+/// (or any `--port`) attaches a guest NIC with outbound access; each `--port`
+/// `HOST:GUEST` becomes a host->guest TCP forward. Returns `Ok(None)` when
+/// neither is given (no network). The `String` error is a user-facing CLI
+/// message the caller wraps in its host error type.
+fn build_net(net: bool, ports: &[String]) -> Result<Option<net::Net>, String> {
+    if !net && ports.is_empty() {
+        return Ok(None);
+    }
+    let mut forwards = Vec::with_capacity(ports.len());
+    for spec in ports {
+        let (host, guest) = spec
+            .split_once(':')
+            .ok_or_else(|| format!("--port {spec:?} must be HOST:GUEST"))?;
+        let host: u16 = host
+            .parse()
+            .map_err(|_| format!("--port {spec:?}: invalid host port"))?;
+        let guest: u16 = guest
+            .parse()
+            .map_err(|_| format!("--port {spec:?}: invalid guest port"))?;
+        forwards.push(net::Forward { host, guest });
+    }
+    Ok(Some(net::Net { forwards }))
+}
+
 // The libkrun backend compiles on every host (its internals are cfg-split, and a
 // host without libkrun gets a typed stub); the Apple-framework modules are macOS
 // only.
 mod linuxkrun;
+
+// Guest networking (gvproxy on a macOS host, TSI port-map on Linux). Compiles on
+// every host; the gvproxy `Proxy` is macOS-only inside.
+mod net;
 
 #[cfg(target_os = "macos")]
 mod drive;
@@ -442,6 +490,8 @@ mod imp {
     pub enum Error {
         #[snafu(display("virtualization is not available on this host"))]
         Unsupported,
+        #[snafu(display("{message}"))]
+        Args { message: String },
         #[snafu(display("guest memory {mib} MiB is too large to express in bytes"))]
         MemoryTooLarge { mib: u64 },
         #[snafu(display(
@@ -474,17 +524,24 @@ mod imp {
                 gpu,
                 cpus,
                 memory_mib,
+                ports,
+                net,
                 console_file,
                 timeout_secs,
-            } => crate::linuxkrun::boot_linux(&crate::linuxkrun::BootLinux {
-                disk,
-                gpu,
-                cpus,
-                memory_mib,
-                console_file,
-                timeout: Duration::from_secs(timeout_secs),
-            })
-            .map_err(|source| Error::Linux { source }),
+            } => {
+                let net = crate::build_net(net, &ports).map_err(|message| Error::Args { message })?;
+                let timeout = (timeout_secs != 0).then(|| Duration::from_secs(timeout_secs));
+                crate::linuxkrun::boot_linux(&crate::linuxkrun::BootLinux {
+                    disk,
+                    gpu,
+                    cpus,
+                    memory_mib,
+                    net,
+                    console_file,
+                    timeout,
+                })
+                .map_err(|source| Error::Linux { source })
+            }
             Command::BootLinuxGui {
                 disk,
                 efi_vars,
