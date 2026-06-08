@@ -63,6 +63,11 @@ MODULES: tuple[Module, ...] = (
         "do risky or parallel work on a throwaway branch in its own checkout, leaving the main "
         "tree untouched",
     ),
+    Module(
+        "browser",
+        "drive a running browser over CDP with Playwright (connects to the standard debug port "
+        "9222 by default); `browser.shot()` renders the screenshot inline",
+    ),
 )
 
 # Always-present namespace builtins (installed by runtime.install; no import).

@@ -1477,6 +1477,27 @@ def _api_rows() -> list[dict]:
             obj = getattr(mod, name, None)
             if obj is not None:
                 add(mod_name, name, obj)
+
+    # Bundled third-party libraries (numpy, polars, httpx, playwright, ...): they
+    # have no first-party surface to introspect, but they ARE import-ready with no
+    # install step, so list them here too -- otherwise an agent treating api() as
+    # the source of truth concludes they are absent (the exact trap that made a
+    # bundled `playwright` look like it needed a `pip install`). Always emit a row
+    # for each declared library; enrich with its version/summary when importable.
+    for lib_name in registry.LIBRARIES:
+        sig = lib_name
+        summary = "bundled library -- import and use it directly (help() / its own docs)"
+        try:
+            mod = __import__(lib_name)
+            version = getattr(mod, "__version__", "")
+            if version:
+                sig = f"{lib_name} {version}"
+            doc = (inspect.getdoc(mod) or "").strip().split("\n", 1)[0]
+            if doc:
+                summary = doc
+        except Exception:
+            pass
+        rows.append({"where": "library", "name": lib_name, "kind": "library", "sig": sig, "summary": summary})
     return rows
 
 

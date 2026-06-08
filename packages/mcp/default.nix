@@ -310,6 +310,28 @@ let
         cp -r ${shPythonSource}/sh/. "$site/"
       ''
   );
+  # Browser automation over CDP: `import browser`, then `await browser.goto(url)`
+  # / `await browser.shot()` drive a Chromium-family browser already running with
+  # --remote-debugging-port (the standard 9222 by default). Pure Python over the
+  # bundled playwright (already in this interpreter, so no `pip`/`playwright
+  # install`); runs on the kernel loop and returns the raw Playwright objects plus
+  # a screenshot Result. Cross-platform.
+  browserPythonSource = builtins.path {
+    name = "ix-mcp-browser-python-source";
+    path = ./src/browser;
+  };
+  browserModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-mcp-browser-python-module"
+      {
+        strictDeps = true;
+        meta.description = "Playwright-over-CDP browser helper bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/browser"
+        mkdir -p "$site"
+        cp -r ${browserPythonSource}/browser/. "$site/"
+      ''
+  );
   # Git worktrees as the unit of isolated work: `import worktree`, then
   # `wt = await worktree.add("my-fix")` checks out a new branch in its own tree,
   # `await wt.build(".#mcp")` stages + nix-builds it, `worktree.list()` is a
@@ -514,6 +536,7 @@ let
       fleetModule
       shModule
       worktreeModule
+      browserModule
     ]
     ++ darwinExtraPackages ps
   );
@@ -2463,6 +2486,81 @@ let
         mkdir -p "$out"
       '';
 
+  # The browser module: it drives a Chromium-family browser over CDP with the
+  # bundled playwright. A real browser needs a display, and we NEVER run headless,
+  # so the sandbox cannot launch one; instead this asserts the contract that does
+  # not need a browser -- the API shape, the standard/persistent defaults, the
+  # never-headless launch argv, the clear error when nothing is on the port, and
+  # that api() now lists both the module and the bundled playwright library.
+  browserTestPy = pkgs.writeText "ix-mcp-browser-test.py" ''
+    import asyncio
+    import sys
+
+    import browser
+    from ix_notebook_mcp import runtime
+
+    # Standard CDP port + a persistent, module-owned profile, so repeat launches
+    # reuse one instance instead of spawning a new window each time.
+    assert browser.DEFAULT_ENDPOINT == "http://127.0.0.1:9222", browser.DEFAULT_ENDPOINT
+    assert browser.DEFAULT_APP == "Dia", browser.DEFAULT_APP
+    for fn in ("get_or_create_browser", "connect", "context", "page", "goto", "shot", "close"):
+        assert callable(getattr(browser, fn)), fn
+
+    udd = browser._default_user_data_dir("Dia")
+    assert udd.endswith(".cdp-dia-profile"), udd
+    argv = browser._launch_argv("Dia", 9222, udd)
+    # The launched browser is ALWAYS a visible window -- never headless.
+    assert not any("headless" in a for a in argv), ("launch must never be headless", argv)
+    assert "--remote-debugging-port=9222" in argv, argv
+    assert ("--user-data-dir=" + udd) in argv, argv
+    if sys.platform == "darwin":
+        assert argv[:3] == ["open", "-na", "Dia"], argv
+    assert browser._port_of("http://127.0.0.1:9222") == 9222
+
+    async def _dead():
+        # Nothing is listening on port 1: connect() must fail clearly and point at
+        # get_or_create_browser() (which would launch one) rather than hang.
+        try:
+            await browser.connect("http://127.0.0.1:1")
+        except ConnectionError as exc:
+            assert "get_or_create_browser" in str(exc), exc
+        else:
+            raise SystemExit("connect() to a dead port should raise ConnectionError")
+
+    asyncio.run(_dead())
+
+    # Discoverability: api() lists the browser module AND playwright as a bundled
+    # library, so neither looks absent to an agent treating api() as the catalog.
+    rows = runtime._api_rows()
+    wheres = {r["where"] for r in rows}
+    assert "browser" in wheres, ("browser module missing from api()", sorted(wheres))
+    libs = {r["name"] for r in rows if r["where"] == "library"}
+    assert "playwright" in libs, ("playwright not listed as a bundled library", sorted(libs))
+
+    print("browser-ok", browser.__version__)
+  '';
+  browserSmoke =
+    pkgs.runCommand "ix-mcp-browser-smoke"
+      {
+        nativeBuildInputs = [ mcpPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        ${lib.getExe mcpPython} ${browserTestPy} >stdout 2>stderr || {
+          echo "ix-mcp browser smoke failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        grep -q '^browser-ok' stdout || {
+          echo "ix-mcp browser smoke did not confirm the browser module:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
+
   screenBundled = importTest "screen" "import screen; print('screen-ok', all(callable(getattr(screen, n)) for n in ('capture', 'click', 'write', 'press', 'key_down', 'key_up', 'apps', 'frontmost', 'launch', 'activate', 'terminate', 'accessibility_trusted')))";
   vmkitBundled = importTest "vmkit" "import vmkit; print('vmkit-ok', callable(vmkit.boot_linux), callable(vmkit.drive), callable(vmkit.screenshot))";
 in
@@ -2494,6 +2592,7 @@ package.overrideAttrs (old: {
         fleetSmoke
         shSmoke
         worktreeSmoke
+        browserSmoke
         ;
       site = dashboardSite;
     }
