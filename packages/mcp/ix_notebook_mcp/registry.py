@@ -71,6 +71,13 @@ MODULES: tuple[Module, ...] = (
         "CSS selector) -- so you can act without a screenshot; `browser.read()` is a lighter "
         "text-first readout and `browser.shot()` renders a screenshot inline",
     ),
+    Module(
+        "google_auth",
+        "Google for your own account: read and send Gmail, and manage Calendar, over the "
+        "official googleapiclient (`google_auth.gmail()` / `.calendar()`); "
+        "`await google_auth.login()` signs in through your browser and `status()` / `logout()` "
+        "manage the grant. Incognito sessions only (a personal mailbox never reaches a shared room)",
+    ),
 )
 
 # Always-present namespace builtins (installed by runtime.install; no import).
@@ -98,7 +105,6 @@ LIBRARIES: tuple[str, ...] = (
     "matplotlib",
     "playwright",
     "exa_py",
-    "google_auth",
 )
 
 

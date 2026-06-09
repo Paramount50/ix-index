@@ -137,8 +137,9 @@ let
   # complement to the (untyped) `google_auth` helper. Notebook users pick
   # whichever fits: `import google_auth` gives the official googleapiclient
   # surface, `import ix_google` gives typed `gmail.Client()` /
-  # `calendar.Client()` over the same shared OAuth grant. Auth bootstrap is
-  # `gmail auth` or `gcal auth` on the host once.
+  # `calendar.Client()` over the same shared OAuth grant. Sign-in is
+  # self-service from a session (`await google_auth.login()` opens a browser),
+  # or `gmail auth` / `gcal auth` on the host.
   ixGooglePythonSource = builtins.path {
     name = "ix-google-python-source";
     path = ../google/py/python;
@@ -196,12 +197,14 @@ let
       ''
   );
 
-  # `google_auth`: mint Google credentials for the bundled Gmail/Calendar Python
-  # clients. Pure Python (no cdylib): it shells to the bundled `gcal` binary
-  # (`IX_GCAL_BIN`, set on the wrapper below) for a short-lived access token from
-  # the shared Google grant, and wraps it as a `google.oauth2.credentials`
-  # object the official client accepts. The refresh token / client secret stay
-  # inside `gcal`; only access tokens cross into Python.
+  # `google_auth`: Gmail + Calendar for the kernel, with self-service sign-in.
+  # Pure Python (no cdylib): it shells to the bundled `gcal` binary
+  # (`IX_GCAL_BIN`, set on the wrapper below) to sign in (`login()` drives
+  # `gcal auth --json` and opens a browser), to sign out (`logout()`), and to
+  # mint short-lived access tokens from the shared grant, which it wraps as a
+  # `google.oauth2.credentials` object the official client accepts. The refresh
+  # token / client secret stay inside `gcal`; only access tokens cross into
+  # Python.
   googleAuthPythonSource = builtins.path {
     name = "ix-mcp-google-auth-python-source";
     path = ./src/google_auth;
@@ -847,6 +850,13 @@ let
 
     assert callable(google_auth.credentials)
     assert callable(google_auth.gmail) and callable(google_auth.calendar)
+    # Self-service sign-in surface: login() is awaitable, status()/logout() are
+    # plain calls. These are what makes Gmail discoverable and usable with no
+    # host-side setup file.
+    import asyncio as _asyncio
+
+    assert _asyncio.iscoroutinefunction(google_auth.login)
+    assert callable(google_auth.status) and callable(google_auth.logout)
 
     # In a shared (multiplayer) room (IX_MCP_SHARED set) Gmail/Calendar are
     # refused before minting ever looks for the grant, so a personal mailbox
@@ -871,6 +881,11 @@ let
         assert "IX_GCAL_BIN" in str(exc), exc
     else:
         raise SystemExit("expected GoogleAuthError when IX_GCAL_BIN is unset")
+
+    # status() answers instead of raising: a not-signed-in session reports
+    # signed_in=False so a caller can branch on it and offer login().
+    state = google_auth.status()
+    assert state["signed_in"] is False, state
     print("google-auth-ok")
   '';
   # Typed PyO3 bindings: the cdylib loads and the two Client classes are
