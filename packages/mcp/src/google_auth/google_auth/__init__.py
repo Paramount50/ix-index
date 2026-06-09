@@ -24,11 +24,13 @@ stored grant predates the Gmail scopes) calls raise `GoogleAuthError` with that
 instruction.
 
 Gmail and Calendar reach the user's personal mailbox and schedule, so they are
-gated to an **incognito (private) session**: a chat whose transcript is never
-replicated to the shared room. The MCP server the room spawns for incognito
-threads sets ``IX_MCP_PRIVATE=1`` (and is the only one given the gcal grant), so
-minting a token outside that context raises `GoogleAuthError`. This keeps a
-personal credential, and any mail it reads, off the synced room state.
+confined to an **incognito session** -- one whose transcript is never replicated
+to a shared room. Incognito is the default: a plain ix-mcp (a single-user chat,
+a Claude Code session, the room's per-thread private MCP) is incognito and may
+mint a token. The exception is a **shared (multiplayer) room**: the room marks
+the one MCP it shares across participants with ``IX_MCP_SHARED=1``, and minting
+from there raises `GoogleAuthError`. This keeps a personal credential, and any
+mail it reads, out of state that syncs to other people.
 """
 
 from __future__ import annotations
@@ -59,30 +61,32 @@ class GoogleAuthError(RuntimeError):
     """Raised when an access token cannot be minted from the stored grant."""
 
 
-# The env var the room sets on the MCP instance backing incognito threads. Gmail
-# and Calendar refuse to mint a token unless it is truthy, so a normal (synced)
-# chat can never reach the personal Google grant even if the binary is on PATH.
-PRIVATE_ENV = "IX_MCP_PRIVATE"
+# The env var a shared (multiplayer) room sets on the one MCP it shares across
+# participants. Incognito is the default, so an unset (or empty) value means a
+# token may be minted; only a truthy value marks the session shared and refuses
+# minting, keeping the personal Google grant out of synced room state.
+SHARED_ENV = "IX_MCP_SHARED"
 
 
-def _require_private() -> None:
-    """Allow token minting only inside an incognito session.
+def _require_incognito() -> None:
+    """Allow token minting unless the session is a shared (multiplayer) room.
 
-    Gmail/Calendar read personal data; binding them to ``IX_MCP_PRIVATE`` keeps
-    that access (and the credential behind it) inside chats that never sync to
-    the shared room. The room runs a dedicated, private MCP for incognito
-    threads and routes only those threads to it.
+    Gmail/Calendar read personal data, so they are confined to incognito
+    sessions -- the default for a plain ix-mcp. A shared room marks the MCP it
+    replicates across participants with ``IX_MCP_SHARED``; only then is minting
+    refused, so a personal credential never reaches state other people can see.
     """
-    if not os.environ.get(PRIVATE_ENV):
+    if os.environ.get(SHARED_ENV):
         raise GoogleAuthError(
-            "Gmail and Calendar are available only in an incognito chat (the "
-            "session is not private). Start an incognito chat to use them; their "
-            "credential is scoped to that context and never reaches the shared room."
+            "Gmail and Calendar are not available in a shared (multiplayer) room "
+            "(IX_MCP_SHARED is set), because they would expose a personal mailbox "
+            "to everyone in the room. Use them from an incognito chat instead; its "
+            "transcript and credential stay private to you."
         )
 
 
 def _mint() -> dict:
-    _require_private()
+    _require_incognito()
     binary = os.environ.get("IX_GCAL_BIN")
     if not binary:
         raise GoogleAuthError("IX_GCAL_BIN is not set; the gcal binary is bundled into ix-mcp")
