@@ -44,6 +44,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Crates whose direct version in a Cargo.toml is deliberately held to
+          # match a pinned-ecosystem dependency, and so must NOT be bumped by
+          # the breaking pass. lake-iceberg pins arrow/parquet to ^57 because
+          # iceberg 0.9 pins arrow/parquet ^57.1 and the two trees have to
+          # unify at the `FileWriter::write` boundary; bumping these to 59
+          # silently breaks that crate's build (see issue #1012). Keep this
+          # list in sync with any such load-bearing pin in the workspace.
+          held=(arrow-array arrow-schema parquet)
+
           # Major (SemVer-incompatible) bumps rewrite Cargo.toml, so cargo gates
           # them behind `--breaking`. Run whole-workspace it is atomic: a single
           # crate that cannot resolve (a renamed feature, a yanked release)
@@ -56,6 +65,14 @@ jobs:
               | awk '$1 == "Upgrading" { print $2 }' | sort -u
           )
           for crate in "${breaking[@]}"; do
+            skip=
+            for h in "${held[@]}"; do
+              if [ "$crate" = "$h" ]; then skip=1; break; fi
+            done
+            if [ -n "$skip" ]; then
+              echo "held $crate at its pinned major (load-bearing ecosystem pin, see #1012)"
+              continue
+            fi
             echo "::group::cargo update --breaking $crate"
             cargo update --breaking -Zunstable-options "$crate" \
               || echo "skipped $crate: no SemVer-incompatible version resolves"
