@@ -7,6 +7,7 @@
   autoPatchelfHook,
   procps,
   ripgrep,
+  minecraft-sound,
   bubblewrap,
   socat,
   nix,
@@ -453,6 +454,7 @@ stdenv.mkDerivation {
           [
             procps
             ripgrep
+            minecraft-sound
           ]
           ++ lib.optionals stdenv.hostPlatform.isLinux [
             bubblewrap

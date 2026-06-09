@@ -143,6 +143,28 @@ class Output(_ResultBase):
         """Combined stdout+stderr with ANSI escape codes stripped."""
         return _strip_ansi(self.raw)
 
+    @property
+    def stdout(self) -> str:
+        """Alias for ``.text``: the merged stdout+stderr with ANSI codes stripped.
+
+        Streams are merged in emission order (terminal-style), so there is no
+        separate stderr channel. This alias exists so the conventional
+        subprocess attribute name works without a wasted AttributeError roundtrip;
+        ``.text`` and ``.stdout`` are identical. For separate streams, redirect
+        in the command, e.g. ``await sh("cmd 2>err.txt")`` and read the file.
+        """
+        return self.text
+
+    @property
+    def stderr(self) -> str:
+        """Alias for ``.text``: stdout and stderr are merged in emission order.
+
+        Returns the same value as ``.stdout`` and ``.text``. The streams cannot
+        be separated after the fact; if you need stderr alone, redirect it in
+        the command, e.g. ``await sh("cmd 2>&1 1>/dev/null")``.
+        """
+        return self.text
+
     def lines(self) -> list[str]:
         """The escape-stripped output split into lines (trailing newline dropped)."""
         return self.text.splitlines()
@@ -397,7 +419,11 @@ async def sh(
 import types as _types
 
 
+import functools as _functools
+
+
 class _CallableModule(_types.ModuleType):
+    @_functools.wraps(sh)
     def __call__(self, *args, **kwargs):
         return sh(*args, **kwargs)
 

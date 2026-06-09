@@ -1037,7 +1037,7 @@ def find(*, query: str, path, limit: int = 100) -> SearchResult:
     return SearchResult(hits=hits, total_matched=len(hits), total_files=len(hits))
 
 
-def grep(*, query: str | list[str], path, mode: str, limit: int = 50) -> GrepResult:
+def grep(*, query: str | list[str], path, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
     """Content grep over `path`, reusing a cached watched (content-indexed) index.
 
     `query` is one pattern, or a list of patterns matched as literals in a single
@@ -1048,12 +1048,24 @@ def grep(*, query: str | list[str], path, mode: str, limit: int = 50) -> GrepRes
       - a list: matched literally, so pass ``"plain"`` (for a regex, pass one
         string like ``"a|b"`` with ``"regex"``).
 
+    `glob` is an optional file-name filter applied before matching, e.g.
+    ``glob="*.rs"`` to restrict a content search to Rust files in a mixed-language
+    repo. For a list query the glob is applied at the native level (inside the
+    Aho-Corasick pass, so only matching-extension files are searched and the
+    ``limit`` is not wasted on excluded files). For a single-pattern query the glob
+    is applied as a post-filter on the returned matches, since the native single-
+    pattern engine has no per-file selector; in that case `limit` applies before the
+    glob, so very tight limits may appear to return fewer results than expected --
+    raise `limit` if you see this.
+
     `path` may be a directory (grepped whole) or a single file. A single file is
     grepped in an isolated one-file index, so it works even for a dotfile (which
     the indexer skips in place) or a file directly under `$HOME`/`/` (which fff
     won't index whole). A bare `~`/`/` *directory* is refused with guidance
     toward a file or a scoped subdirectory.
     """
+    import fnmatch as _fnmatch
+
     multi = not isinstance(query, str)
     if multi and mode != "plain":
         raise ValueError(
@@ -1063,10 +1075,18 @@ def grep(*, query: str | list[str], path, mode: str, limit: int = 50) -> GrepRes
         )
 
     def _run(ff: "FileFinder") -> GrepResult:
-        return (
-            ff.multi_grep(patterns=query, limit=limit)
-            if multi
-            else ff.grep(query=query, mode=mode, limit=limit)
+        if multi:
+            return ff.multi_grep(patterns=query, constraints=glob, limit=limit)
+        result = ff.grep(query=query, mode=mode, limit=limit)
+        if glob is None:
+            return result
+        # Post-filter by glob for single-pattern mode (no native file selector).
+        filtered = [m for m in result.matches if _fnmatch.fnmatch(m.name, glob)]
+        return GrepResult(
+            matches=filtered,
+            total_matched=len(filtered),
+            total_files_searched=result.total_files_searched,
+            next_file_offset=result.next_file_offset,
         )
 
     root, only = _split_path(path)
@@ -1091,9 +1111,9 @@ async def afind(*, query: str, path, limit: int = 100) -> SearchResult:
     return await asyncio.to_thread(find, query=query, path=path, limit=limit)
 
 
-async def agrep(*, query: str | list[str], path, mode: str, limit: int = 50) -> GrepResult:
+async def agrep(*, query: str | list[str], path, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
     """Async content grep: runs off the event loop (non-blocking)."""
-    return await asyncio.to_thread(grep, query=query, path=path, mode=mode, limit=limit)
+    return await asyncio.to_thread(grep, query=query, path=path, mode=mode, limit=limit, glob=glob)
 
 
 class CodeMap:
@@ -1223,14 +1243,15 @@ class CodeMap:
         )
 
 
-def map(*, query: str | list[str], path, mode: str, limit: int = 200) -> CodeMap:
+def map(*, query: str | list[str], path, mode: str, limit: int = 200, glob: str | None = None) -> CodeMap:
     """Content grep grouped into a :class:`CodeMap`: hits per file with
     definitions ranked first. A glanceable answer to "where is X defined and
-    used?" built straight on :func:`grep`."""
-    return CodeMap(query=query, matches=grep(query=query, path=path, mode=mode, limit=limit).matches)
+    used?" built straight on :func:`grep`. Accepts the same ``glob`` filter as
+    :func:`grep` to scope results to files matching a pattern (e.g. ``"*.rs"``)."""
+    return CodeMap(query=query, matches=grep(query=query, path=path, mode=mode, limit=limit, glob=glob).matches)
 
 
-async def amap(*, query: str | list[str], path, mode: str, limit: int = 200) -> CodeMap:
+async def amap(*, query: str | list[str], path, mode: str, limit: int = 200, glob: str | None = None) -> CodeMap:
     """Async :func:`map`: the same code map, off the event loop."""
-    res = await agrep(query=query, path=path, mode=mode, limit=limit)
+    res = await agrep(query=query, path=path, mode=mode, limit=limit, glob=glob)
     return CodeMap(query=query, matches=res.matches)

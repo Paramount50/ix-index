@@ -124,7 +124,7 @@ Content = list[outputs.Content]
 )
 async def python_exec(
     code: Annotated[str, Field(description="Python source to run on the shared kernel")],
-    budget: Annotated[float, Field(description="Seconds to wait before backgrounding the run")] = 15.0,
+    budget: Annotated[float, Field(description="Seconds to wait before backgrounding the run (server-side cap: 120s; larger values are clamped and a notice is appended to the reply)")] = 15.0,
     name: Annotated[str | None, Field(description="Optional label for the job in the dashboard")] = None,
 ) -> Content:
     # A foreground budget is how long the run holds the one shared shell channel
