@@ -40,9 +40,7 @@ const DELTA_CHANNEL_CAPACITY: usize = 1024;
 const SEND_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Parser)]
-#[command(
-    about = "Run a Nix command with quiet terminal output and a live browser monitor."
-)]
+#[command(about = "Run a Nix command with quiet terminal output and a live browser monitor.")]
 #[allow(clippy::struct_field_names)] // `nix_args` is the wire-level name passed to `nix`; renaming would hurt the CLI help text.
 struct Args {
     /// Interface used by the web monitor. Defaults to all interfaces so the UI
@@ -111,9 +109,8 @@ async fn main() -> Result<()> {
     let args = Args::from_arg_matches(&matches).unwrap_or_else(|error| error.exit());
     validate_site_dir(&args.site_dir)?;
 
-    let index_html = Bytes::from(
-        std::fs::read(args.site_dir.join("index.html")).context("reading index.html")?,
-    );
+    let index_html =
+        Bytes::from(std::fs::read(args.site_dir.join("index.html")).context("reading index.html")?);
 
     let command = format!("nix {}", args.nix_args.join(" "));
     let monitor = Arc::new(RwLock::new(MonitorState::new(command)));
@@ -534,7 +531,9 @@ fn copied_size(source: &Path) -> Result<i64> {
         // aborting the whole measurement; the figure is an approximate hint, so
         // a few missing files just make it a slight undercount.
         let Ok(entry) = entry else { continue };
-        if entry.file_type().is_some_and(|file_type| file_type.is_file())
+        if entry
+            .file_type()
+            .is_some_and(|file_type| file_type.is_file())
             && let Ok(metadata) = entry.metadata()
         {
             total = total.saturating_add(metadata.len());

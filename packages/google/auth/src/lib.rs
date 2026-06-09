@@ -457,7 +457,10 @@ impl Authenticator {
         Ok(Self {
             token: TokenClient::new(secrets)?,
             store,
-            required_scopes: required_scopes.iter().map(|scope| (*scope).to_owned()).collect(),
+            required_scopes: required_scopes
+                .iter()
+                .map(|scope| (*scope).to_owned())
+                .collect(),
             cache: RwLock::new(None),
         })
     }

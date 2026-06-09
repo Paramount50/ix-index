@@ -22,8 +22,8 @@ use std::time::Duration;
 use futures::stream::{self, StreamExt as _};
 use mixedbread::Filter;
 use search_core::{Store, wait_until_indexed};
-use source_meta::{Document, Reconciler, Source, SourceAdapter, keys};
 use snafu::ResultExt as _;
+use source_meta::{Document, Reconciler, Source, SourceAdapter, keys};
 
 pub use crate::error::Error;
 use crate::error::{AdapterSnafu, Result, StoreSnafu};
@@ -124,7 +124,10 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
     /// the source's remote records, upload the new or changed documents, and
     /// block until new content is embedded.
     async fn sync_source(&self, source: &Source, documents: &[Document]) -> Result<SyncOutcome> {
-        self.store.ensure_store(self.name).await.context(StoreSnafu)?;
+        self.store
+            .ensure_store(self.name)
+            .await
+            .context(StoreSnafu)?;
         let filter = source_filter(source);
         let remote: HashMap<String, Option<String>> = self
             .store
@@ -155,7 +158,10 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
 
         let results: Vec<Result<()>> = stream::iter(to_upload)
             .map(|document| async move {
-                self.store.upload(self.name, document).await.context(StoreSnafu)?;
+                self.store
+                    .upload(self.name, document)
+                    .await
+                    .context(StoreSnafu)?;
                 Ok(())
             })
             .buffer_unordered(UPLOAD_CONCURRENCY)
@@ -174,7 +180,11 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
                 .context(StoreSnafu)?;
         }
 
-        Ok(SyncOutcome { remote, uploaded, skipped })
+        Ok(SyncOutcome {
+            remote,
+            uploaded,
+            skipped,
+        })
     }
 
     /// Make the store's records for one source exactly `documents`: upload the
@@ -192,12 +202,17 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
     /// delete fails.
     pub async fn replace(&self, source: &Source, documents: &[Document]) -> Result<ReplaceReport> {
         let outcome = self.sync_source(source, documents).await?;
-        let desired: HashSet<&str> =
-            documents.iter().map(|document| document.external_id.as_str()).collect();
+        let desired: HashSet<&str> = documents
+            .iter()
+            .map(|document| document.external_id.as_str())
+            .collect();
         let mut deleted = 0;
         for external_id in outcome.remote.keys() {
             if !desired.contains(external_id.as_str()) {
-                self.store.delete(self.name, external_id).await.context(StoreSnafu)?;
+                self.store
+                    .delete(self.name, external_id)
+                    .await
+                    .context(StoreSnafu)?;
                 deleted += 1;
             }
         }
@@ -223,16 +238,18 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
     /// # Errors
     /// Returns an error if the store cannot be reached, an upload fails, or a
     /// delete of a still-existing record fails.
-    pub async fn apply(
-        &self,
-        upserts: Vec<Document>,
-        deletes: &[String],
-    ) -> Result<ApplyReport> {
-        self.store.ensure_store(self.name).await.context(StoreSnafu)?;
+    pub async fn apply(&self, upserts: Vec<Document>, deletes: &[String]) -> Result<ApplyReport> {
+        self.store
+            .ensure_store(self.name)
+            .await
+            .context(StoreSnafu)?;
 
         let results: Vec<Result<()>> = stream::iter(upserts)
             .map(|document| async move {
-                self.store.upload(self.name, document).await.context(StoreSnafu)?;
+                self.store
+                    .upload(self.name, document)
+                    .await
+                    .context(StoreSnafu)?;
                 Ok(())
             })
             .buffer_unordered(UPLOAD_CONCURRENCY)
@@ -251,17 +268,26 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
 
         let mut removed = 0;
         if !deletes.is_empty() {
-            let existing: HashSet<String> =
-                self.store.list_external_ids(self.name, None).await.context(StoreSnafu)?;
+            let existing: HashSet<String> = self
+                .store
+                .list_external_ids(self.name, None)
+                .await
+                .context(StoreSnafu)?;
             for external_id in deletes {
                 if existing.contains(external_id) {
-                    self.store.delete(self.name, external_id).await.context(StoreSnafu)?;
+                    self.store
+                        .delete(self.name, external_id)
+                        .await
+                        .context(StoreSnafu)?;
                     removed += 1;
                 }
             }
         }
 
-        Ok(ApplyReport { uploaded, deleted: removed })
+        Ok(ApplyReport {
+            uploaded,
+            deleted: removed,
+        })
     }
 }
 
@@ -310,17 +336,28 @@ where
 
     let mut desired = HashSet::new();
     for item in adapter.documents() {
-        let document = item.map_err(|error| AdapterSnafu { message: error.to_string() }.build())?;
+        let document = item.map_err(|error| {
+            AdapterSnafu {
+                message: error.to_string(),
+            }
+            .build()
+        })?;
         desired.insert(document.external_id);
     }
 
     let stale: Vec<&String> = remote.difference(&desired).collect();
     let deleted = stale.len();
     for external_id in stale {
-        store.delete(store_name, external_id).await.context(StoreSnafu)?;
+        store
+            .delete(store_name, external_id)
+            .await
+            .context(StoreSnafu)?;
     }
 
-    Ok(GcReport { deleted, kept: desired.len() })
+    Ok(GcReport {
+        deleted,
+        kept: desired.len(),
+    })
 }
 
 #[cfg(test)]
@@ -333,8 +370,15 @@ mod tests {
     use super::{MixedbreadReconciler, gc_documents};
 
     /// The reconciler under test, with the embedding wait kept short.
-    fn reconciler<'a>(store: &'a MemoryStore, name: &'a str) -> MixedbreadReconciler<'a, MemoryStore> {
-        MixedbreadReconciler { store, name, index_timeout: Duration::from_secs(1) }
+    fn reconciler<'a>(
+        store: &'a MemoryStore,
+        name: &'a str,
+    ) -> MixedbreadReconciler<'a, MemoryStore> {
+        MixedbreadReconciler {
+            store,
+            name,
+            index_timeout: Duration::from_secs(1),
+        }
     }
 
     // A fake record source for exercising the reconcile and GC without a real
@@ -352,7 +396,9 @@ mod tests {
         fn source(&self) -> source_meta::Source {
             source_meta::Source::new("linear")
         }
-        fn documents(&self) -> impl Iterator<Item = std::result::Result<Document, FakeError>> + Send {
+        fn documents(
+            &self,
+        ) -> impl Iterator<Item = std::result::Result<Document, FakeError>> + Send {
             self.docs.clone().into_iter().map(Ok)
         }
     }
@@ -392,7 +438,10 @@ mod tests {
         assert_eq!(store.upload_count(), 2, "no redundant re-upload");
 
         // A changed body for A re-embeds only A.
-        let changed = vec![linear_doc("A", "alpha body EDITED"), linear_doc("B", "beta body")];
+        let changed = vec![
+            linear_doc("A", "alpha body EDITED"),
+            linear_doc("B", "beta body"),
+        ];
         let third = sink.reconcile(&source, &changed).await.expect("third");
         assert_eq!(third.uploaded, 1);
         assert_eq!(store.upload_count(), 3);
@@ -409,11 +458,16 @@ mod tests {
 
         // A delta: A changed, B tombstoned, C never existed (a replayed delete).
         let delta_upserts = vec![linear_doc("A", "a EDITED")];
-        let deletes =
-            vec!["linear:issue:B".to_owned(), "linear:issue:C".to_owned()];
-        let report = sink.apply(delta_upserts.clone(), &deletes).await.expect("apply");
+        let deletes = vec!["linear:issue:B".to_owned(), "linear:issue:C".to_owned()];
+        let report = sink
+            .apply(delta_upserts.clone(), &deletes)
+            .await
+            .expect("apply");
         assert_eq!(report.uploaded, 1);
-        assert_eq!(report.deleted, 1, "the never-existed id must be skipped, not an error");
+        assert_eq!(
+            report.deleted, 1,
+            "the never-existed id must be skipped, not an error"
+        );
         assert_eq!(store.len(), 1, "only A remains");
 
         // Replaying the same delta (a crash before the cursor write) is safe:
@@ -442,7 +496,10 @@ mod tests {
         // The log fold now holds A (changed) and C; B was tombstoned.
         let desired = vec![linear_doc("A", "a EDITED"), linear_doc("C", "c")];
         let report = sink.replace(&linear, &desired).await.expect("replace");
-        assert_eq!(report.uploaded, 2, "the changed and the new document upload");
+        assert_eq!(
+            report.uploaded, 2,
+            "the changed and the new document upload"
+        );
         assert_eq!(report.skipped, 0);
         assert_eq!(report.deleted, 1, "the absent document is deleted");
         assert_eq!(report.total, 2);
@@ -456,14 +513,21 @@ mod tests {
         // emptiness is authoritative for a replace (unlike reconcile, whose
         // live-scan absences are protective).
         let report = sink.replace(&linear, &[]).await.expect("empty replace");
-        assert_eq!(report.deleted, 2, "an empty fold deletes the source's records");
+        assert_eq!(
+            report.deleted, 2,
+            "an empty fold deletes the source's records"
+        );
         assert_eq!(store.len(), 1, "only the other source's record remains");
     }
 
     #[tokio::test]
     async fn gc_deletes_records_absent_from_the_export() {
         let store = MemoryStore::new();
-        let docs = vec![linear_doc("A", "a"), linear_doc("B", "b"), linear_doc("C", "c")];
+        let docs = vec![
+            linear_doc("A", "a"),
+            linear_doc("B", "b"),
+            linear_doc("C", "c"),
+        ];
         reconciler(&store, "s")
             .reconcile(&Source::new("linear"), &docs)
             .await

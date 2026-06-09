@@ -16,8 +16,8 @@ use std::sync::{Mutex, PoisonError};
 
 use mixedbread::{Condition, Filter, Operator};
 use regex::RegexBuilder;
-use source_meta::{Document, Source};
 use snafu::{OptionExt as _, ResultExt as _};
+use source_meta::{Document, Source};
 
 use crate::error::{InvalidMetadataSnafu, InvalidPatternSnafu, Result};
 
@@ -444,8 +444,14 @@ fn matches_filter(meta: &serde_json::Value, filter: &Filter) -> bool {
     match filter {
         Filter::Condition(condition) => matches_condition(meta, condition),
         Filter::Group(group) => {
-            group.all.as_ref().is_none_or(|fs| fs.iter().all(|f| matches_filter(meta, f)))
-                && group.any.as_ref().is_none_or(|fs| fs.iter().any(|f| matches_filter(meta, f)))
+            group
+                .all
+                .as_ref()
+                .is_none_or(|fs| fs.iter().all(|f| matches_filter(meta, f)))
+                && group
+                    .any
+                    .as_ref()
+                    .is_none_or(|fs| fs.iter().any(|f| matches_filter(meta, f)))
                 && group
                     .none
                     .as_ref()
@@ -461,11 +467,17 @@ fn matches_condition(meta: &serde_json::Value, condition: &Condition) -> bool {
         Operator::NotEq => actual != Some(&condition.value),
         Operator::In => json_contains(&condition.value, actual),
         Operator::NotIn => !json_contains(&condition.value, actual),
-        Operator::StartsWith => match (actual.and_then(serde_json::Value::as_str), condition.value.as_str()) {
+        Operator::StartsWith => match (
+            actual.and_then(serde_json::Value::as_str),
+            condition.value.as_str(),
+        ) {
             (Some(value), Some(prefix)) => value.starts_with(prefix),
             _ => false,
         },
-        Operator::Like => match (actual.and_then(serde_json::Value::as_str), condition.value.as_str()) {
+        Operator::Like => match (
+            actual.and_then(serde_json::Value::as_str),
+            condition.value.as_str(),
+        ) {
             (Some(value), Some(needle)) => value.contains(needle),
             _ => false,
         },
@@ -477,7 +489,8 @@ fn matches_condition(meta: &serde_json::Value, condition: &Condition) -> bool {
 /// (the filter's array value), or equals it when `haystack` is a scalar.
 fn json_contains(haystack: &serde_json::Value, needle: Option<&serde_json::Value>) -> bool {
     let Some(needle) = needle else { return false };
-    haystack
-        .as_array()
-        .map_or_else(|| haystack == needle, |items| items.iter().any(|item| item == needle))
+    haystack.as_array().map_or_else(
+        || haystack == needle,
+        |items| items.iter().any(|item| item == needle),
+    )
 }

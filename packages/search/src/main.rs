@@ -319,7 +319,10 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
         if !view.sources.is_empty() {
             println!();
             for (index, hit) in view.sources.iter().enumerate() {
-                println!("{index}: {}", render(hit, cli.content, &palette, &root, theme));
+                println!(
+                    "{index}: {}",
+                    render(hit, cli.content, &palette, &root, theme)
+                );
             }
         }
         Ok(())
@@ -344,7 +347,9 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
 /// A terminal-only "searching" spinner for the query round-trip; piped output
 /// gets none. There is no upload or embedding phase to report any more.
 fn spinner() -> Option<ProgressBar> {
-    let bar = std::io::stderr().is_terminal().then(ProgressBar::new_spinner)?;
+    let bar = std::io::stderr()
+        .is_terminal()
+        .then(ProgressBar::new_spinner)?;
     bar.set_style(progress_style::spinner());
     bar.set_prefix("searching");
     bar.enable_steady_tick(Duration::from_millis(120));
@@ -690,7 +695,10 @@ mod tests {
         )
         .expect("snippet");
         assert_eq!(out, "5\talpha\n6\tbeta");
-        assert!(!out.contains('│'), "machine output must drop the gutter glyph");
+        assert!(
+            !out.contains('│'),
+            "machine output must drop the gutter glyph"
+        );
     }
 
     #[test]
@@ -702,7 +710,13 @@ mod tests {
             code_highlight::Theme::Dark,
         )
         .expect("snippet");
-        assert!(out.contains('│'), "interactive output keeps the aligned gutter");
-        assert!(!out.contains('\t'), "interactive output is not tab-numbered");
+        assert!(
+            out.contains('│'),
+            "interactive output keeps the aligned gutter"
+        );
+        assert!(
+            !out.contains('\t'),
+            "interactive output is not tab-numbered"
+        );
     }
 }

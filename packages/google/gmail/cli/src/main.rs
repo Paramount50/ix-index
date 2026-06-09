@@ -580,7 +580,10 @@ async fn run_attach(command: AttachCommand) -> anyhow::Result<()> {
             } else {
                 use tokio::io::AsyncWriteExt as _;
                 let mut stdout = tokio::io::stdout();
-                stdout.write_all(&bytes).await.context("writing to stdout")?;
+                stdout
+                    .write_all(&bytes)
+                    .await
+                    .context("writing to stdout")?;
                 stdout.flush().await.ok();
             }
         }
@@ -695,9 +698,10 @@ fn guess_content_type(filename: &str) -> String {
 
 /// One listing line for a message: date, from, subject, [id].
 fn message_line(message: &Message) -> String {
-    let date = message
-        .internal_date
-        .map_or_else(|| "                ".to_owned(), |dt| dt.format("%Y-%m-%d %H:%M").to_string());
+    let date = message.internal_date.map_or_else(
+        || "                ".to_owned(),
+        |dt| dt.format("%Y-%m-%d %H:%M").to_string(),
+    );
     let from = message
         .payload
         .as_ref()
@@ -730,11 +734,7 @@ fn message_block(message: &Message) -> String {
         lines.push(format!("  thread:   {thread}"));
     }
 
-    if let Some(body) = message
-        .payload
-        .as_ref()
-        .and_then(first_text_body)
-    {
+    if let Some(body) = message.payload.as_ref().and_then(first_text_body) {
         lines.push(String::new());
         lines.push(body);
     }
@@ -770,7 +770,9 @@ async fn enrich_metadata(
 ) -> anyhow::Result<Vec<Message>> {
     let mut out = Vec::with_capacity(stubs.len());
     for stub in stubs {
-        let message = client.get_message(&stub.id, MessageFormat::Metadata).await?;
+        let message = client
+            .get_message(&stub.id, MessageFormat::Metadata)
+            .await?;
         out.push(message);
     }
     Ok(out)

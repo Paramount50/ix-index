@@ -19,9 +19,10 @@ pub fn repo_slug(root: &Path) -> RepoSlug {
     if let Some(slug) = origin_slug(root) {
         return RepoSlug::Remote(slug);
     }
-    let name = root
-        .file_name()
-        .map_or_else(|| root.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
+    let name = root.file_name().map_or_else(
+        || root.to_string_lossy().into_owned(),
+        |n| n.to_string_lossy().into_owned(),
+    );
     RepoSlug::Local(name)
 }
 

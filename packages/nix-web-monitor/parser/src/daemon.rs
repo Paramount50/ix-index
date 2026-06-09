@@ -36,9 +36,7 @@ impl OpClass {
     #[must_use]
     pub fn classify(syscall: &str) -> Self {
         // Strip a trailing `64`/`_nocancel` so `stat64` / `open_nocancel` match.
-        let name = syscall
-            .trim_end_matches("_nocancel")
-            .trim_end_matches("64");
+        let name = syscall.trim_end_matches("_nocancel").trim_end_matches("64");
         match name {
             "link" | "linkat" | "clonefile" | "clonefileat" => Self::Link,
             "rename" | "renameat" | "renameatx_np" => Self::Rename,

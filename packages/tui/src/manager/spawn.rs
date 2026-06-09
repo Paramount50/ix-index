@@ -22,11 +22,7 @@ const INITIAL_OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(5);
 /// Polls the viewport through the actor mailbox rather than the engine directly:
 /// `read_viewport` drops trailing blank rows, so a non-empty result means the
 /// child has painted something.
-fn wait_for_initial_output(
-    runtime: &Runtime,
-    id: Uuid,
-    command_tx: &mpsc::Sender<PtyCommand>,
-) {
+fn wait_for_initial_output(runtime: &Runtime, id: Uuid, command_tx: &mpsc::Sender<PtyCommand>) {
     let start = Instant::now();
     runtime.block_on(async {
         loop {
@@ -115,7 +111,16 @@ pub(super) fn spawn_tui(
     // zombie), publishes the exit code through `exit_tx`, and can signal it on
     // a kill request. It forwards bytes and reads to the engine thread.
     runtime.spawn(async move {
-        pty_actor(id, pty, child, command_rx, engine_tx, exit_tx, app_cursor_keys).await;
+        pty_actor(
+            id,
+            pty,
+            child,
+            command_rx,
+            engine_tx,
+            exit_tx,
+            app_cursor_keys,
+        )
+        .await;
     });
 
     let instance = TuiInstance {

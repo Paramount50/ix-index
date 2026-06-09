@@ -874,9 +874,19 @@ mod tests {
                 .saturating_mul(1u32 << attempt.min(5))
                 .min(BACKOFF_CAP);
             let delay = backoff(attempt);
-            assert!(delay >= exp / 2, "attempt {attempt}: {delay:?} below half {:?}", exp / 2);
-            assert!(delay <= exp, "attempt {attempt}: {delay:?} above exp {exp:?}");
-            assert!(delay <= BACKOFF_CAP, "attempt {attempt}: {delay:?} above cap");
+            assert!(
+                delay >= exp / 2,
+                "attempt {attempt}: {delay:?} below half {:?}",
+                exp / 2
+            );
+            assert!(
+                delay <= exp,
+                "attempt {attempt}: {delay:?} above exp {exp:?}"
+            );
+            assert!(
+                delay <= BACKOFF_CAP,
+                "attempt {attempt}: {delay:?} above cap"
+            );
         }
     }
 
@@ -892,7 +902,11 @@ mod tests {
                 async move {
                     let n = calls.fetch_add(1, Ordering::SeqCst);
                     if n < fail_times {
-                        (StatusCode::TOO_MANY_REQUESTS, [(header::RETRY_AFTER, "0")], "slow down")
+                        (
+                            StatusCode::TOO_MANY_REQUESTS,
+                            [(header::RETRY_AFTER, "0")],
+                            "slow down",
+                        )
                             .into_response()
                     } else {
                         (StatusCode::OK, "{}").into_response()
@@ -907,14 +921,20 @@ mod tests {
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("serve");
         });
-        MockServer { base_url: format!("http://{addr}"), calls }
+        MockServer {
+            base_url: format!("http://{addr}"),
+            calls,
+        }
     }
 
     #[tokio::test]
     async fn retries_429_then_succeeds() {
         let MockServer { base_url, calls } = spawn_mock(2).await;
         let client = Client::new(base_url, "test-key").expect("client");
-        client.ensure_store("store").await.expect("succeeds after retries");
+        client
+            .ensure_store("store")
+            .await
+            .expect("succeeds after retries");
         // 2 rejected + 1 accepted.
         assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
@@ -949,7 +969,10 @@ mod tests {
                 }
             }
         });
-        MockServer { base_url: format!("http://{addr}"), calls }
+        MockServer {
+            base_url: format!("http://{addr}"),
+            calls,
+        }
     }
 
     #[tokio::test]
@@ -970,7 +993,10 @@ mod tests {
     async fn gives_up_after_max_retries() {
         let MockServer { base_url, calls } = spawn_mock(usize::MAX).await;
         let client = Client::new(base_url, "test-key").expect("client");
-        let err = client.ensure_store("store").await.expect_err("never succeeds");
+        let err = client
+            .ensure_store("store")
+            .await
+            .expect_err("never succeeds");
         assert!(matches!(err, Error::Api { status: 429, .. }), "got {err:?}");
         // The initial attempt plus MAX_RETRIES retries.
         assert_eq!(calls.load(Ordering::SeqCst), (MAX_RETRIES + 1) as usize);

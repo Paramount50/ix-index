@@ -240,7 +240,11 @@ pub struct OptimiseStats {
 /// stream of the variants below. The discriminant rides in a `type` field so
 /// the browser can decode it as a tagged union.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
 pub enum Delta {
     /// Full state, used only to seed a new subscriber. Never broadcast.
     Reset { snapshot: MonitorSnapshot },
@@ -742,7 +746,8 @@ impl MonitorState {
                 // optimisation cost is visible. `bytes` is an apparent file size
                 // and never negative, but clamp defensively before summing.
                 self.optimise.files_linked = self.optimise.files_linked.saturating_add(1);
-                self.optimise.bytes_freed = self.optimise.bytes_freed.saturating_add((*bytes).max(0));
+                self.optimise.bytes_freed =
+                    self.optimise.bytes_freed.saturating_add((*bytes).max(0));
                 self.emit(Delta::OptimiseSet {
                     optimise: self.optimise,
                 });
@@ -1878,9 +1883,9 @@ mod tests {
             "build start carries the derivation and host on a BuildUpsert"
         );
         assert!(
-            deltas
-                .iter()
-                .any(|delta| matches!(delta, Delta::ActivityUpsert { activity } if activity.id == 7)),
+            deltas.iter().any(
+                |delta| matches!(delta, Delta::ActivityUpsert { activity } if activity.id == 7)
+            ),
             "build start also upserts its activity row"
         );
     }
@@ -1900,7 +1905,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(appends.len(), 1, "one log line yields exactly one LogsAppend");
+        assert_eq!(
+            appends.len(),
+            1,
+            "one log line yields exactly one LogsAppend"
+        );
         assert_eq!(appends[0].len(), 1);
         assert_eq!(appends[0][0].text, "compiling");
     }
@@ -1934,7 +1943,10 @@ mod tests {
     fn drain_clears_the_outbox() {
         let mut state = MonitorState::default();
         state.apply_line(r#"@nix {"action":"start","fields":["/nix/store/abc-demo.drv","local",1,1],"id":7,"level":3,"text":"building","type":105}"#);
-        assert!(!state.drain_deltas().is_empty(), "first drain yields the start deltas");
+        assert!(
+            !state.drain_deltas().is_empty(),
+            "first drain yields the start deltas"
+        );
         assert!(
             state.drain_deltas().is_empty(),
             "a second drain with no intervening mutation is empty"
@@ -2017,7 +2029,10 @@ mod tests {
     #[test]
     fn copy_to_store_source_rejects_other_text() {
         assert_eq!(copy_to_store_source("building '/nix/store/x.drv'"), None);
-        assert_eq!(copy_to_store_source("copying '/tmp/x' to somewhere else"), None);
+        assert_eq!(
+            copy_to_store_source("copying '/tmp/x' to somewhere else"),
+            None
+        );
         assert_eq!(copy_to_store_source("copying /tmp/x to the store"), None);
         // An empty path would make the server walk its own CWD; reject it.
         assert_eq!(copy_to_store_source("copying '' to the store"), None);
@@ -2042,11 +2057,18 @@ mod tests {
         state.set_activity_size(3, 4_096);
 
         assert_eq!(state.activities[&3].size_bytes, Some(4_096));
-        let upserted = state.drain_deltas().into_iter().find_map(|delta| match delta {
-            Delta::ActivityUpsert { activity } if activity.id == 3 => activity.size_bytes,
-            _ => None,
-        });
-        assert_eq!(upserted, Some(4_096), "the measured size rides an ActivityUpsert");
+        let upserted = state
+            .drain_deltas()
+            .into_iter()
+            .find_map(|delta| match delta {
+                Delta::ActivityUpsert { activity } if activity.id == 3 => activity.size_bytes,
+                _ => None,
+            });
+        assert_eq!(
+            upserted,
+            Some(4_096),
+            "the measured size rides an ActivityUpsert"
+        );
     }
 
     #[test]

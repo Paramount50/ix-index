@@ -30,8 +30,8 @@ pub fn play(bands: &[Band]) -> Result<()> {
         if band.amplitude <= 0.0 {
             continue;
         }
-        let file = File::open(&band.path)
-            .with_context(|| format!("open band {}", band.path.display()))?;
+        let file =
+            File::open(&band.path).with_context(|| format!("open band {}", band.path.display()))?;
         // `Decoder` is not `Clone`, so `repeat_infinite` needs a `Buffered`
         // wrapper, which caches decoded samples and replays them each loop.
         let source = Decoder::new(BufReader::new(file))

@@ -40,7 +40,10 @@ const RETRY_INTERVAL: Duration = Duration::from_secs(5);
 ///
 /// Never returns an error: tracing is a best-effort overlay, so any failure
 /// becomes a status the panel shows and the loop retries.
-pub async fn run_daemon_probe(monitor: Arc<RwLock<MonitorState>>, deltas: broadcast::Sender<Bytes>) {
+pub async fn run_daemon_probe(
+    monitor: Arc<RwLock<MonitorState>>,
+    deltas: broadcast::Sender<Bytes>,
+) {
     loop {
         let pids = daemon_pids().await;
         if pids.is_empty() {
@@ -67,7 +70,12 @@ pub async fn run_daemon_probe(monitor: Arc<RwLock<MonitorState>>, deltas: broadc
 /// `nix-daemon` pids, newest last. Empty on a single-user store or if `pgrep` is
 /// missing. `pgrep` ships on macOS and Linux, so this needs no extra dependency.
 async fn daemon_pids() -> Vec<u32> {
-    let Ok(output) = Command::new("pgrep").arg("-f").arg("nix-daemon").output().await else {
+    let Ok(output) = Command::new("pgrep")
+        .arg("-f")
+        .arg("nix-daemon")
+        .output()
+        .await
+    else {
         return Vec::new();
     };
     String::from_utf8_lossy(&output.stdout)
@@ -105,7 +113,12 @@ async fn tracer_command(pids: &[u32]) -> Command {
         )
     } else {
         // strace -f follows the workers the master forks per connection.
-        let mut args = vec!["-f".into(), "-qq".into(), "-e".into(), "trace=%file,write,fsync,fdatasync".into()];
+        let mut args = vec![
+            "-f".into(),
+            "-qq".into(),
+            "-e".into(),
+            "trace=%file,write,fsync,fdatasync".into(),
+        ];
         for pid in pids {
             args.push("-p".into());
             args.push(pid.to_string());
@@ -137,7 +150,11 @@ async fn spawn_tracer(pids: &[u32]) -> Result<Child, String> {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!(
                 "syscall tracer not found ({}); daemon view unavailable",
-                if cfg!(target_os = "macos") { "fs_usage" } else { "strace" }
+                if cfg!(target_os = "macos") {
+                    "fs_usage"
+                } else {
+                    "strace"
+                }
             )
         } else {
             format!("could not start daemon tracer: {error}")
@@ -162,7 +179,10 @@ async fn trace_loop(
     let stderr = child.stderr.take();
     let mut lines = BufReader::new(stdout).lines();
 
-    let mut trace = DaemonTrace { workers: pids, ..DaemonTrace::default() };
+    let mut trace = DaemonTrace {
+        workers: pids,
+        ..DaemonTrace::default()
+    };
     // Counts at the previous tick; the difference over the ~1s window is the
     // per-second rate the panel shows.
     let mut last_total: u64 = 0;

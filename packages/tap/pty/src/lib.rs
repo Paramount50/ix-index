@@ -151,10 +151,7 @@ impl PtySession {
         let pty = pty_process::Pty::new()
             .map_err(std::io::Error::other)
             .context(OpenPtySnafu)?;
-        let pts = pty
-            .pts()
-            .map_err(std::io::Error::other)
-            .context(PtsSnafu)?;
+        let pts = pty.pts().map_err(std::io::Error::other).context(PtsSnafu)?;
         pty.resize(pty_process::Size::new(rows, cols))
             .map_err(std::io::Error::other)
             .context(ResizeSnafu)?;
@@ -174,7 +171,15 @@ impl PtySession {
         let actor_emulator = Arc::clone(&emulator);
         let actor_output = output_tx.clone();
         tokio::spawn(async move {
-            actor(pty, child, actor_emulator, actor_output, command_rx, exit_tx).await;
+            actor(
+                pty,
+                child,
+                actor_emulator,
+                actor_output,
+                command_rx,
+                exit_tx,
+            )
+            .await;
         });
 
         Ok(Self {
@@ -396,7 +401,11 @@ mod tests {
     #[tokio::test]
     async fn late_subscriber_gets_a_snapshot_of_prior_output() {
         let session = PtySession::spawn(SessionConfig {
-            command: vec!["sh".into(), "-c".into(), "printf 'before attach'; sleep 5".into()],
+            command: vec![
+                "sh".into(),
+                "-c".into(),
+                "printf 'before attach'; sleep 5".into(),
+            ],
             rows: 24,
             cols: 80,
             scrollback_lines: 1000,
