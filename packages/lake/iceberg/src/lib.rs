@@ -152,18 +152,24 @@ impl Config {
 }
 
 /// Create the `corpus.documents` table if absent and return its identifier.
-/// Race-safe: a concurrent host winning the create is fine (`AlreadyExists`
-/// from either step is success).
+///
+/// Race-safe: a concurrent host winning the create is fine (a classified
+/// `AlreadyExists`, or a conflict confirmed by probing, is success).
 ///
 /// # Errors
 /// Returns an error if the namespace or table cannot be created or checked.
 pub async fn ensure_table(catalog: &dyn Catalog) -> Result<TableIdent> {
     let ns = NamespaceIdent::new(NAMESPACE.to_owned());
     let ident = TableIdent::new(ns.clone(), TABLE.to_owned());
-    match catalog.create_namespace(&ns, HashMap::new()).await {
-        Ok(_) => {}
-        Err(error) if error.kind() == ErrorKind::NamespaceAlreadyExists => {}
-        Err(error) => {
+    if let Err(error) = catalog.create_namespace(&ns, HashMap::new()).await {
+        // Not every catalog classifies its conflict: Lakekeeper's 409 reaches
+        // the REST client as `ErrorKind::Unexpected`, so the AlreadyExists
+        // kind alone broke every fold after the first. Probe for the
+        // namespace rather than matching messages; the create error stands
+        // when the probe cannot confirm it exists.
+        let exists = error.kind() == ErrorKind::NamespaceAlreadyExists
+            || catalog.namespace_exists(&ns).await.unwrap_or(false);
+        if !exists {
             return Err(error).context(EnsureTableSnafu {
                 table: ident.to_string(),
             });
@@ -175,10 +181,17 @@ pub async fn ensure_table(catalog: &dyn Catalog) -> Result<TableIdent> {
         .build();
     match catalog.create_table(&ns, creation).await {
         Ok(_) => Ok(ident),
-        Err(error) if error.kind() == ErrorKind::TableAlreadyExists => Ok(ident),
-        Err(error) => Err(error).context(EnsureTableSnafu {
-            table: ident.to_string(),
-        }),
+        Err(error) => {
+            let exists = error.kind() == ErrorKind::TableAlreadyExists
+                || catalog.table_exists(&ident).await.unwrap_or(false);
+            if exists {
+                Ok(ident)
+            } else {
+                Err(error).context(EnsureTableSnafu {
+                    table: ident.to_string(),
+                })
+            }
+        }
     }
 }
 
