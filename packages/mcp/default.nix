@@ -2074,6 +2074,21 @@ let
     assert chats["chat_identifier"][0] == "+12025550123", chats
     assert chats.schema["last_date"] == pl.Datetime("ns", "UTC"), chats.schema
 
+    # Reads must see un-checkpointed WAL rows: chat.db runs in WAL mode and a
+    # message you just sent sits in the -wal until a checkpoint. A writer keeps a
+    # WAL connection open (no checkpoint) after inserting; messages() must still
+    # see the new row -- it would not under immutable=1. Guards send-then-read-back.
+    writer = sqlite3.connect(chat)
+    writer.execute("PRAGMA journal_mode=WAL")
+    writer.execute(
+        "INSERT INTO message VALUES (3, ?, 'in the wal', NULL, 1, 1, 'iMessage', 1)",
+        (ns(datetime(2024, 1, 2, 3, 6, 5, tzinfo=timezone.utc)),),
+    )
+    writer.execute("INSERT INTO chat_message_join VALUES (1, 3)")
+    writer.commit()
+    assert "in the wal" in imessage.messages(db=chat)["text"].to_list(), "WAL rows must be visible"
+    writer.close()
+
     # contacts: phones/emails aggregate into list columns under one display name.
     ab = os.path.join(work, "ab.abcddb")
     con = sqlite3.connect(ab)

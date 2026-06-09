@@ -79,12 +79,15 @@ _APPLE_EPOCH_NS = int(_APPLE_EPOCH.timestamp() * 1_000_000_000)
 
 
 def _connect(path: str) -> sqlite3.Connection:
-    """Open a SQLite database read-only and immutable, with a clear error.
+    """Open a SQLite database read-only, with a clear error.
 
-    `immutable=1` promises SQLite the file will not change underneath it, which
-    lets it read a database the Messages app holds open without contending for a
-    lock. A failure here is almost always a missing Full Disk Access grant, so
-    say so rather than surface a bare sqlite error.
+    Opened ``mode=ro`` (not ``immutable=1``): the Messages database runs in WAL
+    mode, where ``immutable`` makes SQLite ignore the ``-wal`` file and so miss
+    just-written rows (a message you sent a moment ago stays invisible until a
+    checkpoint). A plain read-only connection reads the WAL too, so reads are
+    fresh, and WAL allows a reader alongside the Messages app's writer without
+    contending for a lock. A failure here is almost always a missing Full Disk
+    Access grant, so say so rather than surface a bare sqlite error.
     """
 
     if not os.path.exists(path):
@@ -93,7 +96,7 @@ def _connect(path: str) -> sqlite3.Connection:
             "home Library; pass an explicit `db=` path if it has moved."
         )
     try:
-        return sqlite3.connect(f"file:{path}?mode=ro&immutable=1", uri=True)
+        return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     except sqlite3.OperationalError as exc:  # pragma: no cover - permission wiring
         raise PermissionError(
             f"imessage: could not open {path!r} ({exc}). Reading the Messages "
