@@ -18,7 +18,7 @@
 
 use std::process::Command;
 
-use snafu::{ensure, ResultExt};
+use snafu::{ResultExt, ensure};
 
 use crate::error::{self};
 use crate::schema::Metric;

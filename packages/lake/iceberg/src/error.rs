@@ -102,9 +102,7 @@ pub enum Error {
     },
     /// The cursor snapshot is no longer in table metadata (expired or never
     /// existed); the caller must fall back to a full rescan.
-    #[snafu(display(
-        "cursor snapshot {snapshot} not found (expired?); a full rescan is required"
-    ))]
+    #[snafu(display("cursor snapshot {snapshot} not found (expired?); a full rescan is required"))]
     CursorNotFound {
         /// The cursor's snapshot id.
         snapshot: i64,

@@ -11,7 +11,7 @@ use anstyle::Color;
 use devicons::icon_for_file;
 
 use crate::git::{ChangeKind, ChangedFile};
-use crate::palette::{self, Theme, GRAY};
+use crate::palette::{self, GRAY, Theme};
 
 /// Closed-folder glyph (Nerd Font `nf-md-folder`), shown for directory nodes.
 const FOLDER_GLYPH: &str = "\u{e5ff}";

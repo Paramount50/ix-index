@@ -3,7 +3,7 @@
 
 use std::collections::HashSet;
 
-use color_eyre::eyre::{eyre, Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use git2::{Commit, DiffOptions, Oid, Repository};
 
 /// How a file changed in a commit, distilled from git's per-delta status. The

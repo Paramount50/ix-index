@@ -27,7 +27,7 @@ use std::future::Future;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
-use snafu::{ensure, ResultExt as _, Snafu};
+use snafu::{ResultExt as _, Snafu, ensure};
 
 /// Which corpus a record came from: an open string tag, not a closed set.
 ///
@@ -323,7 +323,7 @@ pub fn check_metadata(
 
 #[cfg(test)]
 mod tests {
-    use super::{check_metadata, hash_body, Source};
+    use super::{Source, check_metadata, hash_body};
 
     #[test]
     fn source_round_trips_through_str() {

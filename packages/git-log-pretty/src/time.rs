@@ -1,7 +1,7 @@
 //! Relative timestamp formatting for commit times.
 
 use chrono::{DateTime, Utc};
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Result, eyre};
 
 /// Render a Unix timestamp (seconds) as a coarse "N units ago" string relative
 /// to now. Granularity steps down from days to hours to minutes, ending at

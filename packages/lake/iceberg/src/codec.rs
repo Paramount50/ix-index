@@ -25,15 +25,15 @@
 //! any of them on an upsert row is a malformed log and decodes to a typed
 //! error, never a default.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use arrow_array::{Array as _, ArrayRef, Int64Array, RecordBatch, StringArray};
 use arrow_schema::Schema as ArrowSchema;
 use iceberg::spec::{NestedField, PrimitiveType, Schema, Type};
 use snafu::{OptionExt as _, ResultExt as _};
-use source_meta::{keys, Document, Source};
+use source_meta::{Document, Source, keys};
 
 use crate::error::{
     BadOpSnafu, BatchSnafu, ColumnTypeSnafu, MetaJsonSnafu, MissingColumnSnafu, NullValueSnafu,

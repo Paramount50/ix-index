@@ -19,7 +19,7 @@
 //! counting `#[global_allocator]` is process-global, so it must live in the
 //! binary crate root that actually runs under measurement.
 
-use indexbench::micro::{count_allocations, CountingAllocator};
+use indexbench::micro::{CountingAllocator, count_allocations};
 
 #[global_allocator]
 static ALLOC: CountingAllocator = CountingAllocator;

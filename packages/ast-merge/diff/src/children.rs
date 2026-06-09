@@ -6,7 +6,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     engine::{ThreeWayNodes, ThreeWayTrees},
-    items::{build_name_map, get_name, reconcile_single, IndexedNode},
+    items::{IndexedNode, build_name_map, get_name, reconcile_single},
 };
 
 pub fn try_reconcile(trees: &ThreeWayTrees<'_>, nodes: ThreeWayNodes<'_>) -> Option<String> {

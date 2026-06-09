@@ -11,10 +11,10 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use color_eyre::eyre::{eyre, Result, WrapErr};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 
 use crate::font::FontSet;
-use crate::raster::{render_frame, Layout};
+use crate::raster::{Layout, render_frame};
 use crate::scene::Frame;
 use crate::theme::Theme;
 

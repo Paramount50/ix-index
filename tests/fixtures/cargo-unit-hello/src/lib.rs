@@ -24,7 +24,10 @@ mod tests {
 
     #[test]
     fn package_test_env_and_path_are_available() {
-        assert_eq!(std::env::var("CARGO_UNIT_FIXTURE_ENV").as_deref(), Ok("ok"));
+        assert_eq!(
+            std::env::var("CARGO_UNIT_FIXTURE_ENV").as_deref(),
+            Ok("ok")
+        );
 
         let output = std::process::Command::new("hello")
             .output()

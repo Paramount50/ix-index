@@ -8,17 +8,17 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{bail, Context, Result};
-use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
+use anyhow::{Context, Result, bail};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use clap::{Parser, ValueEnum};
 use rustls::{
-    client::{
-        danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
-        WebPkiServerVerifier,
-    },
-    pki_types::{CertificateDer, ServerName, UnixTime},
     ClientConfig, ClientConnection, DigitallySignedStruct, Error as RustlsError, RootCertStore,
     SignatureScheme, StreamOwned,
+    client::{
+        WebPkiServerVerifier,
+        danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
+    },
+    pki_types::{CertificateDer, ServerName, UnixTime},
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};

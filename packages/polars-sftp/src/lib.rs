@@ -80,8 +80,7 @@ fn fetch_bytes(
     // libssh2 blocking-call timeout, in milliseconds (0 would mean no timeout).
     sess.set_timeout(timeout_ms.clamp(1, u32::MAX as u64) as u32);
     sess.set_tcp_stream(tcp);
-    sess.handshake()
-        .map_err(|e| format!("ssh handshake: {e}"))?;
+    sess.handshake().map_err(|e| format!("ssh handshake: {e}"))?;
 
     // Verify the server's host key against ~/.ssh/known_hosts BEFORE sending any
     // credential, so a MITM of a known host is rejected rather than handed a
@@ -226,9 +225,7 @@ fn read_sftp(
     let user = username
         .or_else(|| std::env::var("USER").ok())
         .filter(|u| !u.is_empty())
-        .ok_or_else(|| {
-            PyValueError::new_err("polars-sftp: no username given and $USER is unset")
-        })?;
+        .ok_or_else(|| PyValueError::new_err("polars-sftp: no username given and $USER is unset"))?;
     let format = resolve_format(storage_format.as_deref(), &path)?;
 
     // Release the GIL for the blocking network read + decode: other Python
@@ -245,7 +242,8 @@ fn read_sftp(
                 timeout_ms,
                 check_host_key,
             )?;
-            decode(bytes, format, with_columns, n_rows).map_err(|e| format!("decode {path}: {e}"))
+            decode(bytes, format, with_columns, n_rows)
+                .map_err(|e| format!("decode {path}: {e}"))
         })
         .map_err(|e| PyRuntimeError::new_err(format!("polars-sftp: {e}")))?;
     Ok(PyDataFrame(df))

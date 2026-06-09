@@ -1,4 +1,4 @@
-use super::helpers::{tokenize, tokenize_full, TokenSpan};
+use super::helpers::{TokenSpan, tokenize, tokenize_full};
 
 /// Build a [`TokenSpan`] from its parts for terse assertions.
 fn span(text: &str, position: usize, offset_from: usize, offset_to: usize) -> TokenSpan {

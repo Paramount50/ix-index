@@ -4,7 +4,7 @@
 
 use std::process::Command;
 
-use color_eyre::eyre::{bail, Context, Result};
+use color_eyre::eyre::{Context, Result, bail};
 
 /// The repository root plus the resolved base and head commit SHAs.
 pub struct Revs {

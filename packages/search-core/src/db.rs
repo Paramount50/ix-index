@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use snafu::{OptionExt as _, ResultExt as _};
 
 use crate::content::ContentHash;

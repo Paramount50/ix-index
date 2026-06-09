@@ -5,7 +5,7 @@
 //! sequences and Kitty keyboard-protocol CSI-u, so a bind fires whether or not
 //! an inner app has negotiated Kitty input on the client's terminal.
 
-use anyhow::{bail, Context as _, Result};
+use anyhow::{Context as _, Result, bail};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_EDITOR_KEYBIND: &str = "Alt-e";

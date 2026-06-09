@@ -240,7 +240,7 @@ pub fn read_channel_messages(dir: &Path) -> Result<Vec<Message>, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_external_name, split_id_prefix, SplitName};
+    use super::{SplitName, is_external_name, split_id_prefix};
 
     #[test]
     fn splits_double_dash_id_prefix() {

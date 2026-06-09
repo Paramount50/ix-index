@@ -89,13 +89,15 @@ fn foo() {
     let result = scanner.directory(dir.path()).unwrap();
 
     assert_eq!(result.files.len(), 1);
-    assert!(result
-        .files
-        .first()
-        .unwrap()
-        .path
-        .file_name()
-        .is_some_and(|name| name == std::ffi::OsStr::new("main.rs")));
+    assert!(
+        result
+            .files
+            .first()
+            .unwrap()
+            .path
+            .file_name()
+            .is_some_and(|name| name == std::ffi::OsStr::new("main.rs"))
+    );
 }
 
 #[test]

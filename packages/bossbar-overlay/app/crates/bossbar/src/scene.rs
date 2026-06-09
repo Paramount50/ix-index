@@ -88,12 +88,7 @@ mod panel {
     pub const GAP: f32 = 3.0;
     /// Flat dark-slate fill, kept slightly translucent so the desktop bleeds
     /// through like the bars. Straight (non-premultiplied) RGBA in 0..=1.
-    pub const BG: [f32; 4] = [
-        0x12 as f32 / 255.0,
-        0x0f as f32 / 255.0,
-        0x1a as f32 / 255.0,
-        0.92,
-    ];
+    pub const BG: [f32; 4] = [0x12 as f32 / 255.0, 0x0f as f32 / 255.0, 0x1a as f32 / 255.0, 0.92];
     /// Border opacity; its RGB comes from the bar color's accent.
     pub const BORDER_ALPHA: f32 = 0.95;
 }
@@ -245,7 +240,10 @@ fn title_segments(title: &str, since: Option<i64>, now_unix: i64) -> Vec<(String
     }
     if let (Some(start), false) = (since, title.is_empty()) {
         segs.push((" ".to_string(), white));
-        segs.push((format!("({})", fmt_elapsed(now_unix - start)), TIMER_GRAY));
+        segs.push((
+            format!("({})", fmt_elapsed(now_unix - start)),
+            TIMER_GRAY,
+        ));
     }
     segs
 }
@@ -350,14 +348,7 @@ fn live_progress(b: &BossBar, now_unix: i64) -> f32 {
 }
 
 /// Append one draw item's quads (bar layers, title, optional panel) to `quads`.
-fn build_item(
-    gpu: &Gpu,
-    tex: &BarTextures,
-    scale: f32,
-    now_unix: i64,
-    item: &DrawItem<'_>,
-    quads: &mut Vec<Quad>,
-) {
+fn build_item(gpu: &Gpu, tex: &BarTextures, scale: f32, now_unix: i64, item: &DrawItem<'_>, quads: &mut Vec<Quad>) {
     let b = item.bar;
     let bx = item.geom;
     let alpha = item.alpha;
@@ -379,10 +370,7 @@ fn build_item(
         // Bitmap glyphs are 8 source px tall, so a title row of `title_px` px
         // means a scale of `title_px / 8`.
         let glyph_scale = bx.title_px / 8.0;
-        let text_w: f32 = segments
-            .iter()
-            .map(|(t, _)| gpu.measure(t, glyph_scale))
-            .sum();
+        let text_w: f32 = segments.iter().map(|(t, _)| gpu.measure(t, glyph_scale)).sum();
         // A square avatar (when present and loaded) leads the title: lay them out
         // as one `[icon][gap]title` unit centered within the bar width, so the
         // title stays visually centered with the face beside it. The avatar fills
@@ -394,22 +382,11 @@ fn build_item(
         let row_h = title_row_h(bx.title_px, has_icon);
         let text_y = bx.title_top + (row_h - bx.title_px) * 0.5;
         let icon_side = if item.icon.is_some() { row_h } else { 0.0 };
-        let icon_gap = if item.icon.is_some() {
-            ICON_GAP * glyph_scale
-        } else {
-            0.0
-        };
+        let icon_gap = if item.icon.is_some() { ICON_GAP * glyph_scale } else { 0.0 };
         let unit_w = icon_side + icon_gap + text_w;
         let unit_left = bx.left + (bx.bar_w - unit_w) * 0.5;
         if let Some(icon) = item.icon {
-            quads.push(Quad::new(
-                icon,
-                unit_left,
-                bx.title_top,
-                icon_side,
-                icon_side,
-                tint,
-            ));
+            quads.push(Quad::new(icon, unit_left, bx.title_top, icon_side, icon_side, tint));
         }
         let tx = unit_left + icon_side + icon_gap;
         let shadow = with_alpha(SHADOW, alpha);
@@ -419,28 +396,14 @@ fn build_item(
         let mut pen = tx;
         for (text, rgb) in &segments {
             let fg = [rgb[0], rgb[1], rgb[2], alpha];
-            let _ = gpu.text(
-                text,
-                pen + shadow_off,
-                text_y + shadow_off,
-                glyph_scale,
-                shadow,
-                quads,
-            );
+            let _ = gpu.text(text, pen + shadow_off, text_y + shadow_off, glyph_scale, shadow, quads);
             let w = gpu.text(text, pen, text_y, glyph_scale, fg, quads);
             pen += w;
         }
     }
 
     // Color background, then color progress cropped to the fill.
-    quads.push(Quad::new(
-        tex.get(TexId::ColorBg(b.color)),
-        bx.left,
-        bx.track_y,
-        bx.bar_w,
-        bx.bar_h,
-        tint,
-    ));
+    quads.push(Quad::new(tex.get(TexId::ColorBg(b.color)), bx.left, bx.track_y, bx.bar_w, bx.bar_h, tint));
     if progress > 0.0 {
         quads.push(Quad::sub(
             tex.get(TexId::ColorFill(b.color)),
@@ -454,14 +417,7 @@ fn build_item(
     }
     // Optional notch overlay on top, same draw order.
     if let Some(n) = b.overlay.notch() {
-        quads.push(Quad::new(
-            tex.get(TexId::NotchBg(n)),
-            bx.left,
-            bx.track_y,
-            bx.bar_w,
-            bx.bar_h,
-            tint,
-        ));
+        quads.push(Quad::new(tex.get(TexId::NotchBg(n)), bx.left, bx.track_y, bx.bar_w, bx.bar_h, tint));
         if progress > 0.0 {
             quads.push(Quad::sub(
                 tex.get(TexId::NotchFill(n)),
@@ -495,14 +451,7 @@ fn build_item(
         let inner_w = (p.w - 2.0 * p.border).max(0.0);
         let inner_y = p.y + p.border;
         let inner_h = (revealed_h - 2.0 * p.border).max(0.0);
-        quads.push(Quad::new(
-            white,
-            inner_x,
-            inner_y,
-            inner_w,
-            inner_h,
-            panel::BG,
-        ));
+        quads.push(Quad::new(white, inner_x, inner_y, inner_w, inner_h, panel::BG));
 
         if p.text_alpha > 0.001 && !b.description.trim().is_empty() {
             let text_w = (p.w - 2.0 * (p.border + p.pad)).max(1.0);
@@ -516,14 +465,7 @@ fn build_item(
             let tx = inner_x + p.pad;
             for line in wrap(gpu, &b.description, text_w, glyph_scale) {
                 if !line.is_empty() {
-                    let _ = gpu.text(
-                        &line,
-                        tx + shadow_off,
-                        ty + shadow_off,
-                        glyph_scale,
-                        shadow,
-                        quads,
-                    );
+                    let _ = gpu.text(&line, tx + shadow_off, ty + shadow_off, glyph_scale, shadow, quads);
                     let _ = gpu.text(&line, tx, ty, glyph_scale, fg, quads);
                 }
                 ty += p.line_px;
@@ -645,10 +587,7 @@ pub fn bar_window_px(scale: f32, title_w: f32, has_icon: bool) -> (u32, u32) {
     // Hold whichever is wider, the bar sprite or the title text; both trail the
     // one-pixel shadow down-right, so the shadow margin covers the right edge too.
     let content_w = bar_w.max(title_w) + shadow;
-    (
-        content_w.ceil() as u32,
-        (title + bar_h + shadow).ceil() as u32,
-    )
+    (content_w.ceil() as u32, (title + bar_h + shadow).ceil() as u32)
 }
 
 /// Physical-pixel window size for `bar` with its hover panel open: the collapsed
@@ -656,11 +595,7 @@ pub fn bar_window_px(scale: f32, title_w: f32, has_icon: bool) -> (u32, u32) {
 /// size when the bar has no description. The overlay grows the window to this on
 /// hover so the panel has room to unfold.
 pub fn expanded_window_px(gpu: &Gpu, bar: &BossBar, scale: f32, now_unix: i64) -> (u32, u32) {
-    let (cw, ch) = bar_window_px(
-        scale,
-        title_extent_px(bar, scale, now_unix),
-        !bar.icon.is_empty(),
-    );
+    let (cw, ch) = bar_window_px(scale, title_extent_px(bar, scale, now_unix), !bar.icon.is_empty());
     match panel_size(gpu, &bar.description, scale) {
         Some((panel_w, panel_h)) => {
             let gap = panel::GAP * scale.max(1.0);
@@ -724,8 +659,7 @@ pub fn build_one(
     // plus its grow/breathe headroom. Any extra window height below that is the
     // panel's drop area, so the bar stays put as the panel unfolds. Only the
     // height is read here, so the title width need not be exact.
-    let collapsed_h =
-        bar_window_px(scale, title_extent_px(bar, scale, now_unix), has_icon).1 as f32;
+    let collapsed_h = bar_window_px(scale, title_extent_px(bar, scale, now_unix), has_icon).1 as f32;
     let top_region_h = collapsed_h.min(height as f32);
 
     // Center the content (plus its shadow offset) in the top region so growth on
@@ -839,11 +773,7 @@ pub fn build_all(
         let item = DrawItem {
             bar,
             geom,
-            alpha: if Some(bar.id) == highlight {
-                1.0
-            } else {
-                opacity
-            },
+            alpha: if Some(bar.id) == highlight { 1.0 } else { opacity },
             panel,
             icon,
         };
@@ -965,10 +895,7 @@ mod tests {
         let segs = title_segments("feat(antithesis): durability", Some(1000), 1125);
         // type, sep, scope, sep, subject, sep, counter.
         let texts: Vec<&str> = segs.iter().map(|(t, _)| t.as_str()).collect();
-        assert_eq!(
-            texts,
-            ["feat", " ", "antithesis", " ", "durability", " ", "(2:05)"]
-        );
+        assert_eq!(texts, ["feat", " ", "antithesis", " ", "durability", " ", "(2:05)"]);
         assert_eq!(segs[0].1, label_rgb("feat"));
         assert_eq!(segs[2].1, label_rgb("antithesis"));
         assert_eq!(segs.last().unwrap().1, TIMER_GRAY);
@@ -1035,10 +962,7 @@ mod tests {
                 "test title should exceed the bar at scale {scale}: {text_w} vs {bar_w}",
             );
             let bar_only = bar_window_px(scale, 0.0, false).0 as f32;
-            assert!(
-                width > bar_only,
-                "window must grow past bar-only at scale {scale}"
-            );
+            assert!(width > bar_only, "window must grow past bar-only at scale {scale}");
 
             // Reproduce build_one's widest layout (hover = breathe = 1 → MAX_SCALE).
             let shadow = scale;
@@ -1047,10 +971,7 @@ mod tests {
             let tx = left + (bar_w - text_w) * 0.5;
             // Drawn extent runs from the foreground left edge to the shadow's right
             // edge (one scaled pixel past the glyphs). Both must lie in [0, width].
-            assert!(
-                tx >= -0.01,
-                "title left edge clipped at scale {scale}: tx={tx}"
-            );
+            assert!(tx >= -0.01, "title left edge clipped at scale {scale}: tx={tx}");
             let right = tx + text_w + shadow;
             assert!(
                 right <= width + 0.01,
@@ -1078,9 +999,7 @@ mod tests {
                 height,
                 |gpu| {
                     let tex = register(gpu);
-                    build_one(
-                        gpu, &tex, None, scale, width, height, now, &bar, hover, breathe,
-                    )
+                    build_one(gpu, &tex, None, scale, width, height, now, &bar, hover, breathe)
                 },
                 &out,
             )

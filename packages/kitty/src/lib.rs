@@ -32,8 +32,8 @@
 use std::fmt::Write;
 use std::sync::OnceLock;
 
-use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 
 /// Start of an Application Programming Command carrying a graphics command.
 const APC_START: &str = "\x1b_G";
@@ -284,8 +284,8 @@ fn encode_chunks(control: &str, payload: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        diacritics, place, placeholder_row, transmit, transmit_virtual, Image, Placement,
-        APC_START, MAX_CHUNK, PLACEHOLDER, ST, STANDARD,
+        APC_START, Image, MAX_CHUNK, PLACEHOLDER, Placement, ST, STANDARD, diacritics, place,
+        placeholder_row, transmit, transmit_virtual,
     };
     use base64::Engine;
 

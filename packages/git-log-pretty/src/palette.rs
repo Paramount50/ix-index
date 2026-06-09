@@ -9,7 +9,7 @@ use std::hash::{Hash, Hasher};
 
 use anstyle::{Color, RgbColor, Style};
 
-pub use terminal_theme::{detect, Theme};
+pub use terminal_theme::{Theme, detect};
 
 /// Map a [`Theme`] to the [`devicons`] theme so file icons pick readable glyph
 /// colors against the detected background.

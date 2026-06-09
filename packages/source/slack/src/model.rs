@@ -76,11 +76,7 @@ impl UserProfile {
             return Some(display);
         }
         let real = self.real_name.trim();
-        if real.is_empty() {
-            None
-        } else {
-            Some(real)
-        }
+        if real.is_empty() { None } else { Some(real) }
     }
 }
 
@@ -191,11 +187,7 @@ impl FileRef {
             return name;
         }
         let title = self.title.trim();
-        if title.is_empty() {
-            "file"
-        } else {
-            title
-        }
+        if title.is_empty() { "file" } else { title }
     }
 
     /// The best type string: `pretty_type`, else `filetype`. May be empty.

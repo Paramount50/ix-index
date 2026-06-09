@@ -1,11 +1,11 @@
 //! The typed per-prompt record and its projection to a search [`Document`].
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use snafu::ResultExt as _;
-use source_meta::{keys, Document};
+use source_meta::{Document, keys};
 
-use crate::error::{MetadataSnafu, Result};
 use crate::SOURCE_TAG;
+use crate::error::{MetadataSnafu, Result};
 
 /// One Codex prompt entry: the text the user submitted plus its filter tags.
 ///

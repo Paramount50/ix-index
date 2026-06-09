@@ -3,7 +3,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::{
     engine::{ThreeWayNodes, ThreeWayTrees},
-    items::{get_name, reconcile_single, IndexedNode, Resolved},
+    items::{IndexedNode, Resolved, get_name, reconcile_single},
 };
 
 /// Name-map lookups for base and right items.

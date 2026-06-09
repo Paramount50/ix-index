@@ -3,7 +3,7 @@ mod integration;
 use ast_merge_ast::tree;
 use rustc_hash::FxHashSet;
 
-use crate::{compute, matching::Pair, traverse::node_height, Map};
+use crate::{Map, compute, matching::Pair, traverse::node_height};
 
 fn get_rust_language() -> tree_sitter::Language {
     tree_sitter_rust::LANGUAGE.into()

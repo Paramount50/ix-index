@@ -177,8 +177,8 @@ pub fn sessions_file() -> PathBuf {
 
 /// Serde adapter that stores a byte vector as a base64 string on the wire.
 mod b64 {
-    use base64::engine::general_purpose::STANDARD;
     use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
     use serde::{Deserialize as _, Deserializer, Serializer};
 
     pub fn serialize<S: Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {

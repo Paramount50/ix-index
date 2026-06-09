@@ -6,9 +6,9 @@
 //! in a tempdir rather than the git-branch store so the test needs no repo and
 //! leaves nothing behind.
 
-use indexbench::compare::{compare, CompareConfig, Verdict};
+use indexbench::compare::{CompareConfig, Verdict, compare};
 use indexbench::report::human_table;
-use indexbench::run::{execute, GitContext};
+use indexbench::run::{GitContext, execute};
 use indexbench::store::{HistoryStore, LocalDirStore};
 use indexbench::suite::{BenchSuite, MacroBench, MicroBench};
 

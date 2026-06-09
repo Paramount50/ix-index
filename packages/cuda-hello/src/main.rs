@@ -10,7 +10,7 @@
 //! needs an NVIDIA GPU and driver, because that is where the kernel executes.
 
 use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
-use cuda_device::{cuda_module, kernel, thread, DisjointSlice};
+use cuda_device::{DisjointSlice, cuda_module, kernel, thread};
 
 /// How many threads to launch, one per output element.
 const THREADS: usize = 256;

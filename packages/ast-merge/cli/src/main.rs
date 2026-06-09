@@ -82,7 +82,7 @@ impl From<Result<(), CliError>> for CliResult {
 /// `ix` platform's `service_init::init`, which this standalone tool does not
 /// depend on.
 fn init_tracing() {
-    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::registry()

@@ -4,8 +4,8 @@
 //! DHT, no bootstrap nodes. `CLAUDE_STORIES_PEERS` overrides it with an explicit
 //! list for testing or off-tailnet use.
 
-use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
+use color_eyre::eyre::{Context, eyre};
 use serde::Deserialize;
 
 /// Where to find peers.

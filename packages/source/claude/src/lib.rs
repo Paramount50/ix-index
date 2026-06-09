@@ -246,9 +246,11 @@ mod tests {
 
         let found = collect(temp.path());
         assert_eq!(found.len(), 2, "only .jsonl files, collected recursively");
-        assert!(found
-            .iter()
-            .all(|path| path.extension().is_some_and(|ext| ext == "jsonl")));
+        assert!(
+            found
+                .iter()
+                .all(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        );
     }
 
     #[test]

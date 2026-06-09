@@ -5,7 +5,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     jaccard::multiset_sorted,
-    lsh::{estimated_jaccard, minhash_signature, LshEntry, LshIndex, NodeLocation},
+    lsh::{LshEntry, LshIndex, NodeLocation, estimated_jaccard, minhash_signature},
     types::{CloneGroup, Fragment, Kind},
 };
 

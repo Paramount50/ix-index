@@ -192,15 +192,7 @@ pub fn build(
     let mut quads = Vec::new();
     // Two page sprites: left mirrored, right normal, sharing the centre spine.
     quads.push(Quad::sub(tex.book, ox, oy, pw, ph, page_uv(true), WHITE));
-    quads.push(Quad::sub(
-        tex.book,
-        ox + pw,
-        oy,
-        pw,
-        ph,
-        page_uv(false),
-        WHITE,
-    ));
+    quads.push(Quad::sub(tex.book, ox + pw, oy, pw, ph, page_uv(false), WHITE));
 
     page_content(gpu, &mut quads, book, spread, ox, oy, scale, true);
     page_content(gpu, &mut quads, book, spread + 1, ox + pw, oy, scale, false);
@@ -209,22 +201,10 @@ pub fn build(
     // the highlighted sprite. The whole-book transform below then carries them
     // along with the spread.
     if show_back {
-        push_arrow(
-            &mut quads,
-            tex.bwd,
-            tex.bwd_hi,
-            back_arrow_rect(scale, win_w, win_h),
-            hover.back,
-        );
+        push_arrow(&mut quads, tex.bwd, tex.bwd_hi, back_arrow_rect(scale, win_w, win_h), hover.back);
     }
     if show_fwd {
-        push_arrow(
-            &mut quads,
-            tex.fwd,
-            tex.fwd_hi,
-            fwd_arrow_rect(scale, win_w, win_h),
-            hover.fwd,
-        );
+        push_arrow(&mut quads, tex.fwd, tex.fwd_hi, fwd_arrow_rect(scale, win_w, win_h), hover.fwd);
     }
 
     // Grow the entire spread about the window centre (where the resting spread is
@@ -256,14 +236,7 @@ fn push_arrow(
         quads.push(Quad::new(base, rx, ry, nw, nh, [1.0, 1.0, 1.0, 1.0 - fade]));
     }
     if fade > 0.0 {
-        quads.push(Quad::new(
-            highlighted,
-            rx,
-            ry,
-            nw,
-            nh,
-            [1.0, 1.0, 1.0, fade],
-        ));
+        quads.push(Quad::new(highlighted, rx, ry, nw, nh, [1.0, 1.0, 1.0, fade]));
     }
 }
 
@@ -286,14 +259,7 @@ fn page_content(
 
     let header = format!("Page {} of {}", idx + 1, book.page_count());
     let hw = gpu.measure(&header, s);
-    gpu.text(
-        &header,
-        tx + (tw - hw) * 0.5,
-        oy + HEADER_TOP * s,
-        s,
-        INK,
-        quads,
-    );
+    gpu.text(&header, tx + (tw - hw) * 0.5, oy + HEADER_TOP * s, s, INK, quads);
 
     let mut y = oy + BODY_TOP * s;
     for line in wrap(gpu, book.page(idx), tw, s) {

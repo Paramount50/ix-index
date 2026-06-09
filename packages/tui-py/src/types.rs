@@ -1,5 +1,5 @@
-use pyo3::prelude::*;
 use pyo3::IntoPyObject;
+use pyo3::prelude::*;
 
 use tui::Color;
 

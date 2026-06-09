@@ -59,9 +59,7 @@ pub fn play(kind: Kind) {
         Err(e) => {
             static WARN: Once = Once::new();
             WARN.call_once(|| {
-                eprintln!(
-                    "xp-orb-overlay: pop sound disabled ({e}); `minecraft-sound` not on PATH"
-                );
+                eprintln!("xp-orb-overlay: pop sound disabled ({e}); `minecraft-sound` not on PATH");
             });
         }
     }

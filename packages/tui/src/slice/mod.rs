@@ -1,6 +1,6 @@
 mod core;
 
-pub use core::{slice_2d, ColRange, RowRange};
+pub use core::{ColRange, RowRange, slice_2d};
 
 #[cfg(test)]
 mod tests;

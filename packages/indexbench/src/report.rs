@@ -92,7 +92,7 @@ fn truncate(value: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compare::{compare, CompareConfig};
+    use crate::compare::{CompareConfig, compare};
     use crate::schema::{Metric, Run};
 
     fn run_with(metrics: Vec<Metric>) -> Run {

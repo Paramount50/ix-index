@@ -1,4 +1,4 @@
-use tango_bench::{benchmark_fn, tango_benchmarks, tango_main, IntoBenchmarks};
+use tango_bench::{IntoBenchmarks, benchmark_fn, tango_benchmarks, tango_main};
 
 fn benchmarks() -> impl IntoBenchmarks {
     [benchmark_fn("greeting", |b| {

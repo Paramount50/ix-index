@@ -1,6 +1,6 @@
 use std::{io::Write as _, path::PathBuf};
 
-use clone_detect::{instances, DetectConfig, DetectionResult};
+use clone_detect::{DetectConfig, DetectionResult, instances};
 use clone_scanner::Config;
 use tempfile::TempDir;
 

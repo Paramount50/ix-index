@@ -6,7 +6,7 @@ use repo_walker::{FileScanner, WalkOptions};
 use snafu::ResultExt;
 use std::ops::Bound;
 use std::path::Path;
-use tantivy::{doc, query::RangeQuery, IndexWriter, Term};
+use tantivy::{IndexWriter, Term, doc, query::RangeQuery};
 
 const MAX_FILE_SIZE: u64 = 1_048_576;
 const CHUNK_SIZE: usize = 500;

@@ -11,7 +11,7 @@ use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use dashboard_core::{serve_hub, ExecView, Hub, Pane, ProducerSnapshot, Publisher, RecordingStore};
+use dashboard_core::{ExecView, Hub, Pane, ProducerSnapshot, Publisher, RecordingStore, serve_hub};
 use loro::LoroDoc;
 
 fn exec_pane() -> Pane {

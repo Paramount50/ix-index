@@ -676,14 +676,18 @@ mod tests {
             2,
             "every measured metric surfaces"
         );
-        assert!(comparison
-            .metrics
-            .iter()
-            .all(|m| m.verdict == Verdict::NoBaseline));
-        assert!(comparison
-            .metrics
-            .iter()
-            .all(|m| m.baseline_value.is_none()));
+        assert!(
+            comparison
+                .metrics
+                .iter()
+                .all(|m| m.verdict == Verdict::NoBaseline)
+        );
+        assert!(
+            comparison
+                .metrics
+                .iter()
+                .all(|m| m.baseline_value.is_none())
+        );
         let allocations = comparison
             .metrics
             .iter()

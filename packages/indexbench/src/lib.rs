@@ -36,4 +36,4 @@ pub mod store;
 pub mod suite;
 
 pub use error::{Error, Result};
-pub use schema::{machine_id, Metric, Run};
+pub use schema::{Metric, Run, machine_id};

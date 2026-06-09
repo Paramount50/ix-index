@@ -7,16 +7,16 @@
 //! and read request to it as an [`EngineRequest`]. Replies ride back on the
 //! per-request oneshot channels, so the async side never touches the terminal.
 
-use std::sync::mpsc::{Receiver, Sender, SyncSender};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, Sender, SyncSender};
 
 use parking_lot::RwLock as SyncRwLock;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use crate::Error;
 use crate::error::Result;
 use crate::types::{CursorPos, CursorShape, StyledCell};
-use crate::Error;
 
 /// A request to the VT engine thread.
 ///

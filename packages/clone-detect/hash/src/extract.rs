@@ -1,7 +1,7 @@
 use std::hash::{Hash, Hasher};
 
-pub use ast_merge_ast::compute;
 use ast_merge_ast::Tree;
+pub use ast_merge_ast::compute;
 use rustc_hash::FxHasher;
 
 use crate::{

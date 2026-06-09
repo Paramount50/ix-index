@@ -19,7 +19,7 @@ mod types;
 
 pub use ephemeral::{EphemeralSearch, RankResult};
 pub use error::{Error, Result};
-pub use repo_walker::{is_indexable_file, FileScanner, GitignoreFilter, WalkOptions};
+pub use repo_walker::{FileScanner, GitignoreFilter, WalkOptions, is_indexable_file};
 pub use types::{IndexStats, SearchResult};
 
 use snafu::ResultExt;

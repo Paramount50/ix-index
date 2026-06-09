@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 
 use serde::Serialize;
 
-use crate::causes::{category, Cause};
+use crate::causes::{Cause, category};
 
 /// Maximum number of changed-check bullets to render in the `<details>` list.
 /// A PR touching a shared input rebuilds thousands of checks (on ix, 3817 of

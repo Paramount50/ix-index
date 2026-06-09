@@ -73,11 +73,7 @@ fn initials(name: &str) -> String {
             .to_uppercase(),
         [] => String::new(),
     };
-    if two.is_empty() {
-        "??".to_owned()
-    } else {
-        two
-    }
+    if two.is_empty() { "??".to_owned() } else { two }
 }
 
 /// A peer-supplied URL is safe to emit as a hyperlink only if it is plain

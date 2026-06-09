@@ -3,7 +3,7 @@ use std::{io::Write as _, path::PathBuf};
 use clone_scanner::Config;
 use tempfile::TempDir;
 
-use crate::{instances, DetectConfig, DetectionResult};
+use crate::{DetectConfig, DetectionResult, instances};
 
 pub fn create_temp_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
     let path = dir.path().join(name);

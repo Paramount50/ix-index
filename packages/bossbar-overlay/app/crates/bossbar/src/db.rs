@@ -243,10 +243,7 @@ mod tests {
         assert!(bars[0].description.contains("End Crystals"));
         assert_eq!(bars[1].description, "", "the Wither seed has no panel");
         // The Build seed stamps `since`, so it shows a live counter from launch.
-        assert!(
-            bars[2].since.is_some(),
-            "Build seed should have a live counter"
-        );
+        assert!(bars[2].since.is_some(), "Build seed should have a live counter");
         // The Ender Dragon seed carries a click URL; the others none.
         assert!(bars[0].url.contains("minecraft.wiki"));
         assert_eq!(bars[1].url, "");
