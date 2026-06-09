@@ -3133,6 +3133,54 @@ let
     libs = {r["name"] for r in rows if r["where"] == "library"}
     assert "playwright" in libs, ("playwright not listed as a bundled library", sorted(libs))
 
+    # shot() cost controls (no browser needed -- _encode_shot is a pure helper):
+    # a model-bound shot caps its longest edge and re-encodes, so a full-res 2x
+    # capture cannot flood context. Build a busy 1746x2406 PNG (the size the
+    # friction report measured) and check each path.
+    import io as _io
+    import os as _os
+
+    from PIL import Image as _Image
+
+    _src = _Image.frombytes("RGB", (1746, 2406), _os.urandom(1746 * 2406 * 3))
+    _buf = _io.BytesIO()
+    _src.save(_buf, format="PNG")
+    _raw = _buf.getvalue()
+
+    # Default model path: JPEG, longest edge -> _SHOT_MAX_DIM (1024).
+    _data, _mime = browser._encode_shot(
+        _raw, max_dim=browser._SHOT_MAX_DIM, fmt="jpeg", quality=72
+    )
+    assert _mime == "image/jpeg", _mime
+    assert max(_Image.open(_io.BytesIO(_data)).size) == browser._SHOT_MAX_DIM, (
+        _Image.open(_io.BytesIO(_data)).size
+    )
+    # A busy screenshot as JPEG is far smaller than the raw full-res PNG.
+    assert len(_data) < len(_raw) // 10, (len(_data), len(_raw))
+
+    # PNG path also downscales the longest edge.
+    _pdata, _pmime = browser._encode_shot(_raw, max_dim=1024, fmt="png", quality=72)
+    assert _pmime == "image/png", _pmime
+    assert max(_Image.open(_io.BytesIO(_pdata)).size) == 1024
+
+    # max_dim=0 + png is an exact passthrough (no needless re-encode).
+    _ndata, _nmime = browser._encode_shot(_raw, max_dim=0, fmt="png", quality=72)
+    assert _ndata is _raw and _nmime == "image/png", (_nmime, _ndata is _raw)
+
+    # Never raises: junk bytes come back untouched rather than blowing up a shot.
+    _gdata, _gmime = browser._encode_shot(b"not an image", max_dim=1024, fmt="jpeg", quality=72)
+    assert _gdata == b"not an image" and _gmime == "image/png", (_gmime, _gdata)
+
+    # shot() validates its enum-ish knobs up front.
+    import asyncio as _aio
+    for _bad in (dict(format="webp"), dict(scale="2x")):
+        try:
+            _aio.run(browser.shot(**_bad))
+        except ValueError:
+            pass
+        else:
+            raise SystemExit(f"shot({_bad}) should raise ValueError")
+
     print("browser-ok", browser.__version__)
   '';
   browserSmoke =
