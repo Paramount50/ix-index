@@ -355,6 +355,26 @@ let
         cp -r ${worktreePythonSource}/worktree/. "$site/"
       ''
   );
+  # Example task-dependency graphs generated in Python and stored in SQLite:
+  # `import tasks`, then `tasks.seed("tasks.sqlite")` writes a ~100-node DAG and
+  # `tasks.load(...)` / `tasks.frame(...)` read it back. The task-graph demo site
+  # reads the same SQLite file. Pure stdlib (sqlite3) + lazy polars.
+  tasksPythonSource = builtins.path {
+    name = "ix-mcp-tasks-python-source";
+    path = ./src/tasks;
+  };
+  tasksModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-mcp-tasks-python-module"
+      {
+        strictDeps = true;
+        meta.description = "Task-graph SQLite helper bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/tasks"
+        mkdir -p "$site"
+        cp -r ${tasksPythonSource}/tasks/. "$site/"
+      ''
+  );
   screenPythonSource = builtins.path {
     name = "ix-mcp-screen-python-source";
     path = ./src/screen;
@@ -564,6 +584,7 @@ let
       shModule
       worktreeModule
       browserModule
+      tasksModule
     ]
     ++ darwinExtraPackages ps
   );
