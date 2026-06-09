@@ -185,6 +185,7 @@ numpy = "0.28"
 object_store = { version = "0.13", features = ["aws"] }
 parking_lot = "0.12"
 parquet = { version = "59", features = ["arrow"] }
+percent-encoding = "2"
 progress-style = { path = "packages/progress-style" }
 pty-process = { version = "0.5", features = ["async"] }
 pyo3 = { version = "0.28", features = ["abi3-py311"] }

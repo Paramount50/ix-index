@@ -10,6 +10,7 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use reqwest::{Client as HttpClient, StatusCode};
 use serde::Deserialize;
 use snafu::{OptionExt as _, ResultExt as _, Snafu};
@@ -31,6 +32,24 @@ const LIST_PAGE_SIZE: u32 = 100;
 
 /// Environment variable holding the API key.
 pub const API_KEY_ENV: &str = "MXBAI_API_KEY";
+
+/// Bytes percent-encoded when an external id is spliced into a URL path: the
+/// url crate's path-segment set (controls, space, and the URL delimiters) plus
+/// `/` and `%`. External ids may contain `/` (the API supports path-shaped ids
+/// like `github:org/repo`); unencoded, such an id splits the route and the
+/// API answers 404 for a file that exists.
+const PATH_SEGMENT: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'<')
+    .add(b'>')
+    .add(b'`')
+    .add(b'#')
+    .add(b'?')
+    .add(b'{')
+    .add(b'}')
+    .add(b'/')
+    .add(b'%');
 
 /// Retries for a request that returns a retryable status (`429 Too Many
 /// Requests` or any `5xx`). The fleet runs one indexer per host against a single
@@ -465,7 +484,8 @@ impl Client {
     /// # Errors
     /// Returns an error if the delete request fails.
     pub async fn delete_file(&self, store: &str, external_id: &str) -> Result<()> {
-        let delete_url = self.url(&format!("/v1/stores/{store}/files/{external_id}"));
+        let id = utf8_percent_encode(external_id, PATH_SEGMENT);
+        let delete_url = self.url(&format!("/v1/stores/{store}/files/{id}"));
         let resp = self
             .send_retrying(|| Ok(self.http.delete(delete_url.as_str())))
             .await?;
@@ -667,7 +687,12 @@ struct ListRequest<'a> {
     limit: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     after: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    // The list endpoint takes its filter as `metadata_filter`, unlike
+    // search/grep/question-answering, which take `filters`. The API silently
+    // drops unknown body keys, so a filter sent as `filters` here returns the
+    // whole store as if no filter was given (verified against the live API,
+    // 2026-06-09).
+    #[serde(rename = "metadata_filter", skip_serializing_if = "Option::is_none")]
     filters: Option<&'a filter::Filter>,
 }
 
@@ -807,9 +832,31 @@ mod tests {
     use axum::response::IntoResponse;
 
     use super::{
-        BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL, Error, MAX_RETRIES,
-        RawChunk, Rerank, backoff,
+        BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL, Error, ListRequest,
+        MAX_RETRIES, RawChunk, Rerank, backoff,
     };
+    use crate::Filter;
+
+    #[test]
+    fn list_request_sends_its_filter_as_metadata_filter() {
+        // The list endpoint reads `metadata_filter`, not `filters`, and the API
+        // silently ignores unknown keys: under the wrong name every "scoped"
+        // listing was the whole store, which turned a per-source replace into
+        // deletes of other sources' records. Pin the wire key.
+        let filter = Filter::eq("source", "code");
+        let request = ListRequest {
+            limit: 100,
+            after: None,
+            filters: Some(&filter),
+        };
+        assert_eq!(
+            serde_json::to_value(&request).expect("serialize"),
+            serde_json::json!({
+                "limit": 100,
+                "metadata_filter": { "key": "source", "operator": "eq", "value": "code" }
+            })
+        );
+    }
 
     #[test]
     fn rerank_serializes_as_bool_or_object() {
@@ -925,6 +972,42 @@ mod tests {
             base_url: format!("http://{addr}"),
             calls,
         }
+    }
+
+    #[tokio::test]
+    async fn delete_file_sends_a_slashed_id_as_one_path_segment() {
+        // An external id may contain `/` (e.g. `github:org/repo`). Unencoded it
+        // splits the path and the API 404s; this routes through a real router,
+        // so a regression fails to match the `{file}` segment at all.
+        let captured: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+        let app = Router::new().route(
+            "/v1/stores/{store}/files/{file}",
+            axum::routing::delete({
+                let captured = Arc::clone(&captured);
+                move |axum::extract::Path((_store, file)): axum::extract::Path<(String, String)>| {
+                    *captured.lock().expect("lock") = Some(file);
+                    async { (StatusCode::OK, "{}") }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        client
+            .delete_file("s", "github:indexable-inc/index")
+            .await
+            .expect("delete routes as one segment");
+        assert_eq!(
+            captured.lock().expect("lock").as_deref(),
+            Some("github:indexable-inc/index"),
+            "the router must decode the segment back to the original id"
+        );
     }
 
     #[tokio::test]

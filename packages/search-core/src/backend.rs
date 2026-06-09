@@ -111,6 +111,11 @@ pub struct StoredRecord {
     /// The `content_hash` stored in its metadata, when present. Absent means the
     /// record predates content-hash tracking and must be treated as changed.
     pub content_hash: Option<String>,
+    /// The `source` stored in its metadata, when present. A caller that listed
+    /// with a `source == X` filter can cross-check it: a record claiming
+    /// another source (or none) means the backend did not apply the scope, and
+    /// anything derived from the listing — deletes above all — must not run.
+    pub source: Option<String>,
 }
 
 /// A vector store that holds documents and answers searches.
@@ -313,6 +318,7 @@ impl Store for MemoryStore {
             .map(|stored| StoredRecord {
                 external_id: stored.document.external_id.clone(),
                 content_hash: Some(stored.document.content_hash.clone()),
+                source: Some(stored.source.as_str().to_owned()),
             })
             .collect();
         drop(inner);

@@ -4,8 +4,10 @@
 //! Records are addressed by a source-defined `external_id`, so change detection
 //! compares each document's `content_hash` against the value stored under that
 //! id: upload the new or changed, skip the unchanged. Listing is scoped with a
-//! `source == X` filter, so a reconcile never reads or touches another source's
-//! records.
+//! `source == X` filter, and the scope is verified against each returned
+//! record's own `source` before anything acts on the listing — a backend that
+//! drops the filter aborts the pass instead of feeding a store-wide delete set
+//! into [`MixedbreadReconciler::replace`].
 //!
 //! This is the write half of the corpus, paired with `sink-parquet`. It is built
 //! on `search-core`'s [`Store`] abstraction (so it works against the production
@@ -26,7 +28,7 @@ use snafu::ResultExt as _;
 use source_meta::{Document, Reconciler, Source, SourceAdapter, keys};
 
 pub use crate::error::Error;
-use crate::error::{AdapterSnafu, Result, StoreSnafu};
+use crate::error::{AdapterSnafu, Result, ScopeLeakSnafu, StoreSnafu};
 
 /// Maximum concurrent uploads in flight.
 const UPLOAD_CONCURRENCY: usize = 16;
@@ -129,11 +131,30 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
             .await
             .context(StoreSnafu)?;
         let filter = source_filter(source);
-        let remote: HashMap<String, Option<String>> = self
+        let records = self
             .store
             .list_records(self.name, Some(&filter))
             .await
-            .context(StoreSnafu)?
+            .context(StoreSnafu)?;
+
+        // Trust but verify the scope before anything derives from the listing.
+        // A backend that drops the filter hands back the whole store, and a
+        // replace pass would then "delete" every other source's records (it
+        // happened: the API renamed the list filter parameter and ignored the
+        // old name). Refusing here turns that into a loud no-op instead.
+        let mut foreign = records
+            .iter()
+            .filter(|record| record.source.as_deref() != Some(source.as_str()));
+        if let Some(example) = foreign.next() {
+            return ScopeLeakSnafu {
+                scope: source.as_str().to_owned(),
+                count: foreign.count() + 1,
+                example: example.external_id.clone(),
+            }
+            .fail();
+        }
+
+        let remote: HashMap<String, Option<String>> = records
             .into_iter()
             .map(|record| (record.external_id, record.content_hash))
             .collect();
@@ -518,6 +539,106 @@ mod tests {
             "an empty fold deletes the source's records"
         );
         assert_eq!(store.len(), 1, "only the other source's record remains");
+    }
+
+    /// A store whose record listing drops the requested filter, standing in for
+    /// a backend that silently ignores an unrecognized filter parameter (the
+    /// production API did exactly this when the parameter was misnamed).
+    struct UnscopedStore(MemoryStore);
+
+    impl search_core::Store for UnscopedStore {
+        async fn ensure_store(&self, name: &str) -> search_core::Result<()> {
+            self.0.ensure_store(name).await
+        }
+        async fn list_external_ids(
+            &self,
+            store: &str,
+            _filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<std::collections::HashSet<String>> {
+            self.0.list_external_ids(store, None).await
+        }
+        async fn list_records(
+            &self,
+            store: &str,
+            _filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<Vec<search_core::StoredRecord>> {
+            self.0.list_records(store, None).await
+        }
+        async fn upload(&self, store: &str, document: Document) -> search_core::Result<()> {
+            self.0.upload(store, document).await
+        }
+        async fn delete(&self, store: &str, external_id: &str) -> search_core::Result<()> {
+            self.0.delete(store, external_id).await
+        }
+        async fn search(
+            &self,
+            stores: &[String],
+            query: &str,
+            top_k: usize,
+            options: search_core::SearchOptions,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<Vec<search_core::SearchHit>> {
+            self.0.search(stores, query, top_k, options, filters).await
+        }
+        async fn grep(
+            &self,
+            stores: &[String],
+            pattern: &str,
+            top_k: usize,
+            options: search_core::GrepOptions,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<Vec<search_core::SearchHit>> {
+            self.0.grep(stores, pattern, top_k, options, filters).await
+        }
+        async fn ask(
+            &self,
+            stores: &[String],
+            query: &str,
+            top_k: usize,
+            options: search_core::SearchOptions,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<search_core::Answer> {
+            self.0.ask(stores, query, top_k, options, filters).await
+        }
+        async fn store_status(&self, store: &str) -> search_core::Result<search_core::StoreStatus> {
+            self.0.store_status(store).await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_listing_that_leaks_other_sources_aborts_before_any_delete() {
+        // Seed two sources through the well-behaved store, then wrap it so
+        // listings come back unscoped, as they did from the production API.
+        let memory = MemoryStore::new();
+        reconciler(&memory, "s")
+            .reconcile(&Source::new("linear"), &[linear_doc("A", "a")])
+            .await
+            .expect("seed linear");
+        let mut other = linear_doc("O", "o");
+        other.meta_json["source"] = serde_json::json!("other");
+        reconciler(&memory, "s")
+            .reconcile(&Source::new("other"), std::slice::from_ref(&other))
+            .await
+            .expect("seed other");
+
+        let store = UnscopedStore(memory);
+        let err = MixedbreadReconciler {
+            store: &store,
+            name: "s",
+            index_timeout: Duration::from_secs(1),
+        }
+        .replace(&Source::new("linear"), &[linear_doc("A", "a")])
+        .await
+        .expect_err("an unscoped listing must abort the replace");
+        assert!(
+            matches!(err, crate::Error::ScopeLeak { .. }),
+            "got {err:?}"
+        );
+        assert_eq!(
+            store.0.len(),
+            2,
+            "nothing may be uploaded or deleted off a leaked listing"
+        );
     }
 
     #[tokio::test]

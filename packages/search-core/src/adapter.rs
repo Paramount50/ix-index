@@ -134,6 +134,7 @@ impl Store for MixedbreadStore {
                         file.metadata.as_ref(),
                         source_meta::keys::CONTENT_HASH,
                     ),
+                    source: metadata_str(file.metadata.as_ref(), source_meta::keys::SOURCE),
                     external_id,
                 })
             })
