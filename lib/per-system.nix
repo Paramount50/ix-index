@@ -159,18 +159,86 @@ let
         # cwd. blast-radius consumes this on a later PR via `--timings` to
         # annotate the rebuilt-checks list with wall-clock seconds. The path is
         # relative to the runner cwd; check.yml uploads it as an artifact.
-        ^nix run $fast_build -- ...[
-          "--flake" ".#ciChecks.x86_64-linux"
-          "--eval-max-memory-size" "6144"
-          "--eval-workers" "16"
-          "--skip-cached"
-          "--no-nom"
-          "--no-link"
-          "--result-format" "json"
-          "--result-file" "check-results.json"
-          "--option" "accept-flake-config" "true"
-          "--option" "extra-experimental-features" "ca-derivations"
-        ]
+        # nix-fast-build prints "Cannot build <drv>" for a failed check but not the
+        # build's own output, so a clippy lint or a test panic surfaces only as a
+        # bare "build exited with 1" with no diagnostic to act on. Catch the
+        # failure, then replay each failed build's log via `nix log` so the actual
+        # clippy/test output lands in the CI log. The failed attrs are read from
+        # the --result-file this just wrote (one {attr,type,success,...} record
+        # per attr per phase); it is written even on failure.
+        # `try` returns false on success and the `catch` returns true, so the
+        # failure is carried in an immutable binding (nushell forbids mutating an
+        # outer `mut` from inside the catch closure).
+        let build_failed = (
+          try {
+            ^nix run $fast_build -- ...[
+              "--flake" ".#ciChecks.x86_64-linux"
+              "--eval-max-memory-size" "6144"
+              "--eval-workers" "16"
+              "--skip-cached"
+              "--no-nom"
+              "--no-link"
+              "--result-format" "json"
+              "--result-file" "check-results.json"
+              "--option" "accept-flake-config" "true"
+              "--option" "extra-experimental-features" "ca-derivations"
+            ]
+            false
+          } catch {
+            true
+          }
+        )
+
+        if ("check-results.json" | path exists) {
+          let failed = (
+            open check-results.json
+            | get results
+            | where type == "BUILD" and success == false
+          )
+          for f in $failed {
+            # GitHub Actions log group so a long clippy dump stays collapsible;
+            # harmless plain text in a local `nix run .#check`.
+            print --stderr $"::group::build log: ($f.attr)"
+            let inst = $".#ciChecks.x86_64-linux.($f.attr)"
+            # Fast path: replay the retained build log via `nix log` (works for
+            # input-addressed checks like the browser smoke test).
+            let drv = (
+              ^nix eval --raw
+                --option accept-flake-config true
+                --option extra-experimental-features ca-derivations
+                $"($inst).drvPath"
+              | complete
+            )
+            let logged = if $drv.exit_code == 0 and (($drv.stdout | str trim) | is-not-empty) {
+              ^nix log ($drv.stdout | str trim) | complete
+            } else {
+              { exit_code: 1, stdout: "" }
+            }
+            if $logged.exit_code == 0 and (($logged.stdout | str trim) | is-not-empty) {
+              print --stderr $logged.stdout
+            } else {
+              # A content-addressed build (the rust units default to CA) keeps
+              # its log under the *resolved* drv, which `nix log` cannot fetch by
+              # the original -- so re-run the one failed check with -L to stream
+              # the diagnostic (clippy lint / test output). nix does not cache
+              # failures, so this just re-attempts that single check.
+              try {
+                ^nix build ...[
+                  $inst
+                  "-L"
+                  "--no-link"
+                  "--option" "accept-flake-config" "true"
+                  "--option" "extra-experimental-features" "ca-derivations"
+                ]
+              } catch { }
+            }
+            print --stderr "::endgroup::"
+          }
+        }
+
+        if $build_failed {
+          exit 1
+        }
 
         let tmp = (mktemp --directory --tmpdir "ix-check.XXXXXX")
         let report = ($tmp | path join "flake-schema-eval.jsonl")
