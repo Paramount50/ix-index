@@ -389,6 +389,29 @@ let
         cp -r ${vmkitPythonSource}/vmkit/. "$site/"
       ''
   );
+  # Native macOS iMessage access, bundled like `screen`/`vmkit` so every session
+  # can `import imessage` on Darwin. Pure Python over the bundled sqlite3/polars
+  # (plus Foundation's NSUnarchiver to decode the archived message text): it reads
+  # the Messages and Contacts SQLite databases into polars frames and sends new
+  # messages through the Messages app over AppleScript. macOS-only; the module
+  # raises off Darwin.
+  imessagePythonSource = builtins.path {
+    name = "ix-mcp-imessage-python-source";
+    path = ./src/imessage;
+  };
+  imessageModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-mcp-imessage-python-module"
+      {
+        strictDeps = true;
+        meta.description = "Native macOS iMessage read-to-polars + send bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/imessage"
+        mkdir -p "$site"
+        cp -r ${imessagePythonSource}/imessage/. "$site/"
+      ''
+  );
+
   # The vmkit binary `vmkit` spawns. Darwin-only; referenced lazily so a Linux
   # mcp build never forces it.
   vmkitBin = ix.rustWorkspace.units.binaries."vmkit";
@@ -408,6 +431,7 @@ let
       ps.pyobjc-framework-Quartz
       screenModule
       vmkitModule
+      imessageModule
     ];
 
   # htpy: build HTML in plain Python (`div(class_="x")[ ... ]`), auto-escaping
@@ -1961,6 +1985,152 @@ let
         mkdir -p "$out"
       '';
 
+  # The imessage module: read the Messages/Contacts SQLite databases into polars
+  # and (without sending) validate the AppleScript send path. Hermetic -- it
+  # builds tiny fixture databases with the real schema subset and round-trips an
+  # archived NSAttributedString through Foundation, so the sandbox runs it.
+  imessageTestPy = pkgs.writeText "ix-mcp-imessage-test.py" ''
+
+    import os
+    import sqlite3
+    import tempfile
+    from datetime import datetime, timezone
+
+    import polars as pl
+
+    import imessage
+
+    assert imessage.CHAT_DB.endswith("Library/Messages/chat.db"), imessage.CHAT_DB
+
+    # attributedBody round-trip: archive an NSAttributedString the way macOS does,
+    # then assert our NSUnarchiver-based decoder recovers the exact text (incl.
+    # non-ASCII), and that junk/None decode to None rather than raising.
+    import Foundation
+
+    s = Foundation.NSAttributedString.alloc().initWithString_("héllo 👋 world")
+    blob = bytes(Foundation.NSArchiver.archivedDataWithRootObject_(s))
+    assert imessage._decode_attributed_body(blob) == "héllo 👋 world"
+    assert imessage._decode_attributed_body(b"not an archive") is None
+    assert imessage._decode_attributed_body(None) is None
+
+    # normalization lines up handles with address-book entries.
+    assert imessage._norm("+1 (202) 555-0123") == imessage._norm("2025550123")
+    assert imessage._norm("Me@Example.COM ") == "me@example.com"
+
+    work = tempfile.mkdtemp()
+    chat = os.path.join(work, "chat.db")
+    con = sqlite3.connect(chat)
+    con.executescript(
+        """
+        CREATE TABLE handle (ROWID INTEGER PRIMARY KEY, id TEXT);
+        CREATE TABLE chat (ROWID INTEGER PRIMARY KEY, display_name TEXT, chat_identifier TEXT, service_name TEXT);
+        CREATE TABLE message (ROWID INTEGER PRIMARY KEY, date INTEGER, text TEXT, attributedBody BLOB, is_from_me INTEGER, is_read INTEGER, service TEXT, handle_id INTEGER);
+        CREATE TABLE chat_message_join (chat_id INTEGER, message_id INTEGER);
+        CREATE TABLE message_attachment_join (message_id INTEGER, attachment_id INTEGER);
+        """
+    )
+    apple_epoch = datetime(2001, 1, 1, tzinfo=timezone.utc)
+
+    def ns(dt):
+        return int((dt - apple_epoch).total_seconds() * 1_000_000_000)
+
+    t1 = datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    t2 = datetime(2024, 1, 2, 3, 5, 5, tzinfo=timezone.utc)
+    con.execute("INSERT INTO handle VALUES (1, '+12025550123')")
+    con.execute("INSERT INTO chat VALUES (1, NULL, '+12025550123', 'iMessage')")
+    con.execute("INSERT INTO message VALUES (1, ?, 'plain text', NULL, 1, 1, 'iMessage', 1)", (ns(t1),))
+    con.execute("INSERT INTO message VALUES (2, ?, NULL, ?, 0, 0, 'iMessage', 1)", (ns(t2), blob))
+    con.execute("INSERT INTO chat_message_join VALUES (1, 1), (1, 2)")
+    con.execute("INSERT INTO message_attachment_join VALUES (2, 99)")
+    con.commit()
+    con.close()
+
+    # resolve_names defaults True; with no address book under $HOME it must degrade
+    # to name=None rather than fail.
+    df = imessage.messages(db=chat, limit=10)
+    assert df.height == 2, df
+    assert df.schema["date"] == pl.Datetime("ns", "UTC"), df.schema
+    # newest first; attributedBody is decoded into `text`.
+    assert df["rowid"].to_list() == [2, 1], df
+    assert df["text"].to_list() == ["héllo 👋 world", "plain text"], df["text"].to_list()
+    assert df["is_from_me"].to_list() == [False, True], df
+    assert df["name"].to_list() == [None, None], df
+
+    row2 = df.filter(pl.col("rowid") == 2)
+    assert row2["date"][0] == t2, (row2["date"][0], t2)
+    assert row2["n_attachments"][0] == 1, row2
+
+    # filters: from_me, contact (by handle, normalized), since, and a no-match.
+    assert imessage.messages(db=chat, from_me=True).height == 1
+    assert imessage.messages(db=chat, contact="(202) 555-0123").height == 2
+    assert imessage.messages(db=chat, contact="+19999999999").height == 0
+    since = imessage.messages(db=chat, since=t2)
+    assert since.height == 1 and since["rowid"][0] == 2, since
+    # a no-match still returns the full, typed (datetime) schema.
+    assert imessage.messages(db=chat, contact="+19999999999").schema["date"] == pl.Datetime("ns", "UTC")
+
+    chats = imessage.chats(db=chat)
+    assert chats.height == 1 and chats["n_messages"][0] == 2, chats
+    assert chats["chat_identifier"][0] == "+12025550123", chats
+    assert chats.schema["last_date"] == pl.Datetime("ns", "UTC"), chats.schema
+
+    # contacts: phones/emails aggregate into list columns under one display name.
+    ab = os.path.join(work, "ab.abcddb")
+    con = sqlite3.connect(ab)
+    con.executescript(
+        """
+        CREATE TABLE ZABCDRECORD (Z_PK INTEGER PRIMARY KEY, ZFIRSTNAME TEXT, ZLASTNAME TEXT, ZORGANIZATION TEXT, ZNICKNAME TEXT);
+        CREATE TABLE ZABCDPHONENUMBER (Z_PK INTEGER PRIMARY KEY, ZOWNER INTEGER, ZFULLNUMBER TEXT);
+        CREATE TABLE ZABCDEMAILADDRESS (Z_PK INTEGER PRIMARY KEY, ZOWNER INTEGER, ZADDRESS TEXT);
+        """
+    )
+    con.execute("INSERT INTO ZABCDRECORD VALUES (1, 'Ada', 'Lovelace', NULL, NULL)")
+    con.execute("INSERT INTO ZABCDPHONENUMBER VALUES (1, 1, '+1 (202) 555-0123')")
+    con.execute("INSERT INTO ZABCDPHONENUMBER VALUES (2, 1, '+12025550124')")
+    con.execute("INSERT INTO ZABCDEMAILADDRESS VALUES (1, 1, 'ada@x.com')")
+    con.commit()
+    con.close()
+    co = imessage.contacts(db=ab)
+    assert co.height == 1, co
+    rec = co.row(0, named=True)
+    assert rec["name"] == "Ada Lovelace", rec
+    assert set(rec["phones"]) == {"+1 (202) 555-0123", "+12025550124"}, rec
+    assert rec["emails"] == ["ada@x.com"], rec
+
+    # send: rejects an unknown service and never sends here; the script carries the
+    # service token and takes recipient/body as run-arguments (no injection).
+    try:
+        imessage.send("+12025550123", "nope", service="bogus")
+    except ValueError:
+        pass
+    else:
+        raise SystemExit("send must reject an unknown service")
+    assert "service type = iMessage" in imessage._SEND_SCRIPT.format(service="iMessage")
+
+    print("imessage-ok")
+  '';
+  imessageSmoke =
+    pkgs.runCommand "ix-mcp-imessage-smoke"
+      {
+        nativeBuildInputs = [ mcpPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        ${lib.getExe mcpPython} ${imessageTestPy} >stdout 2>stderr || {
+          echo "ix-mcp imessage smoke failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        grep -qx 'imessage-ok' stdout || {
+          echo "ix-mcp imessage smoke did not confirm the imessage module:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
+
   # The view module: tabular helpers return plain polars DataFrames (so they stay
   # composable), the file helpers return a Code view whose repr is the raw text,
   # and df_html renders the styled table the kernel installs globally. Pure local
@@ -2740,6 +2910,7 @@ let
 
   screenBundled = importTest "screen" "import screen; print('screen-ok', all(callable(getattr(screen, n)) for n in ('capture', 'click', 'write', 'press', 'key_down', 'key_up', 'apps', 'frontmost', 'launch', 'activate', 'terminate', 'accessibility_trusted')))";
   vmkitBundled = importTest "vmkit" "import vmkit; print('vmkit-ok', callable(vmkit.boot_linux), callable(vmkit.drive), callable(vmkit.screenshot))";
+  imessageBundled = importTest "imessage" "import imessage; print('imessage-ok', all(callable(getattr(imessage, n)) for n in ('messages', 'chats', 'contacts', 'send')))";
 in
 package.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
@@ -2775,7 +2946,13 @@ package.overrideAttrs (old: {
       site = dashboardSite;
     }
     // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
-      inherit screenBundled vmkitBundled vmkitResourceSmoke;
+      inherit
+        screenBundled
+        vmkitBundled
+        vmkitResourceSmoke
+        imessageBundled
+        imessageSmoke
+        ;
     };
   };
 })
