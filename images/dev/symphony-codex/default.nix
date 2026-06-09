@@ -73,10 +73,10 @@ in
     pkgs.gnutar
     pkgs.gzip
     pkgs.jaq
-    pkgs.mcp
+    ix.packages.mcp
     pkgs.nodejs_24
     pkgs.openssh
-    pkgs.pi-harness
+    ix.packages.pi-harness
     pkgs.pkg-config
     pkgs.python3
     pkgs.ripgrep
