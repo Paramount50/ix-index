@@ -11,11 +11,17 @@ separate worktree by default, including small docs edits. Keep the shared `main`
 checkout as the clean landing zone for pulls, branch bases, and final syncs.
 
 Create the branch and worktree from the updated `main` checkout. Use the
-`codex/` branch prefix unless the user asks for a different name:
+`codex/` branch prefix unless the user asks for a different name. Place the
+worktree as a sibling of the repo root (the `../` prefix) so it stays outside
+the flake source tree and does not slow down Nix source-copy or lint walks:
 
 ```sh
 git worktree add ../<short-name>-<branch> -b codex/<branch> main
 ```
+
+Never place worktrees under the repo root (e.g. `.claude/worktrees/` or
+`.worktrees/`). A nested checkout adds tens of thousands of files to the flake
+source set, which makes every `nix run .#...` re-ingest slow.
 
 If the shared checkout already has unrelated edits, name the paths and the one
 line summary of what they appear to be doing before creating the new worktree.

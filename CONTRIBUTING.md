@@ -125,6 +125,41 @@ the package owns that hardening, hardware, ABI, kernel, or realtime constraint.
 Rust's upstream target matrix and flag details live in the
 [Unstable Book sanitizer chapter](https://doc.rust-lang.org/unstable-book/compiler-flags/sanitizer.html).
 
+## Rust formatting
+
+The repo does not enforce `rustfmt`. Running `cargo fmt` will reflow lines
+unrelated to your change (attribute macros, `assert_eq!` call wrapping, etc.)
+and produce noise in the diff. Do not run `cargo fmt` before committing.
+
+Rust style is enforced through Clippy (the repo's `llm-clippy` fork) and code
+review. See [Rust style](AGENTS.md#rust-style) for the house conventions.
+
+## Running the fork Clippy locally
+
+CI uses a custom `clippy-driver` from the
+[`indexable-inc/clippy`](https://github.com/indexable-inc/clippy) fork that adds
+two workspace-level lints (`fallible_int_fallback`, `anonymous_tuple_return_type`)
+denied across the workspace. A plain `cargo clippy` will not catch these.
+
+To run the same check CI runs, build the per-unit clippy derivation for the
+crate you are editing:
+
+```sh
+nix build .#ciChecks.x86_64-linux.rust-<crate-name>.clippy
+```
+
+Replace `<crate-name>` with the kebab-case package name, e.g.:
+
+```sh
+nix build .#ciChecks.x86_64-linux.rust-git-log-pretty.clippy
+```
+
+To list every available clippy derivation:
+
+```sh
+nix eval --json .#ciChecks.x86_64-linux --apply 'cs: builtins.attrNames cs' | jq '.[] | select(test("clippy"))'
+```
+
 ## Coding standards
 
 The full style guide lives in [AGENTS.md](AGENTS.md). Skim the section that matches what you're touching:
