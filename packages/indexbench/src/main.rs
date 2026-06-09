@@ -16,12 +16,12 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use indexbench::Result;
-use indexbench::compare::{CompareConfig, compare};
+use indexbench::compare::{compare, CompareConfig};
 use indexbench::report::human_table;
-use indexbench::run::{GitContext, execute};
+use indexbench::run::{execute, GitContext};
 use indexbench::store::{GitBranchStore, HistoryStore, LocalDirStore};
 use indexbench::suite::{BenchSuite, MacroBench, MicroBench};
+use indexbench::Result;
 
 /// Metric-centric continuous benchmarking: micro + macro harnesses, durable
 /// history, and a statistical regression gate.

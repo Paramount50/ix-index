@@ -6,10 +6,10 @@ use std::{
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use minecraft_nbt::{Document, decode_document};
+use minecraft_nbt::{decode_document, Document};
 use quartz_nbt::{
-    NbtTag,
     io::{self, Flavor},
+    NbtTag,
 };
 use serde_json::Value;
 

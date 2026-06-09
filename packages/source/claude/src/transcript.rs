@@ -356,7 +356,7 @@ mod tests {
 
     use std::io::Write as _;
 
-    use super::{MessageOrigin, parse};
+    use super::{parse, MessageOrigin};
 
     fn origin() -> MessageOrigin {
         MessageOrigin {

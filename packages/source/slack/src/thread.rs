@@ -9,9 +9,9 @@
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use snafu::ResultExt as _;
-use source_meta::{Document, hash_body, keys};
+use source_meta::{hash_body, keys, Document};
 
 use crate::{
     channel::ChannelInfo,

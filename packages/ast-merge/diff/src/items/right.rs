@@ -1,7 +1,7 @@
 use ast_merge_ast::Tree;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::items::{IndexedNode, Resolved, get_name};
+use crate::items::{get_name, IndexedNode, Resolved};
 
 /// Context for collecting right-only items not present in base.
 pub struct CollectNewContext<'a, 'tree> {

@@ -71,5 +71,9 @@ impl UserMap {
 /// handle if present, otherwise the raw id (never empty).
 fn fallback_name<'a>(handle: &'a str, id: &'a str) -> &'a str {
     let handle = handle.trim();
-    if handle.is_empty() { id } else { handle }
+    if handle.is_empty() {
+        id
+    } else {
+        handle
+    }
 }

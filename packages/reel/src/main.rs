@@ -44,11 +44,11 @@ use std::path::PathBuf;
 use clap::Parser;
 use color_eyre::eyre::Result;
 
-use crate::encode::{Codec, Encoding, encode};
+use crate::encode::{encode, Codec, Encoding};
 use crate::font::FontSet;
 use crate::raster::Layout;
 use crate::record::record;
-use crate::scene::{Frame, outro_card, title_card};
+use crate::scene::{outro_card, title_card, Frame};
 use crate::theme::Theme;
 
 /// Record a terminal demo reel to animated AVIF (with a WebP fallback).

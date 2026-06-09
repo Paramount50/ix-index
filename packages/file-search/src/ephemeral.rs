@@ -8,11 +8,11 @@ use crate::error::{
 };
 use snafu::ResultExt;
 use tantivy::{
-    Index, IndexReader, TantivyDocument,
     collector::TopDocs,
     doc,
     query::QueryParser,
-    schema::{Field, IndexRecordOption, STORED, Schema, TextFieldIndexing, TextOptions, Value},
+    schema::{Field, IndexRecordOption, Schema, TextFieldIndexing, TextOptions, Value, STORED},
+    Index, IndexReader, TantivyDocument,
 };
 
 #[derive(Debug, Clone, Copy)]

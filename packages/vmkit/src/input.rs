@@ -6,7 +6,7 @@
 //! map and technique from github.com/thecrypticace/vzautomation.
 
 use objc2::rc::Retained;
-use objc2::{ClassType, msg_send};
+use objc2::{msg_send, ClassType};
 use objc2_app_kit::{NSEvent, NSEventModifierFlags, NSEventType};
 use objc2_foundation::{NSPoint, NSString};
 use objc2_virtualization::VZVirtualMachineView;

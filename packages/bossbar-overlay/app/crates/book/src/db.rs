@@ -175,7 +175,11 @@ mod tests {
         let book = read(&conn).unwrap();
         assert_eq!(book.pages.len(), 4);
         assert!(book.pages[0].contains("book overlay"));
-        assert_eq!(book.last_spread(), 2, "4 pages -> last spread starts at page index 2");
+        assert_eq!(
+            book.last_spread(),
+            2,
+            "4 pages -> last spread starts at page index 2"
+        );
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }
 

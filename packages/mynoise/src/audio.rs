@@ -9,7 +9,7 @@ use std::io::BufReader;
 use std::path::PathBuf;
 use std::thread;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{bail, Context as _, Result};
 use rodio::source::Source as _;
 use rodio::{Decoder, OutputStream, Sink};
 

@@ -173,7 +173,15 @@ pub fn build(
     let y = cy - size * 0.5 + bob_off;
 
     let uv = icon_uv(icon_for(orb.amount));
-    let mut quads = vec![Quad::sub(tex.orb, x, y, size, size, uv, shimmer_tint(shimmer))];
+    let mut quads = vec![Quad::sub(
+        tex.orb,
+        x,
+        y,
+        size,
+        size,
+        uv,
+        shimmer_tint(shimmer),
+    )];
 
     // Grow the whole orb about the window centre on hover, like the book.
     let mul = 1.0 + hover * (MAX_MUL - 1.0);

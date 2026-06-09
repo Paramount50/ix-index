@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use block2::RcBlock;
-use dispatch2::{DispatchQueue, dispatch_main};
+use dispatch2::{dispatch_main, DispatchQueue};
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AllocAnyThread, MainThreadMarker};
@@ -38,7 +38,7 @@ use objc2_virtualization::{
     VZVirtualMachineConfiguration, VZVirtualMachineView,
 };
 
-use crate::imp::{Error, file_url, ns_error_message};
+use crate::imp::{file_url, ns_error_message, Error};
 
 /// `kCVPixelFormatType_32BGRA` ('BGRA'): the layout the `IOSurface` read assumes.
 const PIXEL_FORMAT_BGRA: u32 = 0x4247_5241;

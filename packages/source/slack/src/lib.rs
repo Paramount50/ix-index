@@ -46,7 +46,7 @@ use source_meta::{Document, Source, SourceAdapter};
 pub use crate::error::Error;
 use crate::{
     channel::{
-        ChannelDir, ChannelInfo, discover_channel_dirs, read_channel_messages, resolve_channel,
+        discover_channel_dirs, read_channel_messages, resolve_channel, ChannelDir, ChannelInfo,
     },
     error::{ParseSnafu, ReadSnafu},
     model::{ChannelEntry, UserEntry},

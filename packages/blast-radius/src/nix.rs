@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::process::Command;
 
-use color_eyre::eyre::{Context, Result, bail};
+use color_eyre::eyre::{bail, Context, Result};
 use serde::Deserialize;
 
 use crate::causes::{DrvNode, Graph};
@@ -343,7 +343,7 @@ pub fn drv_for(checks: &[Check], attr: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{EvalFailure, drv_name, normalize_attr, partition_eval_rows};
+    use super::{drv_name, normalize_attr, partition_eval_rows, EvalFailure};
 
     #[test]
     fn drv_name_strips_hash_and_suffix() {

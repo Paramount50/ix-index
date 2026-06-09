@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     matching::Map,
-    traverse::{SiblingNodes, SubtreesInput, subtrees},
+    traverse::{subtrees, SiblingNodes, SubtreesInput},
 };
 
 #[derive(Clone)]

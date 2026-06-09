@@ -137,7 +137,10 @@ mod tests {
         let mut g = DragClick::new(5.0);
         g.cursor_moved(at(10.0, 10.0));
         g.pressed();
-        assert!(g.cursor_moved(at(20.0, 10.0)), "crossing threshold starts the drag");
+        assert!(
+            g.cursor_moved(at(20.0, 10.0)),
+            "crossing threshold starts the drag"
+        );
         assert!(g.dragging());
         assert!(!g.released(), "a drag is not a click");
         assert!(!g.dragging(), "release clears the drag");
@@ -148,8 +151,7 @@ mod tests {
         // A trackpad PixelDelta is physical px; dividing by the scale factor gives
         // the logical points the window position is in. The sign is negated so the
         // window tracks the scroll gesture rather than the content direction.
-        let (dx, dy) =
-            scroll_drag_delta(MouseScrollDelta::PixelDelta(at(20.0, -8.0)), 2.0);
+        let (dx, dy) = scroll_drag_delta(MouseScrollDelta::PixelDelta(at(20.0, -8.0)), 2.0);
         assert_eq!((dx, dy), (-10.0, 4.0));
     }
 
@@ -157,9 +159,11 @@ mod tests {
     fn window_moves_opposite_the_reported_scroll() {
         // A winit scroll delta points the way the content would scroll; the window
         // moves the other way so it follows the gesture (grab-and-move).
-        let (dx, dy) =
-            scroll_drag_delta(MouseScrollDelta::PixelDelta(at(5.0, 7.0)), 1.0);
-        assert!(dx < 0.0 && dy < 0.0, "window moves opposite the content-scroll delta");
+        let (dx, dy) = scroll_drag_delta(MouseScrollDelta::PixelDelta(at(5.0, 7.0)), 1.0);
+        assert!(
+            dx < 0.0 && dy < 0.0,
+            "window moves opposite the content-scroll delta"
+        );
     }
 
     #[test]

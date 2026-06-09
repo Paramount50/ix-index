@@ -4,7 +4,7 @@ mod filter;
 use std::{io::Write, path::PathBuf};
 
 use clap::Parser;
-use clone_detect::{DetectConfig, DetectionResult, instances};
+use clone_detect::{instances, DetectConfig, DetectionResult};
 use clone_scanner::{Config, Scanner};
 use snafu::ResultExt as _;
 
@@ -123,7 +123,7 @@ enum RunError {
 /// `ix` platform's `service_init::init`, which this standalone tool does not
 /// depend on.
 fn init_tracing() {
-    use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     tracing_subscriber::registry()

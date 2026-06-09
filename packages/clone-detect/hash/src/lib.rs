@@ -3,7 +3,7 @@ pub mod kinds;
 mod normalize;
 
 pub use ast_merge_ast::compute;
-pub use extract::{ChildInfo, Dual, NodeInfo, dual, significant_nodes};
+pub use extract::{dual, significant_nodes, ChildInfo, Dual, NodeInfo};
 pub use kinds::is_significant;
 pub use normalize::hash;
 

@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context as _, Result, bail};
+use anyhow::{bail, Context as _, Result};
 
 use crate::term::RawGuard;
 

@@ -1,5 +1,5 @@
 use super::helpers::{parse_js, parse_python, parse_rust};
-use crate::{Dual, dual, hash as normalized};
+use crate::{dual, hash as normalized, Dual};
 
 #[test]
 fn renamed_functions_same() {

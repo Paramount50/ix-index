@@ -1,5 +1,5 @@
 use code_tokenizer::CODE_STEMMED_TOKENIZER;
-use tantivy::schema::{IndexRecordOption, STORED, STRING, Schema, TextFieldIndexing, TextOptions};
+use tantivy::schema::{IndexRecordOption, Schema, TextFieldIndexing, TextOptions, STORED, STRING};
 
 pub fn build_schema() -> Schema {
     let text_indexing = TextFieldIndexing::default()

@@ -30,18 +30,18 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use base64::Engine as _;
-use dashboard_core::{Pane, Publisher, socket_path};
+use dashboard_core::{socket_path, Pane, Publisher};
 use dispatch2::DispatchQueue;
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
+use objc2::MainThreadMarker;
 use objc2_app_kit::{NSApplication, NSEventType};
 use objc2_virtualization::VZVirtualMachineView;
 
 use crate::imp::Error;
 use crate::input;
 use crate::macguest::{
-    DirShare, bgra_to_rgba, capture, downscale_rgba, encode_png_rgba,
-    frame_size as guest_frame_size, read_frame_bgra, start_guest_offscreen,
+    bgra_to_rgba, capture, downscale_rgba, encode_png_rgba, frame_size as guest_frame_size,
+    read_frame_bgra, start_guest_offscreen, DirShare,
 };
 
 /// Gap between a key's down and up, and after its release, so the guest HID

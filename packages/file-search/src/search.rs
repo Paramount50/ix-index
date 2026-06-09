@@ -7,10 +7,10 @@ use snafu::ResultExt;
 use std::ops::Bound;
 use std::path::Path;
 use tantivy::{
-    Index, IndexReader, Term,
     collector::TopDocs,
     query::{BooleanQuery, Occur, Query, QueryParser, RangeQuery},
     schema::Value,
+    Index, IndexReader, Term,
 };
 
 // Filename matches rank above raw path matches, which rank above content

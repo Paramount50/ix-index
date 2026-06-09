@@ -4,8 +4,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use color_eyre::eyre::{eyre, Context};
 use color_eyre::Result;
-use color_eyre::eyre::{Context, eyre};
 use serde::{Deserialize, Serialize};
 
 /// How long a story stays visible, mirroring Instagram's 24h window. A peer

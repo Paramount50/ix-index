@@ -2,7 +2,7 @@ mod lang;
 mod profiles;
 mod types;
 
-pub use lang::{Lang, detect, detect_from_extension};
+pub use lang::{detect, detect_from_extension, Lang};
 pub use types::Profile;
 
 #[cfg(test)]

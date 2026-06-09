@@ -1,7 +1,7 @@
-use ast_merge_ast::{Tree, tree};
+use ast_merge_ast::{tree, Tree};
 use ast_merge_langs::Lang;
 
-use crate::{Info, Pragma, parse_text, ranges_overlap, scan};
+use crate::{parse_text, ranges_overlap, scan, Info, Pragma};
 
 fn parse_rust(source: &str) -> Option<Tree> {
     let lang = Lang::Rust.to_tree_sitter();

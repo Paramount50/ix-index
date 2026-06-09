@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{eyre, Result};
 use fontdue::{Font, FontSettings, Metrics};
 
 const REGULAR: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");

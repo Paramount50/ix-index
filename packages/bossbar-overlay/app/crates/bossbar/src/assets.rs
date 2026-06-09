@@ -29,7 +29,10 @@ pub fn color_sprites(c: Color) -> (&'static [u8], &'static [u8]) {
 /// `(background, progress)` sprite bytes for one notch overlay.
 pub fn notch_sprites(n: Notch) -> (&'static [u8], &'static [u8]) {
     match n {
-        Notch::N6 => (sprite!("notched_6_background"), sprite!("notched_6_progress")),
+        Notch::N6 => (
+            sprite!("notched_6_background"),
+            sprite!("notched_6_progress"),
+        ),
         Notch::N10 => (
             sprite!("notched_10_background"),
             sprite!("notched_10_progress"),

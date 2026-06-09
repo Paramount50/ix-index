@@ -2,12 +2,12 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap, HashSet, btree_map::Entry};
+use std::collections::{btree_map::Entry, BTreeMap, HashMap, HashSet};
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{PermissionsExt, symlink};
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
@@ -1880,11 +1880,9 @@ mod tests {
 
         let result = load_base_image(&archive, &layers_dir, &blobs_dir);
 
-        assert!(
-            result
-                .err()
-                .is_some_and(|error| error.to_string().contains("digest mismatch"))
-        );
+        assert!(result
+            .err()
+            .is_some_and(|error| error.to_string().contains("digest mismatch")));
         Ok(())
     }
 
@@ -2164,11 +2162,9 @@ mod tests {
 
         let result = run_materialize(&json, &work.path().join("out.tar"), None);
 
-        assert!(
-            result
-                .err()
-                .is_some_and(|error| error.to_string().contains("digest mismatch"))
-        );
+        assert!(result
+            .err()
+            .is_some_and(|error| error.to_string().contains("digest mismatch")));
         Ok(())
     }
 }

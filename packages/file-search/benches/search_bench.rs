@@ -1,5 +1,5 @@
 use file_search::EphemeralSearch;
-use tango_bench::{IntoBenchmarks, benchmark_fn, tango_benchmarks, tango_main};
+use tango_bench::{benchmark_fn, tango_benchmarks, tango_main, IntoBenchmarks};
 
 const SAMPLE_RUST_CODE: &str = r"
 pub fn fibonacci(n: u64) -> u64 {

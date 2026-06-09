@@ -16,13 +16,13 @@
 //! Boundary strings come from a v4 UUID hex, with a short prefix so they
 //! visibly mark "this is a MIME boundary" in the wire bytes.
 
-use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD as BASE64_STD, URL_SAFE_NO_PAD};
+use base64::Engine as _;
 use uuid::Uuid;
 
-use crate::Result;
 use crate::error::UnsafeHeaderSnafu;
 use crate::model::{Attachment, OutgoingMessage};
+use crate::Result;
 
 /// Build a Gmail-ready raw payload (URL-safe base64, no padding) for
 /// `message`.

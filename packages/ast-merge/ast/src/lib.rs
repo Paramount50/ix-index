@@ -3,12 +3,12 @@ mod parse;
 mod types;
 
 pub use hash::compute;
-pub use parse::{Error, Output, PreorderIterator, SetLanguageSnafu, Tree, tree};
+pub use parse::{tree, Error, Output, PreorderIterator, SetLanguageSnafu, Tree};
 pub use types::{Node, NodeId, Revision};
 
 #[cfg(test)]
 mod tests {
-    use crate::{Node, NodeId, Revision, compute, tree};
+    use crate::{compute, tree, Node, NodeId, Revision};
 
     fn get_rust_language() -> tree_sitter::Language {
         tree_sitter_rust::LANGUAGE.into()

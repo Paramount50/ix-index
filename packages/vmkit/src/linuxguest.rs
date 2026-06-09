@@ -16,9 +16,9 @@
 
 use std::path::{Path, PathBuf};
 
+use objc2::rc::Retained;
 use objc2::AllocAnyThread;
 use objc2::MainThreadMarker;
-use objc2::rc::Retained;
 use objc2_app_kit::NSApplication;
 use objc2_foundation::{NSArray, NSFileHandle, NSPipe};
 use objc2_virtualization::{
@@ -34,7 +34,7 @@ use objc2_virtualization::{
     VZVirtioTraditionalMemoryBalloonDeviceConfiguration, VZVirtualMachineConfiguration,
 };
 
-use crate::imp::{Error, file_url, ns_error_message};
+use crate::imp::{file_url, ns_error_message, Error};
 
 /// Display geometry for the guest's single virtio-gpu scanout.
 const DISPLAY_WIDTH: isize = 1920;

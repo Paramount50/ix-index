@@ -419,7 +419,12 @@ pub fn visible_frame_logical() -> Option<(f64, f64, f64, f64)> {
     // Cocoa frames use a bottom-left origin; convert the visible region's top edge
     // to a top-left inset (the menu bar height) for winit's coordinate space.
     let top = full.size.height - (visible.origin.y + visible.size.height);
-    Some((visible.origin.x, top, visible.size.width, visible.size.height))
+    Some((
+        visible.origin.x,
+        top,
+        visible.size.width,
+        visible.size.height,
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]

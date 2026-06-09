@@ -6,7 +6,7 @@
 //! commit, dirty flag, and timestamp, and appends each [`Run`] to the store. The
 //! CLI then compares each fresh run against its baseline.
 
-use crate::schema::{Metric, Run, machine_id};
+use crate::schema::{machine_id, Metric, Run};
 use crate::suite::BenchSuite;
 
 /// Git context for a run: the resolved commit and whether the tree is dirty.

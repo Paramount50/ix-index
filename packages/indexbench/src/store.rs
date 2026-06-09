@@ -23,7 +23,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use snafu::{ResultExt, ensure};
+use snafu::{ensure, ResultExt};
 
 use crate::error::{self};
 use crate::schema::Run;

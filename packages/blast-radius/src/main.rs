@@ -17,10 +17,10 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use clap::Parser;
-use color_eyre::eyre::{Result, bail};
+use color_eyre::eyre::{bail, Result};
 
-use causes::{Caps, root_causes};
-use report::{Report, categories};
+use causes::{root_causes, Caps};
+use report::{categories, Report};
 
 /// Phase labels are kebab-case and stable: they appear in CI logs and in
 /// `report.json.phaseTimings`, so renaming them breaks downstream readers.

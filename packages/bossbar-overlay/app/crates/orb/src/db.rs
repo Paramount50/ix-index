@@ -95,23 +95,19 @@ pub fn set_position(path: &Path, pos: glam::DVec2) -> rusqlite::Result<()> {
 }
 
 fn read(conn: &Connection) -> rusqlite::Result<Orb> {
-    conn.query_row(
-        "SELECT amount, url, x, y FROM orb WHERE id = 1",
-        [],
-        |r| {
-            let amount: i64 = r.get(0)?;
-            let url: String = r.get(1)?;
-            let x: Option<f64> = r.get(2)?;
-            let y: Option<f64> = r.get(3)?;
-            Ok(Orb {
-                amount: amount.max(0),
-                url,
-                // Both coordinates must be present to pin the orb; a half-written
-                // row falls back to centering rather than placing it at an edge.
-                pos: x.zip(y).map(|(x, y)| glam::DVec2::new(x, y)),
-            })
-        },
-    )
+    conn.query_row("SELECT amount, url, x, y FROM orb WHERE id = 1", [], |r| {
+        let amount: i64 = r.get(0)?;
+        let url: String = r.get(1)?;
+        let x: Option<f64> = r.get(2)?;
+        let y: Option<f64> = r.get(3)?;
+        Ok(Orb {
+            amount: amount.max(0),
+            url,
+            // Both coordinates must be present to pin the orb; a half-written
+            // row falls back to centering rather than placing it at an edge.
+            pos: x.zip(y).map(|(x, y)| glam::DVec2::new(x, y)),
+        })
+    })
     .optional()
     .map(Option::unwrap_or_default)
 }
@@ -266,7 +262,8 @@ mod tests {
     fn negative_amount_clamps_to_zero() {
         let path = temp_db("neg");
         let conn = open(&path).unwrap();
-        conn.execute("UPDATE orb SET amount = -5 WHERE id = 1", []).unwrap();
+        conn.execute("UPDATE orb SET amount = -5 WHERE id = 1", [])
+            .unwrap();
         assert_eq!(read(&conn).unwrap().amount, 0);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
     }

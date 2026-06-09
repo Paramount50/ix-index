@@ -5,7 +5,7 @@ use rayon::prelude::*;
 use crate::{
     config::Config,
     matching::{Map, Pair},
-    metadata::{DescendantRangeQuery, Index, build_kind_index, compute_node_meta},
+    metadata::{build_kind_index, compute_node_meta, DescendantRangeQuery, Index},
 };
 
 /// Dice coefficient numerator multiplier: |2 * intersection| / |A| + |B|.

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use ast_merge_ast::tree;
-use ast_merge_langs::{Lang, detect};
-use clone_hash::{NodeInfo, significant_nodes};
+use ast_merge_langs::{detect, Lang};
+use clone_hash::{significant_nodes, NodeInfo};
 use clone_pragma::scan;
 use ignore::WalkBuilder;
 use parking_lot::Mutex;

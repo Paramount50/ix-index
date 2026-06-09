@@ -1,6 +1,6 @@
 use clone_hash::NodeInfo;
 
-use crate::{Hash, index::Entry};
+use crate::{index::Entry, Hash};
 
 #[test]
 fn new_index_is_empty() {

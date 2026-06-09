@@ -10,7 +10,7 @@
 // `ix_sdk::*`. This `use` is the typecheck against the prebuilt rmeta: the
 // symbols must exist in the injected rlib for the SDK to compile and link.
 pub use ix_sdk_wire::{
-    DecodeError, Decoder, Encoder, IX_BUF_VERSION, IxBuf, IxError, IxErrorCode, IxErrorKind,
+    DecodeError, Decoder, Encoder, IxBuf, IxError, IxErrorCode, IxErrorKind, IX_BUF_VERSION,
 };
 
 /// Round-trip an error code through the prebuilt wire crate.

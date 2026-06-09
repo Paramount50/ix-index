@@ -1,6 +1,6 @@
 //! Build a temporary atuin-shaped sqlite db and check the projected documents.
 
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use source_atuin::AtuinHistory;
 use source_meta::{Source, SourceAdapter as _};
 

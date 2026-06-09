@@ -11,7 +11,7 @@ use std::time::Duration;
 use color_eyre::eyre::{Result, WrapErr};
 use tui::{SpawnConfig, TuiInstance, TuiManager};
 
-use crate::scene::{Action, Cursor, Frame, PROMPT, script};
+use crate::scene::{script, Action, Cursor, Frame, PROMPT};
 
 /// Record the demo script into a sequence of terminal frames.
 pub fn record(cols: u16, rows: u16, fps: u32) -> Result<Vec<Frame>> {

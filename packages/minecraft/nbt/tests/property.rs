@@ -5,8 +5,8 @@
 //! decoder never panics. It is allowed to return `Err`; what must not happen
 //! is a panic, integer overflow, or stack overflow on a hostile input.
 
-use hegel::TestCase;
 use hegel::generators::{self as gs, Generator};
+use hegel::TestCase;
 use minecraft_nbt::decode_document;
 use serde_json::{Map, Number, Value};
 

@@ -1,4 +1,4 @@
-use super::{ColRange, RowRange, slice_2d};
+use super::{slice_2d, ColRange, RowRange};
 
 #[test]
 fn test_slice_2d_full_range() {

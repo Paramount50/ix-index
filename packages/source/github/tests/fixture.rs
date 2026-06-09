@@ -11,7 +11,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use source_github::GithubExport;
-use source_meta::{Document, Source, SourceAdapter, hash_body};
+use source_meta::{hash_body, Document, Source, SourceAdapter};
 
 /// Path to the synthetic fixture directory shipped with this crate.
 fn fixture_dir() -> PathBuf {

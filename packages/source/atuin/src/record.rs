@@ -1,11 +1,11 @@
 //! The typed per-command record and its projection to a search [`Document`].
 
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use snafu::ResultExt as _;
-use source_meta::{Document, keys};
+use source_meta::{keys, Document};
 
-use crate::SOURCE_TAG;
 use crate::error::{MetadataSnafu, Result};
+use crate::SOURCE_TAG;
 
 /// One recorded shell command from atuin, with its filter tags.
 #[derive(Debug, Clone)]

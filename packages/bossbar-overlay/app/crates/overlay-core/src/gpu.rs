@@ -221,8 +221,15 @@ impl Gpu {
         // `shared()` (doing so would couple GPU bring-up to the lazy metrics init).
         let mut textures = Vec::new();
         let white_tex = {
-            let bind =
-                upload_texture(&device, &queue, &tex_layout, &sampler, &[0xff, 0xff, 0xff, 0xff], 1, 1);
+            let bind = upload_texture(
+                &device,
+                &queue,
+                &tex_layout,
+                &sampler,
+                &[0xff, 0xff, 0xff, 0xff],
+                1,
+                1,
+            );
             let h = TexHandle(textures.len() as u32);
             textures.push(bind);
             h
@@ -321,7 +328,15 @@ impl Gpu {
 
     /// Lay out `text` as glyph quads at `(x, y)` top-left, `scale` px per source
     /// pixel, tinted `color`. Returns the advance width drawn.
-    pub fn text(&self, text: &str, x: f32, y: f32, scale: f32, color: [f32; 4], out: &mut Vec<Quad>) -> f32 {
+    pub fn text(
+        &self,
+        text: &str,
+        x: f32,
+        y: f32,
+        scale: f32,
+        color: [f32; 4],
+        out: &mut Vec<Quad>,
+    ) -> f32 {
         let font = bitmap_font::shared();
         let cell = BitmapFont::cell_px() * scale;
         let mut pen = x;

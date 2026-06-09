@@ -35,9 +35,9 @@ use std::path::{Path, PathBuf};
 
 use chrono::DateTime;
 use serde::Deserialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use snafu::{ResultExt as _, Snafu};
-use source_meta::{Document, Source, SourceAdapter, keys};
+use source_meta::{keys, Document, Source, SourceAdapter};
 
 /// All failures surfaced by this crate.
 #[derive(Debug, Snafu)]
