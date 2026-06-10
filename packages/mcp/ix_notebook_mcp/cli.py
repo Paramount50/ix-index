@@ -28,34 +28,6 @@ from .config import Config, runtime_dir, set_config
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _WILDCARD_HOSTS = {"0.0.0.0", "::"}
 
-# Required env vars for each integration. Each entry is (var_name, description).
-# GOOGLE_OAUTH_* are excluded in a shared (multiplayer) room (IX_MCP_SHARED is set)
-# because google_auth refuses minting there by design.
-_REQUIRED_ENV: list[tuple[str, str]] = [
-    ("EXA_API_KEY", "exa web search (exa_py)"),
-    ("IX_GCAL_BIN", "Gmail / Calendar via the bundled gcal binary"),
-    ("GOOGLE_OAUTH_CLIENT_ID", "Gmail / Calendar OAuth client (gcal binary)"),
-    ("GOOGLE_OAUTH_CLIENT_SECRET", "Gmail / Calendar OAuth client (gcal binary)"),
-]
-# Vars that are only required in incognito (non-shared) sessions.
-_GOOGLE_OAUTH_VARS = {"GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"}
-
-
-def _missing_env(shared: bool = False) -> list[tuple[str, str]]:
-    """Return (var, description) pairs for every required env var that is unset or empty.
-
-    When ``shared`` is True the Google OAuth client id/secret are omitted: a
-    shared (multiplayer) room refuses google_auth by design, so those vars are
-    not required there.
-    """
-    missing = []
-    for var, desc in _REQUIRED_ENV:
-        if shared and var in _GOOGLE_OAUTH_VARS:
-            continue
-        if not os.environ.get(var):
-            missing.append((var, desc))
-    return missing
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="ix-mcp", description="Single-tool Python execution MCP server")
@@ -69,12 +41,6 @@ def main(argv: list[str] | None = None) -> int:
         const="127.0.0.1:8000",
         metavar="ADDR",
         help="Serve over streamable HTTP at host:port instead of stdio",
-    )
-    serve.add_argument(
-        "--no-env-check",
-        action="store_true",
-        default=False,
-        help="Skip the required-env preflight check (also: IX_MCP_SKIP_ENV_CHECK=1)",
     )
     sub.add_parser("dashboard", help="Open the running server's dashboard URL")
     ev = sub.add_parser("eval", help="Evaluate one expression on a throwaway kernel")
@@ -225,22 +191,6 @@ def _resolve_ssh_auth_sock(
 
 
 def _serve(args: argparse.Namespace) -> int:
-    # Fail fast if required env vars are missing, before touching stdio fds or
-    # starting the kernel. This surfaces ALL missing vars at once so the operator
-    # can fix them in one go, rather than discovering each mid-session.
-    skip_check = getattr(args, "no_env_check", False) or os.environ.get("IX_MCP_SKIP_ENV_CHECK")
-    if not skip_check:
-        shared = bool(os.environ.get("IX_MCP_SHARED"))
-        missing = _missing_env(shared=shared)
-        if missing:
-            lines = ["[ix-mcp] missing required environment variables:"]
-            for var, desc in missing:
-                lines.append(f"  {var}  -- {desc}")
-            lines.append("Set the missing variables and restart ix-mcp serve.")
-            lines.append("(Use --no-env-check or IX_MCP_SKIP_ENV_CHECK=1 to skip this check.)")
-            print("\n".join(lines), file=sys.stderr)
-            return 1
-
     wd = getattr(args, "workdir", None)
     workdir = Path(wd).resolve() if wd else Path.cwd()
     workdir.mkdir(parents=True, exist_ok=True)
