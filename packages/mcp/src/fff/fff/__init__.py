@@ -82,7 +82,7 @@ __version__ = "0.9.2"
 _OPTIONS_VERSION = 1
 
 # fff_live_grep mode byte: 0 plain (SIMD literal), 1 regex, 2 fuzzy.
-_GREP_MODES = {"plain": 0, "text": 0, "regex": 1, "fuzzy": 2}
+_GREP_MODES = {"plain": 0, "literal": 0, "text": 0, "regex": 1, "fuzzy": 2}
 
 
 class FffError(RuntimeError):
@@ -750,12 +750,14 @@ class FileFinder:
     ) -> GrepResult:
         """Content search across indexed files.
 
-        ``mode`` is required (no default): ``"plain"`` (fast SIMD literal),
-        ``"regex"``, or ``"fuzzy"``.
+        ``mode`` is required (no default): ``"plain"`` (fast SIMD literal;
+        aliases ``"literal"`` and ``"text"``), ``"regex"``, or ``"fuzzy"``.
         """
         self._check_open()
         if mode not in _GREP_MODES:
-            raise ValueError(f"unknown grep mode {mode!r}; use 'plain', 'regex', or 'fuzzy'")
+            raise ValueError(
+                f"unknown grep mode {mode!r}; use 'plain' (aliases 'literal'/'text'), 'regex', or 'fuzzy'"
+            )
         mode_byte = _GREP_MODES[mode]
         _validate_grep_args(
             limit,
@@ -1018,7 +1020,7 @@ def _isolated_file_finder(abspath: str, tmp: str, *, content_indexing: bool) -> 
 
 
 def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
-    """Fuzzy file search over `path`, reusing a cached watched index.
+    """Fuzzy file search over `path=` (root directory or file), reusing a cached watched index.
 
     `path` may be a directory (searched whole) or a single file (searched on its
     own, in an isolated one-file index so even a dotfile or a file directly under
@@ -1038,7 +1040,7 @@ def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
 
 
 def grep(query: str | list[str], path=".", *, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
-    """Content grep over `path`, reusing a cached watched (content-indexed) index.
+    """Content grep over `path=` (root directory or file), reusing a cached watched (content-indexed) index.
 
     `query` and `path` are positional like the shell's `grep PATTERN PATH`
     (path defaults to the current directory); the options stay keyword-only.
@@ -1046,9 +1048,10 @@ def grep(query: str | list[str], path=".", *, mode: str, limit: int = 50, glob: 
     OR pass (Aho-Corasick) -- the one call for "where does any of these appear?",
     so you never loop grep over a list. `mode` is required (no default), so each
     call states its intent:
-      - one string: ``"plain"`` (fast SIMD literal), ``"regex"``, or ``"fuzzy"``;
-      - a list: matched literally, so pass ``"plain"`` (for a regex, pass one
-        string like ``"a|b"`` with ``"regex"``).
+      - one string: ``"plain"`` (fast SIMD literal; aliases ``"literal"`` and
+        ``"text"``), ``"regex"``, or ``"fuzzy"``;
+      - a list: matched literally, so pass ``"plain"`` or ``"literal"`` (for a
+        regex, pass one string like ``"a|b"`` with ``"regex"``).
 
     `glob` is an optional file-name filter applied before matching, e.g.
     ``glob="*.rs"`` to restrict a content search to Rust files in a mixed-language
@@ -1069,11 +1072,11 @@ def grep(query: str | list[str], path=".", *, mode: str, limit: int = 50, glob: 
     import fnmatch as _fnmatch
 
     multi = not isinstance(query, str)
-    if multi and mode != "plain":
+    if multi and _GREP_MODES.get(mode) != 0:
         raise ValueError(
             'a list of patterns is matched literally (OR across them); pass '
-            'mode="plain". For a regex, pass a single pattern string with '
-            'mode="regex" (e.g. "a|b").'
+            'mode="plain" (or alias "literal"/"text"). For a regex, pass a '
+            'single pattern string with mode="regex" (e.g. "a|b").'
         )
 
     def _run(ff: "FileFinder") -> GrepResult:
