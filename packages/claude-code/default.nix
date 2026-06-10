@@ -3,7 +3,8 @@
   ix,
   stdenv,
   fetchurl,
-  makeBinaryWrapper,
+  runtimeShell,
+  writeText,
   autoPatchelfHook,
   procps,
   ripgrep,
@@ -37,16 +38,26 @@
   # runtime. `{ }` (default) ships only the computed defaults.
   extraSettings ? { },
 
+  # MCP servers baked into the wrapper as a generated `--mcp-config=<file>`
+  # layer, one plain server per entry (tool prefix `mcp__<name>`). Values use
+  # Claude's mcpServers schema (`{ type = "stdio"; command = ...; }` /
+  # `{ type = "http"; url = ...; }`). CLI `--mcp-config` layers MERGE: a user's
+  # own `--mcp-config` and a discovered project `.mcp.json` still load alongside
+  # this set, so baking the flag here replaces the old pattern of consumers
+  # symlinkJoin-wrapping this wrapper a second time just to add it. `{ }`
+  # (default) bakes no flag.
+  mcpServers ? { },
+
   # Replace Claude Code's entire system prompt with this text. The string is
   # materialized to a store file and baked into the wrapper as
-  # `--system-prompt-file <path>`: passing by path (not inline text) keeps
-  # arbitrary content free of shell escaping and, since a store path has no
-  # spaces, it survives makeBinaryWrapper's word splitting where an inline
-  # `--system-prompt "<text with spaces>"` would shatter into separate argv.
+  # `--system-prompt-file=<path>`: passing by path (not inline text) keeps
+  # arbitrary content free of shell quoting, and the store path makes the flag
+  # one self-contained argv token (see `wrapperFlags` for why every injected
+  # option-argument uses the `=` form).
   # This DROPS the default prompt wholesale (tool guidance, safety rules, coding
-  # conventions), so the agent only knows what this text says. Baked with
-  # `--add-flags` (prepended) so an explicit
-  # `--system-prompt`/`--system-prompt-file` on the CLI still wins. Defaults to the
+  # conventions), so the agent only knows what this text says. Prepended before
+  # the user argv so an explicit `--system-prompt`/`--system-prompt-file` on the
+  # CLI still wins (single-value options are last-wins). Defaults to the
   # house prompt below (the shokunin craft ethos plus the pre-v1
   # backward-compatibility engineering rule, plus a preference for working in git
   # worktrees); set to `null` to bake no flag and keep Claude Code's stock prompt.
@@ -97,8 +108,8 @@ let
 
   # Env defaults applied through the wrapper, declared as data (single source)
   # and derived into flags below rather than hand-written into the install phase.
-  # `--set-default` (not `--set`) so an explicit env or settings.json `env` value
-  # still overrides per machine. Three groups:
+  # Exported by the wrapper only when unset (the old `--set-default`), so an
+  # explicit env or settings.json `env` value still overrides per machine. Three groups:
   #  - Output-truncation caps raised to the CLI's built-in maxima: we run a
   #    trusted config (our own CLAUDE.md / AGENTS.md / hooks / MCP servers), so
   #    prefer full output over pruning. BASH_MAX_OUTPUT_LENGTH default 30000
@@ -116,12 +127,13 @@ let
     # Re-enable 1M per machine: `export CLAUDE_CODE_DISABLE_1M_CONTEXT=`.
     CLAUDE_CODE_DISABLE_1M_CONTEXT = 1;
   };
-  envDefaultFlags = lib.concatLists (
-    lib.mapAttrsToList (name: value: [
-      "--set-default"
-      name
-      (toString value)
-    ]) wrapperEnvDefaults
+  # Rendered as `export NAME="${NAME-default}"` lines: assign only when the
+  # variable is UNSET. No colon in the expansion, so an explicit empty value
+  # survives (e.g. `export CLAUDE_CODE_DISABLE_1M_CONTEXT=` re-enables 1M).
+  envDefaultExports = lib.concatStringsSep "\n" (
+    lib.mapAttrsToList (
+      name: value: "export ${name}=\"\${${name}-${toString value}}\""
+    ) wrapperEnvDefaults
   );
 
   # Settings-key defaults that have no env knob, shipped as a JSON the wrapper
@@ -133,10 +145,14 @@ let
   # intact, and managed settings can still override it.
   #
   # IMPORTANT: between two `--settings` *flags* the CLI is first-wins (they do
-  # NOT merge with each other), so this is injected with `--append-flags` (last
-  # in argv): a user who passes their own `--settings` on the CLI wins (theirs
-  # comes first), and ours applies only when they pass none. `--add-flags` would
-  # prepend ours and silently shadow a user's `--settings`.
+  # NOT merge with each other), so the wrapper injects this file only when the
+  # caller passed no `--settings` of their own (see the argv scan in
+  # `wrapperScript`): a user's CLI `--settings` applies untouched, and ours
+  # applies only when they pass none. Injecting ours unconditionally up front
+  # would silently shadow theirs, and the old approach of appending it after the
+  # user argv put it inside subcommand argv, where a parser that does not define
+  # the option dies (`claude mcp list` -> "error: unknown option '--settings'",
+  # issue #1044).
   #   cleanupPeriodDays: keep transcripts + the wrapper's --debug logs ~1yr for
   #     the optimize analysis and troubleshooting (CLI default 30).
   #   skipDangerousModePermissionPrompt (the default): pre-accept the one-time
@@ -161,23 +177,114 @@ let
     (formats.json { }).generate "claude-code-default-settings.json"
       settingsDefaults;
 
-  # The default `--dangerously-skip-permissions` posture (see its arg comment),
-  # baked with `--add-flags` and rendered through escapeShellArgs, same as the
-  # system-prompt pair below; an empty list contributes nothing.
-  postureWrapperArgs = lib.optionals dangerouslySkipPermissions [
-    "--add-flags"
-    "--dangerously-skip-permissions"
-  ];
+  mcpConfigFile = (formats.json { }).generate "claude-code-mcp-config.json" {
+    inherit mcpServers;
+  };
 
-  # System-prompt override (see the `systemPrompt` arg). Materialize the text to
-  # a store file and add `--system-prompt-file <path>` as makeBinaryWrapper args.
-  # escapeShellArgs emits the `--system-prompt-file <path>` pair as one shell
-  # word so makeBinaryWrapper re-splits it into the two argv tokens the CLI wants;
-  # when unset the list is empty and contributes nothing.
-  systemPromptWrapperArgs = lib.optionals (systemPrompt != null) [
-    "--add-flags"
-    "--system-prompt-file ${builtins.toFile "claude-code-system-prompt.txt" systemPrompt}"
-  ];
+  # PATH additions the CLI expects at runtime (prepended, like the old
+  # `--prefix PATH :`): ps for process checks, the pinned ripgrep, the house
+  # minecraft-sound chime, and the Linux sandbox helpers.
+  wrapperPath = lib.makeBinPath (
+    [
+      procps
+      ripgrep
+      minecraft-sound
+    ]
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
+      bubblewrap
+      socat
+    ]
+  );
+
+  # Every flag the wrapper injects, PREPENDED before the user argv. Two hard
+  # rules, both learned from real breakage:
+  #
+  #  - Prepend, never append. Root-level options parse before subcommand
+  #    dispatch, so `claude --settings=F mcp list` works; an appended flag lands
+  #    inside the subcommand's argv, where a parser that does not define the
+  #    option dies ("error: unknown option '--settings'", issue #1044).
+  #  - An option-argument always rides in the `=` form, one self-contained argv
+  #    token. The space form is a landmine: `--mcp-config <configs...>` is
+  #    variadic and swallows the next positional (`claude agents` -> "MCP config
+  #    file not found: ./agents"), and an optional-value flag does the same.
+  #
+  # `--debug` is such an optional-value flag (`--debug [filter]`: `--debug
+  # agents` parses "agents" as the filter and then rejects the rest), and it has
+  # no value spelling for "everything", so it cannot take the `=` form. It is
+  # safe ONLY because the unconditional `--thinking-display=...` follows it;
+  # never let an optional-value flag sit last in this list.
+  #
+  # Why each flag:
+  #  - `--debug`: write operational telemetry (HTTP/API timings, auto-mode
+  #    classifier, MCP/LSP lifecycle, startup phases, permission decisions) to
+  #    ~/.claude/debug/ for troubleshooting and the optimize history analysis.
+  #    It does not pollute `claude -p` stdout (verified). Those logs prune on
+  #    the cleanupPeriodDays sweep, so settingsDefaults ships a long retention.
+  #  - `--thinking-display=summarized`: the API default DIFFERS BY MODEL:
+  #    `thinking.display` defaulted to "summarized" through Opus/Sonnet 4.6 but
+  #    Anthropic silently flipped it to "omitted" on Opus 4.7/4.8 (faster
+  #    time-to-first-token, thinking blocks arrive with an empty `thinking`
+  #    field), so on the latest Opus the live UI shows nothing and the
+  #    transcript persists no reasoning. `showThinkingSummaries` does NOT fix it
+  #    (renderer-only; anthropics/claude-code#49268 root cause, #63358 for Opus
+  #    4.8); this hidden flag is the only lever that works (verified on 2.1.159).
+  #    Safe for Haiku (already summarized by default), and unlike
+  #    CLAUDE_CODE_EXTRA_BODY it does not force `type:adaptive`, which Haiku
+  #    rejects. We trade the TTFT win for visible reasoning fleet-wide; an
+  #    explicit later `--thinking-display=omitted` on the CLI still wins
+  #    (single-value options are last-wins).
+  #  - `--dangerously-skip-permissions` (see its arg comment).
+  wrapperFlags = [
+    "--debug"
+    "--thinking-display=summarized"
+  ]
+  ++ lib.optional dangerouslySkipPermissions "--dangerously-skip-permissions"
+  ++ lib.optional (
+    systemPrompt != null
+  ) "--system-prompt-file=${builtins.toFile "claude-code-system-prompt.txt" systemPrompt}"
+  ++ lib.optional (mcpServers != { }) "--mcp-config=${mcpConfigFile}";
+
+  # The wrapper itself: a plain shell script rather than a compiled
+  # makeBinaryWrapper, because the one thing a static wrapper cannot express is
+  # the conditional `--settings` injection below, and a readable script beats
+  # `strings`-ing a Mach-O when debugging argv anyway. `@helper@` is substituted
+  # with the real binary's path at install time (it lives under $out, which is
+  # unknowable here). The store output is read-only, so the bundled self-updater
+  # could never write; DISABLE_AUTOUPDATER turns it off cleanly, the install
+  # checks are skipped, and USE_BUILTIN_RIPGREP=0 pins search to the Nix ripgrep
+  # on PATH so the wrapper owns the version pin.
+  wrapperScript = writeText "claude-wrapper.sh" ''
+    #!${runtimeShell}
+    # Generated by packages/claude-code/default.nix; see wrapperFlags there.
+    export DISABLE_AUTOUPDATER=1
+    export DISABLE_INSTALLATION_CHECKS=1
+    export USE_BUILTIN_RIPGREP=0
+    ${envDefaultExports}
+    export PATH=${wrapperPath}''${PATH:+:$PATH}
+
+    flags=(${lib.escapeShellArgs wrapperFlags})
+
+    # --settings is first-wins between two flags (they never merge), so inject
+    # the package defaults only when the caller passed none; see the
+    # settingsDefaults comment.
+    inject_settings=1
+    for arg in "$@"; do
+      case "$arg" in
+      --settings | --settings=*)
+        inject_settings=0
+        break
+        ;;
+      --)
+        break
+        ;;
+      esac
+    done
+    if ((inject_settings)); then
+      flags+=(--settings=${settingsDefaultsFile})
+    fi
+
+    exec -a "$0" "@helper@" "''${flags[@]}" "$@"
+  '';
 
   inherit (stdenv.hostPlatform) system;
   target =
@@ -275,10 +382,7 @@ stdenv.mkDerivation {
   dontStrip = true;
   strictDeps = true;
 
-  nativeBuildInputs = [
-    makeBinaryWrapper
-  ]
-  ++ lib.optional stdenv.hostPlatform.isElf autoPatchelfHook;
+  nativeBuildInputs = lib.optional stdenv.hostPlatform.isElf autoPatchelfHook;
 
   installPhase = ''
     runHook preInstall
@@ -296,64 +400,74 @@ stdenv.mkDerivation {
     helper="$out/libexec/Claude Code"
     install -m755 ${nativeBinary} "$helper"
 
-    # The store output is read-only, so the bundled self-updater can never
-    # write; disable it and the install checks, and pin the bundled ripgrep to
-    # the Nix one so PATH stays reproducible. The wrapper owns the version pin.
-    # Apply our env defaults (see `wrapperEnvDefaults` above).
-    #
-    # Start in debug mode by default (`--debug`): the CLI writes operational
-    # telemetry (HTTP/API timings, auto-mode classifier, MCP/LSP lifecycle,
-    # startup phases, permission decisions) to ~/.claude/debug/ for
-    # troubleshooting and the optimize history analysis. It does not pollute
-    # `claude -p` stdout (verified). Those logs prune on the cleanupPeriodDays
-    # sweep, so we also ship a long retention via --settings (see
-    # `settingsDefaults` above).
-    #
-    # Opt back into summarized thinking (`--thinking-display summarized`). The
-    # API behavior here DIFFERS BY MODEL: `thinking.display` defaulted to
-    # "summarized" on Opus 4.6 / Sonnet 4.6 and earlier, but Anthropic silently
-    # flipped it to "omitted" on Opus 4.7 and Opus 4.8 (faster time-to-first-
-    # token). With "omitted" the API returns thinking blocks whose `thinking`
-    # field is empty (only the encrypted `signature` rides along), so on the
-    # latest Opus the live UI shows nothing and the transcript persists no
-    # reasoning. The harness never requests "summarized" itself, and
-    # `showThinkingSummaries` does NOT fix it (it only drives the ctrl+o
-    # renderer + a beta header, wired to nothing that sets the request's
-    # display) -- see anthropics/claude-code#49268 (root cause) and #63358
-    # (Opus 4.8). The hidden `--thinking-display summarized` flag is the only
-    # lever that works, and it is verified to restore readable Opus-4.8 thinking
-    # on 2.1.159. We want the reasoning for steering and for the optimize
-    # analysis, so we trade the TTFT win for visible thinking fleet-wide. Safe
-    # for Haiku (it already defaults to "summarized"); unlike CLAUDE_CODE_EXTRA_
-    # BODY this does not force `type:adaptive`, which Haiku rejects. Via
-    # `--add-flags` (prepended) so an explicit `--thinking-display omitted` on
-    # the CLI still wins for anyone who wants the latency back.
-    makeBinaryWrapper "$helper" $out/bin/${binName} \
-      --inherit-argv0 \
-      --add-flags --debug \
-      --add-flags "--thinking-display summarized" \
-      ${lib.escapeShellArgs postureWrapperArgs} \
-      --append-flags "--settings ${settingsDefaultsFile}" \
-      ${lib.escapeShellArgs systemPromptWrapperArgs} \
-      --set DISABLE_AUTOUPDATER 1 \
-      --set DISABLE_INSTALLATION_CHECKS 1 \
-      --set USE_BUILTIN_RIPGREP 0 \
-      ${lib.escapeShellArgs envDefaultFlags} \
-      --prefix PATH : ${
-        lib.makeBinPath (
-          [
-            procps
-            ripgrep
-            minecraft-sound
-          ]
-          ++ lib.optionals stdenv.hostPlatform.isLinux [
-            bubblewrap
-            socat
-          ]
-        )
-      }
+    # All flag and env injection lives in `wrapperScript` (see its let-binding
+    # and `wrapperFlags` for the per-flag rationale); here it only learns the
+    # helper's real path.
+    install -m755 ${wrapperScript} $out/bin/${binName}
+    substituteInPlace $out/bin/${binName} --subst-var-by helper "$helper"
 
     runHook postInstall
+  '';
+
+  # Argv regression net for the wrapper, run against a stub helper so it is
+  # offline and instant. Guards the properties the wrapper exists for: injected
+  # flags ride BEFORE the user argv (subcommands keep parsing), every injected
+  # option-argument is one `=` token (nothing can swallow a positional), and
+  # `--settings` defers to a caller-provided one (the CLI is first-wins between
+  # two `--settings` flags).
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+
+    stub="$PWD/stub"
+    printf '%s\n' '#!${runtimeShell}' 'printf "%s\n" "$@"' > "$stub"
+    chmod +x "$stub"
+    sed "s|$helper|$stub|" $out/bin/${binName} > test-wrapper
+    chmod +x test-wrapper
+
+    check() {
+      local desc="$1" expected="$2"
+      shift 2
+      local got
+      got="$(./test-wrapper "$@")"
+      if [ "$got" != "$expected" ]; then
+        printf 'claude wrapper argv check failed: %s\nexpected:\n%s\ngot:\n%s\n' \
+          "$desc" "$expected" "$got" >&2
+        exit 1
+      fi
+    }
+
+    check "flags prepend; settings injected when caller passes none" \
+      ${
+        lib.escapeShellArg (
+          lib.concatStringsSep "\n" (
+            wrapperFlags
+            ++ [
+              "--settings=${settingsDefaultsFile}"
+              "mcp"
+              "list"
+            ]
+          )
+        )
+      } \
+      mcp list
+
+    check "caller --settings wins; package defaults stay out" \
+      ${
+        lib.escapeShellArg (
+          lib.concatStringsSep "\n" (
+            wrapperFlags
+            ++ [
+              "--settings=/dev/null"
+              "-p"
+              "hi"
+            ]
+          )
+        )
+      } \
+      --settings=/dev/null -p hi
+
+    runHook postInstallCheck
   '';
 
   passthru = lib.optionalAttrs (updateScript != null) {
