@@ -1652,8 +1652,7 @@ let
 
   fleetPlan = fleet.planValue.nodes;
 
-  prefixedFleet = ix.mkFleet {
-    nodePrefix = "tprefix-";
+  prefixedFleetBase = ix.mkFleet {
     nodes = {
       api = {
         services.openssh.enable = true;
@@ -1672,6 +1671,8 @@ let
       };
     };
   };
+
+  prefixedFleet = prefixedFleetBase.withNodePrefix "tprefix-";
 
   fleetIpv4HealthCheckEval = builtins.tryEval (
     builtins.deepSeq
@@ -4367,22 +4368,35 @@ let
             "tprefix-api"
             "tprefix-worker"
           ];
-        message = "nodePrefix should rename every node in the plan order";
+        message = "withNodePrefix should rename every node in the plan order";
       }
       {
         assertion = prefixedFleet.planValue.nodes."tprefix-worker".dependsOn == [ "tprefix-api" ];
-        message = "nodePrefix should rewrite dependsOn references so the prefixed graph stays connected";
+        message = "withNodePrefix should rewrite dependsOn references so the prefixed graph stays connected";
       }
       {
         assertion = prefixedFleet.planValue.nodes."tprefix-worker".groups == [ "tprefix-private-apps" ];
-        message = "nodePrefix should rewrite east-west group names so scratch fleets do not collide";
+        message = "withNodePrefix should rewrite east-west group names so scratch fleets do not collide";
       }
       {
-        assertion = prefixedFleet.nodes."tprefix-api".networking.hostName == "tprefix-api";
-        message = "nodePrefix should flow into the deployment-level identity (hostname, image name)";
+        assertion =
+          prefixedFleet.planValue.nodes."tprefix-api".replacementImage.destination == "tprefix-api:latest";
+        message = "withNodePrefix should prefix the registry destination so scratch pushes cannot clobber the base tag";
       }
       {
-        assertion = prefixedFleet.nodes."tprefix-worker".environment.etc."api-host".text == "tprefix-api";
+        assertion = prefixedFleet.nodes."tprefix-api".networking.hostName == "api";
+        message = "withNodePrefix is a plan-level rename: guest hostname and image name stay base-named so the prefixed fleet shares the base fleet's closures";
+      }
+      {
+        assertion =
+          prefixedFleet.planValue.nodes."tprefix-api".system == prefixedFleetBase.planValue.nodes.api.system
+          &&
+            prefixedFleet.planValue.nodes."tprefix-api".replacementImage.source
+            == prefixedFleetBase.planValue.nodes.api.replacementImage.source;
+        message = "withNodePrefix must reuse the base fleet's system closure and image source, not re-evaluate them";
+      }
+      {
+        assertion = prefixedFleet.nodes."tprefix-worker".environment.etc."api-host".text == "api";
         message = "nodes module-arg should resolve by the example's base name even when prefixed";
       }
     ];

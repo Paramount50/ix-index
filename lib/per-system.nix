@@ -572,14 +572,15 @@ let
 
   exampleFleets = ix.exampleFleetsFor { hostSystem = system; };
 
-  # Separate aggregation with "health-check-" prepended to every node name,
-  # so the lifecycle scripts that force-delete VMs by name can never clobber
-  # an unrelated production VM that happens to share the example's node name
-  # (`nginx`, `factions`, ...).
-  healthCheckExampleFleets = ix.exampleFleetsFor {
-    hostSystem = system;
-    nodePrefix = "health-check-";
-  };
+  # Same fleets with "health-check-" prepended to every external name, so the
+  # lifecycle scripts that force-delete VMs by name can never clobber an
+  # unrelated production VM that happens to share the example's node name
+  # (`nginx`, `factions`, ...). `withNodePrefix` only rewrites plan data, so
+  # both surfaces share one NixOS closure evaluation per node instead of
+  # evaluating every example fleet twice (ENG-2411).
+  healthCheckExampleFleets = lib.mapAttrs (
+    _name: fleet: fleet.withNodePrefix "health-check-"
+  ) exampleFleets;
 
   # Surface every example's `ix fleet <sub>` wrapper as a flake package.
   # Each example contributes `packages.<system>.<example>-{up,health,...}`,

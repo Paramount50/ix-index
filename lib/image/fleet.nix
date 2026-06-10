@@ -21,11 +21,6 @@
   deployment ? { },
   secrets ? { },
   nodes,
-  # Prefix prepended to every node name and to every `dependsOn` string.
-  # Lets a non-production consumer (test runner, scratch fleet) reuse an
-  # example without colliding with real VMs that share the natural node
-  # names. Defaults to empty so production callers see no change.
-  nodePrefix ? "",
 }:
 let
   inherit (builtins)
@@ -108,27 +103,6 @@ let
 
   isWrappedNode = value: isAttrs value && lib.any (key: value ? "${key}") wrappedNodeKeys;
 
-  prefixExternalName = name: nodePrefix + name;
-  prefixWrappedNode =
-    spec:
-    if !(isWrappedNode spec) then
-      spec
-    else
-      spec
-      // lib.optionalAttrs (spec ? dependsOn) {
-        dependsOn = map prefixExternalName (toList spec.dependsOn);
-      }
-      // lib.optionalAttrs (spec ? groups) {
-        groups = map prefixExternalName (toList spec.groups);
-      };
-  prefixedNodes =
-    if nodePrefix == "" then
-      nodes
-    else
-      lib.mapAttrs' (
-        name: spec: lib.nameValuePair (prefixExternalName name) (prefixWrappedNode spec)
-      ) nodes;
-
   normalizeNode =
     name: value:
     let
@@ -178,7 +152,7 @@ let
         ) spec.replicas
       );
 
-  rawNodeSpecs = lib.mapAttrs normalizeNode prefixedNodes;
+  rawNodeSpecs = lib.mapAttrs normalizeNode nodes;
   nodeSpecs = lib.concatMapAttrs expandReplicas rawNodeSpecs;
   knownDependency = dep: hasAttr dep rawNodeSpecs || hasAttr dep nodeSpecs;
   unknownDependencies = lib.filterAttrs (_: deps: deps != [ ]) (
@@ -236,14 +210,7 @@ let
     }
   ) checkedNodeSpecs;
 
-  # Module-args `nodes` is keyed by the example's base node names so cross-node
-  # references like `nodes.file-server.config.ix.networking.eastWest.hostName`
-  # keep working when the fleet was rebuilt with a `nodePrefix`. The prefix is
-  # an external (VM-name / image-name / hostname) concern; it must not change
-  # how an example refers to its own siblings.
-  nodeRefs = lib.mapAttrs' (
-    name: config: lib.nameValuePair (lib.removePrefix nodePrefix name) { inherit config; }
-  ) nodeConfigs;
+  nodeRefs = lib.mapAttrs (_name: config: { inherit config; }) nodeConfigs;
   planHealthChecks =
     config:
     lib.mapAttrs (_name: check: {
@@ -323,57 +290,107 @@ let
     secrets = secretSet.plan;
   };
 
-  plan = (pkgs.formats.json { }).generate "ix-fleet-plan.json" planValue;
+  # Rename a fleet's external identities without re-evaluating any NixOS
+  # closure: only plan data (node names, `dependsOn`, east-west `groups`, the
+  # registry `destination` the replacement image is pushed to) carries the
+  # prefix, while `system`/`switch` targets and the OCI image `source`/
+  # `sourceDrv` keep pointing at the shared base closures. The health-check
+  # runner relies on this so the 10 example fleets are evaluated once per
+  # `nix flake check`/`.#packages` eval instead of twice (ENG-2411). The
+  # guest-side identity (`networking.hostName`, `ix.image.name`) therefore
+  # stays base-named; the safety property the prefix exists for (lifecycle
+  # scripts only ever force-delete VMs named after plan nodes, e.g.
+  # `health-check-*`) lives entirely in the plan names.
+  prefixedPlanValue =
+    prefix:
+    let
+      prefixName = name: prefix + name;
+    in
+    {
+      order = map prefixName planValue.order;
+      nodes = lib.mapAttrs' (
+        name: node:
+        lib.nameValuePair (prefixName name) (
+          node
+          // {
+            name = prefixName name;
+            baseName = prefixName node.baseName;
+            dependsOn = map prefixName node.dependsOn;
+            groups = map prefixName node.groups;
+            replacementImage = node.replacementImage // {
+              destination = prefixName node.replacementImage.destination;
+            };
+          }
+        )
+      ) planValue.nodes;
+      inherit (planValue) secrets;
+    };
+
   userLocalBinPath = ''
     let home = ($env.HOME? | default "")
     if $home != "" {
       $env.PATH = [$"($home)/.local/bin"] ++ $env.PATH
     }
   '';
-  # Wraps `ix-fleet [sub]` with a stable PATH that includes ~/.local/bin so
-  # users see their installed `ix` binary, not whatever nix happens to find.
-  mkFleetCmd =
-    sub:
-    writeNushellApplication pkgs {
-      name = if sub == null then "ix-fleet" else "ix-fleet-${sub}";
-      runtimeInputs = [ ixFleet ];
-      text = ''
-        def --wrapped main [...args] {
-          ${userLocalBinPath}
-          exec ${lib.getExe ixFleet} --plan ${plan} ${lib.optionalString (sub != null) "${sub} "}...$args
-        }
-      '';
+
+  resultFor =
+    prefix:
+    let
+      externalName = name: prefix + name;
+      externalKeyed = lib.mapAttrs' (name: value: lib.nameValuePair (externalName name) value);
+      planValueFor = if prefix == "" then planValue else prefixedPlanValue prefix;
+      plan = (pkgs.formats.json { }).generate "ix-fleet-plan.json" planValueFor;
+      # Wraps `ix-fleet [sub]` with a stable PATH that includes ~/.local/bin so
+      # users see their installed `ix` binary, not whatever nix happens to find.
+      mkFleetCmd =
+        sub:
+        writeNushellApplication pkgs {
+          name = if sub == null then "ix-fleet" else "ix-fleet-${sub}";
+          runtimeInputs = [ ixFleet ];
+          text = ''
+            def --wrapped main [...args] {
+              ${userLocalBinPath}
+              exec ${lib.getExe ixFleet} --plan ${plan} ${lib.optionalString (sub != null) "${sub} "}...$args
+            }
+          '';
+        };
+
+      subcommands = lib.genAttrs [
+        "bootstrap"
+        "diff"
+        "down"
+        "health"
+        "replace"
+        "switch"
+        "up"
+      ] mkFleetCmd;
+    in
+    {
+      inherit (subcommands)
+        bootstrap
+        diff
+        down
+        replace
+        health
+        switch
+        up
+        ;
+      command = mkFleetCmd null;
+      planCommand = mkFleetCmd "plan";
+
+      inherit plan;
+      planValue = planValueFor;
+      nodes = externalKeyed nodeConfigs;
+      meta = externalKeyed checkedNodeSpecs;
+      packages = externalKeyed (lib.mapAttrs (_: config: config.ix.build.ociImage) nodeConfigs);
+      systemPackages = lib.mapAttrs' (
+        name: config: lib.nameValuePair "${externalName name}-system" config.system.build.toplevel
+      ) nodeConfigs;
+      # Prepend `newPrefix` to every external name; the underlying NixOS
+      # closures stay shared with the unprefixed fleet (see
+      # `prefixedPlanValue` above).
+      withNodePrefix = newPrefix: resultFor (newPrefix + prefix);
     };
 
-  subcommands = lib.genAttrs [
-    "bootstrap"
-    "diff"
-    "down"
-    "health"
-    "replace"
-    "switch"
-    "up"
-  ] mkFleetCmd;
-
 in
-{
-  inherit (subcommands)
-    bootstrap
-    diff
-    down
-    replace
-    health
-    switch
-    up
-    ;
-  command = mkFleetCmd null;
-  planCommand = mkFleetCmd "plan";
-
-  inherit plan planValue;
-  nodes = nodeConfigs;
-  meta = checkedNodeSpecs;
-  packages = lib.mapAttrs (_: config: config.ix.build.ociImage) nodeConfigs;
-  systemPackages = lib.mapAttrs' (
-    name: config: lib.nameValuePair "${name}-system" config.system.build.toplevel
-  ) nodeConfigs;
-}
+resultFor ""
