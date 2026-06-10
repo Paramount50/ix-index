@@ -130,13 +130,11 @@ let
     # settings key would, since flagSettings outranks user settings.json).
     # Re-enable 1M per machine: `export CLAUDE_CODE_DISABLE_1M_CONTEXT=`.
     CLAUDE_CODE_DISABLE_1M_CONTEXT = 1;
-    # Self-driving autonomy off fleet-wide. Background tasks are a
-    # `run_in_background` *parameter* (no tool to disallow), so this env knob is
-    # the only lever; the cron family is also dropped via `--disallowedTools`
-    # below, with this as defense in depth. `--set-default`, so a machine opts
-    # back in with `export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=` /
-    # `export CLAUDE_CODE_DISABLE_CRON=`.
-    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = 1;
+    # Self-scheduling off fleet-wide: the cron family is dropped via
+    # `--disallowedTools` below, with this env knob as defense in depth.
+    # `--set-default`, so a machine opts back in with
+    # `export CLAUDE_CODE_DISABLE_CRON=`. Background tasks stay enabled: the
+    # house prompt tells the agent to background its subagents by default.
     CLAUDE_CODE_DISABLE_CRON = 1;
   };
   envDefaultFlags = lib.concatLists (
