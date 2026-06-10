@@ -121,7 +121,11 @@ NO_SHELL = (
     "`os.walk` or `ls`; to edit, `view.edit(path, old, new)`, never blind. For meaning-based "
     "recall across a corpus, `import search`. When you genuinely must shell out, use the async "
     "`sh` (it runs off the loop, streams into the job's pageable output, and preserves clean "
-    "color); to run elsewhere pass `cwd=`, never a `cd X && ...` prefix."
+    "color); to run elsewhere pass `cwd=`, never a `cd X && ...` prefix. And shell out for "
+    "DATA, not text: when the CLI has a JSON mode (`gh --json`, `cargo metadata`, `nix "
+    "--json`) use it and parse with `.json()` / `.jsonl()` / `.df()` on the Output (`.df()` "
+    "is a polars frame ready to filter and render), one command per `sh()` call -- never "
+    "`cmd1; echo ===; cmd2` chains scraped apart with string splitting."
 )
 
 VERIFY = (

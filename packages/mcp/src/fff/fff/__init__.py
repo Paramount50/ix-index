@@ -1017,7 +1017,7 @@ def _isolated_file_finder(abspath: str, tmp: str, *, content_indexing: bool) -> 
     return ff
 
 
-def find(*, query: str, path, limit: int = 100) -> SearchResult:
+def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
     """Fuzzy file search over `path`, reusing a cached watched index.
 
     `path` may be a directory (searched whole) or a single file (searched on its
@@ -1037,9 +1037,11 @@ def find(*, query: str, path, limit: int = 100) -> SearchResult:
     return SearchResult(hits=hits, total_matched=len(hits), total_files=len(hits))
 
 
-def grep(*, query: str | list[str], path, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
+def grep(query: str | list[str], path=".", *, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
     """Content grep over `path`, reusing a cached watched (content-indexed) index.
 
+    `query` and `path` are positional like the shell's `grep PATTERN PATH`
+    (path defaults to the current directory); the options stay keyword-only.
     `query` is one pattern, or a list of patterns matched as literals in a single
     OR pass (Aho-Corasick) -- the one call for "where does any of these appear?",
     so you never loop grep over a list. `mode` is required (no default), so each
@@ -1106,12 +1108,12 @@ def grep(*, query: str | list[str], path, mode: str, limit: int = 50, glob: str 
     )
 
 
-async def afind(*, query: str, path, limit: int = 100) -> SearchResult:
+async def afind(query: str, path=".", *, limit: int = 100) -> SearchResult:
     """Async fuzzy file search: runs off the event loop (non-blocking)."""
     return await asyncio.to_thread(find, query=query, path=path, limit=limit)
 
 
-async def agrep(*, query: str | list[str], path, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
+async def agrep(query: str | list[str], path=".", *, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
     """Async content grep: runs off the event loop (non-blocking)."""
     return await asyncio.to_thread(grep, query=query, path=path, mode=mode, limit=limit, glob=glob)
 

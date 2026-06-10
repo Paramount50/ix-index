@@ -2168,6 +2168,19 @@ def install(user_ns: dict | None = None) -> None:
             target[_mod_name] = __import__(_mod_name)
         except Exception:
             pass
+    # The kernel is async-first and polars-first: nearly every session reaches
+    # for asyncio (ensure_future / sleep), json (every CLI's --json output), and
+    # pl within its first cells, and a NameError on `asyncio` in an async kernel
+    # is pure friction (observed twice in one 2026-06-10 session). Bound like
+    # sh/fff/view; an explicit import returns the same module.
+    target["asyncio"] = asyncio
+    target["json"] = json
+    try:
+        import polars as _polars_mod
+
+        target["pl"] = _polars_mod
+    except Exception:
+        pass
     target["api"] = api
 
     try:

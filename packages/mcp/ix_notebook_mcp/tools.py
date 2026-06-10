@@ -42,19 +42,26 @@ from . import guide, outputs
 from .config import config
 from .kernel import current_kernel
 
+# Order matters: clients truncate long instruction blocks from the tail, and a
+# 2026-06-10 session showed exactly that failure: the cut landed inside JOBS, so
+# NO_SHELL and POLARS never reached the model and it shelled out ls/grep and
+# scraped TSV all session. The rules that shape every single call (what to reach
+# for, what shape to return) come first; operational mechanics (job paging,
+# blocking, rendering details) follow; the module index and dashboard niceties
+# close. Losing the tail degrades gracefully; losing the head does not.
 _KERNEL_GUIDE = guide.compose(
     guide.INTRO,
     guide.NAMESPACE,
     guide.DISCOVER,
+    guide.NO_SHELL,
+    guide.POLARS,
+    guide.RESULT_CONTRACT,
     guide.JOBS,
     guide.PAGING,
     guide.BLOCKING,
     guide.modules_index(),
-    guide.NO_SHELL,
     guide.HTML,
     guide.VERIFY,
-    guide.POLARS,
-    guide.RESULT_CONTRACT,
     guide.RESULT_SPLIT,
     guide.RESULT_VARIANTS,
     guide.READABLE,

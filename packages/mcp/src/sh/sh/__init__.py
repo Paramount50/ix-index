@@ -117,6 +117,33 @@ _COLOR_ENV = {
 _MONO = "ui-monospace,SFMono-Regular,Menlo,monospace"
 
 
+# Local file listing / reading / searching has a bundled, polars-first owner.
+# When a command reaches for one of these tools directly, the Output carries a
+# one-line hint to the model naming the structured alternative. A hint, not an
+# error: piping through grep on a remote ssh command (the first token is then
+# `ssh`, not `grep`) or a genuinely odd local pipeline stays untouched.
+_STRUCTURED_OWNER = {
+    "ls": "view.ls() returns this directory as a polars frame (pre-imported)",
+    "tree": "view.tree() returns the tree as a polars frame (pre-imported)",
+    "cat": "view.cat() renders the file; the `read` tool reads it without flooding the dashboard",
+    "head": "view.cat() / the `read` tool with start/end replace head",
+    "tail": "view.cat() / the `read` tool with start/end replace tail",
+    "grep": "fff.grep() searches a cached content index and returns matches as a polars frame",
+    "rg": "fff.grep() searches a cached content index and returns matches as a polars frame",
+    "find": "fff.find() is typo-tolerant file find returning a polars frame",
+    "fd": "fff.find() is typo-tolerant file find returning a polars frame",
+}
+
+
+def _structured_hint(cmd: str | list[str]) -> str | None:
+    """A redirect hint when ``cmd`` starts with a tool a bundled module owns."""
+    if isinstance(cmd, str):
+        first = cmd.strip().split(None, 1)[0] if cmd.strip() else ""
+    else:
+        first = str(cmd[0]) if cmd else ""
+    return _STRUCTURED_OWNER.get(first.rsplit("/", 1)[-1])
+
+
 class ShellError(RuntimeError):
     """Raised by ``await sh(cmd, check=True)`` when the command exits non-zero.
 
@@ -138,11 +165,14 @@ class Output(_ResultBase):
     hands the model ``llm_result`` (the same output with escape codes removed).
     """
 
-    def __init__(self, *, cmd: str, code: int, raw: str, duration: float) -> None:
+    def __init__(
+        self, *, cmd: str, code: int, raw: str, duration: float, hint: str | None = None
+    ) -> None:
         self.cmd = cmd
         self.code = code
         self.raw = raw
         self.duration = duration
+        self.hint = hint
         if _HAS_RESULT:
             super().__init__(
                 user_html=self._render_html(),
@@ -217,13 +247,41 @@ class Output(_ResultBase):
             raise ShellError(self)
         return [_json.loads(line) for line in self.text.splitlines() if line.strip()]
 
+    def df(self):
+        """The command's JSON output as a polars DataFrame: the one-liner for any
+        CLI with a JSON mode.
+
+        ``(await sh("gh run list --json status,conclusion,displayTitle")).df()``
+        hands back a frame ready to ``.filter`` / ``.sort`` / render, instead of
+        TSV text to scrape. Accepts a top-level JSON array of objects, a single
+        object (one row), or JSON Lines. Same non-zero guard as :meth:`json`, and
+        the same merged-stream caveat: silence chatty stderr (``2>/dev/null``)
+        when the tool writes diagnostics on success.
+        """
+        import polars as pl
+
+        if not self.ok:
+            raise ShellError(self)
+        try:
+            value = _json.loads(self.text)
+        except _json.JSONDecodeError:
+            value = [_json.loads(line) for line in self.text.splitlines() if line.strip()]
+        if isinstance(value, dict):
+            value = [value]
+        return pl.DataFrame(value)
+
     def _render_text(self) -> str:
         body = self.text
-        if self.code == 0:
-            return body
-        # Flag a failure so the model never reads non-zero output as success.
-        marker = f"[exit {self.code}]"
-        return f"{body}\n{marker}" if body else marker
+        if self.code != 0:
+            # Flag a failure so the model never reads non-zero output as success.
+            marker = f"[exit {self.code}]"
+            body = f"{body}\n{marker}" if body else marker
+        if self.hint:
+            # Model view only: the human's terminal block stays clean. The hint
+            # teaches the structured alternative at the exact moment the weaker
+            # tool was reached for, which survives instruction truncation.
+            body = f"{body}\n[hint: {self.hint}]" if body else f"[hint: {self.hint}]"
+        return body
 
     def _render_html(self) -> str:
         body = _ansi_to_html(self.raw)
@@ -366,6 +424,17 @@ async def sh(
     With no ``timeout`` a command that keeps the stdout pipe open (a daemon it
     backgrounds, say) waits for that pipe to close. The await yields to the loop,
     so it never blocks other jobs; pass ``timeout`` to bound such a command.
+
+    Prefer structured output over text scraping: when the CLI has a JSON mode
+    (``gh --json``, ``cargo metadata``, ``nix --json``) use it and parse with
+    ``.json()`` / ``.jsonl()`` / ``.df()`` on the returned Output; ``.df()`` is a
+    polars frame ready to filter and render. Run ONE command per call and combine
+    the parsed results in Python, instead of chaining ``cmd1; echo ===; cmd2``
+    and splitting text. For local listing / reading / searching, the bundled
+    ``view`` and ``fff`` modules are the owners (`view.ls`, `view.cat`,
+    `fff.grep`, `fff.find`); reaching for ``ls``/``cat``/``grep``/``find``
+    through the shell returns an Output carrying a hint to the structured
+    alternative.
     """
     if isinstance(cmd, str) and re.match(r"\s*cd\b", cmd):
         raise ValueError(
@@ -452,6 +521,7 @@ async def sh(
         code=proc.returncode if proc.returncode is not None else -1,
         raw="".join(chunks),
         duration=duration,
+        hint=_structured_hint(cmd),
     )
     if check and not out.ok:
         raise ShellError(out)

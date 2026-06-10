@@ -120,8 +120,16 @@ BUILTINS: tuple[Builtin, ...] = (
     Builtin("doc", "the signature + docstring of any object, returned as a Result (help() only prints and returns None)"),
     Builtin("resources", "the live, self-updating views (a terminal, a widget)"),
     Builtin("register_resource", "publish a live Resource to the dashboard"),
-    Builtin("sh", "shell out on the loop; the Output IS a Result (ANSI as HTML for the human, `.text`/`.code`/`.ok` for you)"),
+    Builtin(
+        "sh",
+        "shell out on the loop; the Output IS a Result (ANSI as HTML for the human, "
+        "`.text`/`.code`/`.ok` for you), and `.json()`/`.jsonl()`/`.df()` parse a JSON-mode "
+        "CLI straight to data / a polars frame: ask the tool for --json, never scrape TSV",
+    ),
     Builtin("api", "the live catalog of every helper, as a polars frame (`api('grep')` to filter)"),
+    Builtin("asyncio", "stdlib asyncio, pre-bound: `asyncio.ensure_future` / `sleep` with no import"),
+    Builtin("json", "stdlib json, pre-bound: parse a CLI's --json output with no import"),
+    Builtin("pl", "polars, pre-bound: build/transform DataFrames with no import"),
     Builtin("DASHBOARD_URL", "this session's live dashboard URL"),
 )
 
