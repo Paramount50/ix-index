@@ -1,16 +1,16 @@
 # Contributing
 
-Bug reports and enhancement requests go to [GitHub Issues](https://github.com/indexable-inc/index/issues). Security reports follow [SECURITY.md](SECURITY.md) instead. Code changes land through pull requests against the `main` branch.
+Bug reports and enhancement requests go to [GitHub Issues](https://github.com/indexable-inc/index/issues). Security reports follow [SECURITY.md](SECURITY.md) instead. Code changes land directly on `main` after local verification; a pull request is the optional path when a change wants human or AI review (see [Workflow](AGENTS.md#workflow)).
 
 ## Local setup
 
-Run the repo lint before pushing:
+Local verification is the gate that decides whether a change is safe to land, not CI. A single shared runner node serves the whole team, so routing routine validation through it overloads the node and slows everyone down; verify locally, then push. Run the repo lint before pushing:
 
 ```sh
 nix run .#lint
 ```
 
-It checks Nix formatting (nixfmt), Statix, Deadnix, and the repo's ast-grep rules. CI runs the same derivation as a flake check.
+It checks Nix formatting (nixfmt), Statix, Deadnix, and the repo's ast-grep rules. CI runs the same derivation as a flake check, but treat that run as advisory signal rather than a landing gate.
 
 The repo ships a tracked git pre-commit hook at `.githooks/pre-commit` that calls the lint app. To activate it locally, `direnv allow` in the repo root: `.envrc` exports `core.hooksPath` so git uses the tracked hook. No additional shell or framework is needed.
 
@@ -186,4 +186,4 @@ One logical change per commit; see the [Workflow](AGENTS.md#workflow) section fo
 
 ## Pull requests
 
-PRs target `main` and need passing required status checks, currently `flake-check` and `ai review approved`. Repositories migrating an older review gate can set `AI_REVIEW_REQUIRED_CHECK_NAME` until branch protection uses the model-neutral check name. The PR description should answer the same "why" question the commit body answers, plus anything reviewer-only: rollout plan, known follow-ups, and reviewer-specific context.
+PRs are the optional review path, not the default way to land a change; verified changes push directly to `main`. When you do open one, it targets `main`. Required status checks (currently `flake-check` and `ai review approved`) on a PR are signal, not a queue you are required to babysit once local gates pass. Repositories migrating an older review gate can set `AI_REVIEW_REQUIRED_CHECK_NAME` until branch protection uses the model-neutral check name. The PR description should answer the same "why" question the commit body answers, plus anything reviewer-only: rollout plan, known follow-ups, and reviewer-specific context.
