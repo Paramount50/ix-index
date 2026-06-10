@@ -673,6 +673,12 @@ let
         // rustPackageSet;
         explicitChecks = {
           inherit (tests) eval;
+          # Boots a NixOS VM running the minecraft-blocks producer's Paper
+          # server and asserts the BlockEvents plugin's onEnable succeeded
+          # with no exception (ENG-2186). Paper's paperclip bootstrap is
+          # pre-run at build time so the VM never needs the network; see
+          # tests/minecraft-blocks-vm.nix.
+          minecraft-blocks-vm = tests.minecraftBlocksVm;
           # Instruction files are not committed; they are rendered live by the
           # SessionStart hook. This gate forces the rendered always-on documents
           # (which evaluates the always-on char cap assertion) and the combined

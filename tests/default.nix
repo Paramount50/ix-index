@@ -12,6 +12,10 @@ let
   fs = lib.fileset;
   repoPackages = ix.packageSetFor pkgs;
   portableServicesTest = import ./portable-services.nix { inherit lib pkgs ix; };
+  # VM boot smoke test for the minecraft-blocks Paper plugin (ENG-2186). Not
+  # part of the `eval` aggregate: it boots a qemu VM, so it is its own check
+  # (`checks.<system>.minecraft-blocks-vm`).
+  minecraftBlocksVmTest = import ./minecraft-blocks-vm.nix { inherit lib pkgs ix; };
   # Public Rust SDK: links the prebuilt, R2-hosted ix-sdk-wire rlib with no
   # ix-sdk-wire source (ENG-2151 / ENG-2154). `proof` is the end-to-end check.
   sdkRust = import ../sdk/rust { inherit lib pkgs ix; };
@@ -4852,6 +4856,7 @@ in
   # End-to-end: public ix-sdk links the R2-hosted prebuilt ix-sdk-wire rlib.
   sdkRustPrebuilt = sdkRust.proof;
   portableServices = portableServicesTest;
+  minecraftBlocksVm = minecraftBlocksVmTest;
 
   # Aggregate. Pulls every per-image test into one derivation so
   # `nix flake check` covers the whole suite.
