@@ -110,6 +110,13 @@ MODULES: tuple[Module, ...] = (
         "scrolled until it has `limit` tweets (one row each, with author, time, text and counts). Reads the signed-in account's personal feed, so incognito sessions only (a shared room never sees your timeline)",
     ),
     Module(
+        "slack",
+        "read Slack channels, messages, and threads into polars, send messages, and search "
+        "(`await slack.channels()` / `messages(channel)` / `thread(channel, ts)` / `send(channel, text)` / `search(query)`); "
+        "`slack.login(token)` stores your user token (mode 0600); `status()` / `logout()` manage it. "
+        "Incognito sessions only (personal Slack data never reaches a shared room)",
+    ),
+    Module(
         "linear",
         "Linear issue tracker over GraphQL using LINEAR_API_KEY: "
         "`await linear.issue(id)` / `issue_update(id, **fields)` / "
