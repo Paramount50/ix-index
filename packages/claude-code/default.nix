@@ -27,36 +27,9 @@
   # `claude-code.override { dangerouslySkipPermissions = false; }`.
   dangerouslySkipPermissions ? true,
 
-  # Opt-in alternative posture: confine the agent to a fixed allow-list and
-  # nothing else. Set to a list of permission rules (typically one MCP server,
-  # e.g. `[ "mcp__index" "mcp__index__*" ]`) and the wrapper switches to plain
-  # `default` permission mode, `allow`s exactly those rules, and bare-`deny`s
-  # every other built-in tool (Bash, Read, Edit, Write, ...), stripping them from
-  # the model's context. The agent can then only use the allowed tools; anything
-  # else (shell, file IO, HTTP) it must do through whatever those tools expose
-  # (e.g. a python/Jupyter MCP kernel). A built-in name listed here is removed
-  # from the deny list, so you can also re-allow a specific built-in.
-  # `bypassPermissions` cannot express this (it skips the permission layer
-  # entirely, so deny rules are silently ignored) and `dontAsk` is intentionally
-  # avoided. Takes PRECEDENCE over `dangerouslySkipPermissions`, since bypass
-  # would void the deny rules. `null` (default) leaves the normal posture.
-  restrictToTools ? null,
-
-  # Tools dropped from the model's tool set via `--disallowedTools`, which works
-  # regardless of permission mode (a `permissions.deny` would be skipped under
-  # the default bypass posture). Empty by default: no tool blocking, every
-  # built-in ships enabled. The groups this package used to block by default are
-  # kept as data in `toolGroups` below (also on passthru), so the old lean
-  # posture is one override away:
-  #   claude-code.override {
-  #     disallowedTools = with claude-code.toolGroups; autonomy ++ meta;
-  #   }
-  disallowedTools ? [ ],
-
   # Extra settings.json keys to ship through the read-only flagSettings layer
   # (the `--settings` file below), deep-merged UNDER the computed defaults so the
-  # security-relevant keys this package controls (the restrictToTools / bypass
-  # `permissions`) always win on a conflict. Lets a consumer keep its whole
+  # keys this package controls always win on a conflict. Lets a consumer keep its whole
   # static Claude config (hooks, statusLine, enabledPlugins, marketplaces, ...)
   # in Nix and out of a hand-maintained ~/.claude/settings.json: flagSettings
   # merges per-key ABOVE user settings and is a separate read-only layer, so it
@@ -151,45 +124,6 @@ let
     ]) wrapperEnvDefaults
   );
 
-  # Tool groups this package used to pass to `--disallowedTools` by default,
-  # kept as data (and exposed via `passthru.toolGroups`) so re-adding the old
-  # posture is one `disallowedTools` override rather than archaeology. Nothing
-  # here is blocked by default.
-  #  - autonomy: self-watching (Monitor), self-scheduling (ScheduleWakeup, the
-  #    cron family, and RemoteTrigger, which creates/runs claude.ai routines
-  #    server-side), and the user-interrupting PushNotification. Monitor,
-  #    PushNotification, and RemoteTrigger are server-gated with no env knob,
-  #    so `--disallowedTools` is their only off-switch.
-  #  - meta: the structured plan/task/team/worktree/question surface, dropped
-  #    for a lean code-execution agent that works turn-by-turn through an MCP
-  #    kernel instead of branching into those flows.
-  toolGroups = {
-    autonomy = [
-      "Monitor"
-      "ScheduleWakeup"
-      "RemoteTrigger"
-      "PushNotification"
-      "CronCreate"
-      "CronDelete"
-      "CronList"
-    ];
-    meta = [
-      "AskUserQuestion"
-      "EnterPlanMode"
-      "ExitPlanMode"
-      "TaskCreate"
-      "TaskList"
-      "TaskGet"
-      "TaskUpdate"
-      "TeamCreate"
-      "TeamDelete"
-      "SendMessage"
-      "EnterWorktree"
-      "ExitWorktree"
-      "WaitForMcpServers"
-    ];
-  };
-
   # Settings-key defaults that have no env knob, shipped as a JSON the wrapper
   # injects via `--settings`. The package wraps the binary, so it can carry env
   # vars and CLI flags but not a settings.json *key* directly. `--settings` adds
@@ -205,70 +139,21 @@ let
   # prepend ours and silently shadow a user's `--settings`.
   #   cleanupPeriodDays: keep transcripts + the wrapper's --debug logs ~1yr for
   #     the optimize analysis and troubleshooting (CLI default 30).
-  #   permissions.{allow,deny} (only when `restrictToTools` is set, opt-in):
-  #     confine the agent to that allow-list and strip every other built-in tool
-  #     from context. Arrays concat across layers and a deny at any scope wins, so
-  #     a downstream user/project/local settings file cannot un-deny these; the
-  #     only un-lock is dropping the nix `restrictToTools` override. Caveat: a
-  #     managed `bypassPermissions` skips the whole permission layer, so these
-  #     deny rules would be inert under one.
-  #   skipDangerousModePermissionPrompt (the default, unless `restrictToTools`
-  #     takes precedence): pre-accept the one-time dangerous-mode warning, which
-  #     the baked `--dangerously-skip-permissions` flag alone does not suppress.
-  #     Honored in every scope except *project* (a guard against untrusted
-  #     repos), so it takes effect from this flagSettings layer. The dev image
-  #     (images/dev/development-base) enforces the same posture via managed
-  #     settings; see its comment for the full rationale.
-  #
-  # Bare tool names as deny rules remove the built-in tool from the model's
-  # context entirely (per the permissions docs), not merely gate it behind a
-  # prompt, so the agent never sees a shell/file/web/subagent tool. Read-only Bash
-  # (`cat`, `ls`, ...) is otherwise always allowed in every mode, so denying bare
-  # `Bash` is what actually closes the shell.
-  deniedBuiltinTools = [
-    "Agent"
-    "Bash"
-    "BashOutput"
-    "Edit"
-    "Glob"
-    "Grep"
-    "KillShell"
-    "ListMcpResources"
-    "NotebookEdit"
-    "PowerShell"
-    "Read"
-    "ReadMcpResource"
-    "Skill"
-    "SlashCommand"
-    "Task"
-    "TodoWrite"
-    "WebFetch"
-    "WebSearch"
-    "Write"
-  ];
-
-  # The lockdown is active whenever the caller pins an allow-list.
-  restrictTools = restrictToTools != null;
+  #   skipDangerousModePermissionPrompt (the default): pre-accept the one-time
+  #     dangerous-mode warning, which the baked `--dangerously-skip-permissions`
+  #     flag alone does not suppress. Honored in every scope except *project* (a
+  #     guard against untrusted repos), so it takes effect from this flagSettings
+  #     layer. The dev image (images/dev/development-base) enforces the same
+  #     posture via managed settings; see its comment for the full rationale.
 
   # Caller's extraSettings first, then the computed defaults recursively merged
-  # ON TOP, so the security-relevant `permissions`/bypass keys below always win a
-  # conflict while the caller's other keys (hooks, statusLine, ...) pass through.
+  # ON TOP, so the keys below always win a conflict while the caller's other
+  # keys (hooks, statusLine, ...) pass through.
   settingsDefaults = ix.deepMerge.rhs extraSettings (
     {
       cleanupPeriodDays = 365;
     }
-    // lib.optionalAttrs restrictTools {
-      permissions = {
-        allow = restrictToTools;
-        # A built-in named in the allow-list is re-allowed by dropping it here.
-        deny = lib.subtractLists restrictToTools deniedBuiltinTools;
-      };
-    }
-    # restrictToTools takes precedence: bypass would skip the permission layer
-    # and void its deny rules, so the wrapper bakes the bypass flag (see
-    # `postureWrapperArgs`) and this warning pre-accept only when no allow-list
-    # is pinned.
-    // lib.optionalAttrs (dangerouslySkipPermissions && !restrictTools) {
+    // lib.optionalAttrs dangerouslySkipPermissions {
       skipDangerousModePermissionPrompt = true;
     }
   );
@@ -276,20 +161,13 @@ let
     (formats.json { }).generate "claude-code-default-settings.json"
       settingsDefaults;
 
-  # Posture flags derived from the args above (see their comments): the
-  # opt-in `--disallowedTools` list and the default
-  # `--dangerously-skip-permissions`. Baked with `--add-flags` and rendered
-  # through escapeShellArgs, same as the system-prompt pair below; empty lists
-  # contribute nothing.
-  postureWrapperArgs =
-    lib.optionals (disallowedTools != [ ]) [
-      "--add-flags"
-      "--disallowedTools ${lib.concatStringsSep "," disallowedTools}"
-    ]
-    ++ lib.optionals (dangerouslySkipPermissions && !restrictTools) [
-      "--add-flags"
-      "--dangerously-skip-permissions"
-    ];
+  # The default `--dangerously-skip-permissions` posture (see its arg comment),
+  # baked with `--add-flags` and rendered through escapeShellArgs, same as the
+  # system-prompt pair below; an empty list contributes nothing.
+  postureWrapperArgs = lib.optionals dangerouslySkipPermissions [
+    "--add-flags"
+    "--dangerously-skip-permissions"
+  ];
 
   # System-prompt override (see the `systemPrompt` arg). Materialize the text to
   # a store file and add `--system-prompt-file <path>` as makeBinaryWrapper args.
@@ -478,10 +356,7 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
 
-  passthru = {
-    inherit toolGroups;
-  }
-  // lib.optionalAttrs (updateScript != null) {
+  passthru = lib.optionalAttrs (updateScript != null) {
     inherit updateScript;
   };
 
