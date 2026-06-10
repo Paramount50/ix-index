@@ -9,16 +9,43 @@ auto-started dashboard shows every running execution and its live output.
 ## Quickstart
 
 ```
-nix run .#mcp -- serve                # MCP over stdio (what an MCP client launches)
-nix run .#mcp -- serve --http :8000   # MCP over streamable HTTP instead
-nix run .#mcp -- dashboard            # open the running server's dashboard URL
-nix run .#mcp -- eval '1 + 2'         # one-shot expression on a throwaway kernel
+nix run .#mcp -- serve                       # MCP over stdio (what an MCP client launches)
+nix run .#mcp -- serve --http :8000          # MCP over streamable HTTP instead
+nix run .#mcp -- serve --session work.ixnb   # same, recorded in a reopenable session file
+nix run .#mcp -- notebook work.ixnb          # the engine alone: kernel + dashboard, no MCP
+nix run .#mcp -- dashboard                   # open the running server's dashboard URL
+nix run .#mcp -- eval '1 + 2'                # one-shot expression on a throwaway kernel
 ```
 
 When `serve` starts it prints a dashboard URL to stderr. The dashboard is
 read-only (it renders the execution log); access is gated by reachability: the
 default bind is loopback, and the fleet only exposes it over Tailscale (see
 [Remote access](#remote-access)).
+
+## Sessions: a notebook file whose state comes back
+
+By default a server is ephemeral: its execution log is wiped at startup. Point
+it at a session file instead (`serve --session work.ixnb`, or the standalone
+`notebook work.ixnb`) and that one SQLite file becomes the durable notebook:
+
+- **Everything is recorded.** Every cell, its output, its rich renders (tables,
+  plots, HTML), and a serialized **checkpoint of the kernel namespace** (taken
+  after cells finish, debounced; serialized per-name with dill so functions and
+  classes defined in cells survive).
+- **Reopening restores state instantly.** Start the server on an existing file
+  and the latest checkpoint loads straight back into the kernel; only the few
+  successful cells newer than the checkpoint re-run (`kind='replay'` rows in the
+  log), and cells that were mid-run when the previous server died are marked
+  `interrupted`. The restore holds the kernel's shell channel, so the first new
+  cell always sees the restored state.
+- **Failure is self-healing.** A checkpoint that fails to save just leaves the
+  previous one in place; replay covers everything since it. Values no
+  serializer can carry (open sockets, live jobs, terminals) are skipped and
+  reported; their defining cells are in the log to re-run.
+
+`ix-notebook work.ixnb` (the second binary this package installs) is the same
+engine without the MCP surface: our jupyter-shaped serve. The MCP server is one
+client of that engine; the dashboard and the room feed are others.
 
 ## The main tool
 
@@ -129,7 +156,9 @@ owns the parent directory, and the fresh-log invariant still holds: the store
 and its `-wal`/`-shm` sidecars are wiped at startup. Unset, the store is minted
 in the private runtime dir, keyed by the data-API port
 (`IX_MCP_DASHBOARD_PORT`, free port if unset) so concurrent servers never
-collide.
+collide. `--session` is the one mode that keeps the store across runs (that is
+its point); it refuses to combine with `IX_MCP_STORE` rather than guess which
+contract you meant.
 
 ## Remote access
 

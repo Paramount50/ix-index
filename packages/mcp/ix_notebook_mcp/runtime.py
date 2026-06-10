@@ -195,10 +195,15 @@ class Job:
     """A single ``python_exec`` execution: an awaitable handle over the asyncio
     task running the code, with its captured output, result, and status."""
 
-    def __init__(self, code: str, name: str | None = None, budget: float = 15.0):
+    def __init__(self, code: str, name: str | None = None, budget: float = 15.0, kind: str = "cell"):
         self.id = uuid.uuid4().hex[:8]
         self.code = code
         self.name = name or self.id
+        # 'cell' for a normal execution; 'replay' for a re-run performed while
+        # reopening a session file. Replays never feed future replays
+        # (store.replayable filters on this), so a session cannot double-run
+        # its history.
+        self.kind = kind
         self.status = "running"
         self.started = time.time()
         # The foreground budget (seconds) this run was given before it backgrounds;
@@ -1153,7 +1158,15 @@ async def _runner(job: Job, ns: dict) -> None:
     token = _ix_current.set(job)
     if _store is not None and _store_conn is not None:
         try:
-            _store.start(_store_conn, id=job.id, name=job.name, code=job.code, started_at=job.started, budget=job.budget)
+            _store.start(
+                _store_conn,
+                id=job.id,
+                name=job.name,
+                code=job.code,
+                started_at=job.started,
+                budget=job.budget,
+                kind=job.kind,
+            )
         except Exception:
             # Best-effort logging: a store write must never abort the job.
             pass
@@ -1255,6 +1268,7 @@ async def _runner(job: Job, ns: dict) -> None:
         job.ended = time.time()
         _ix_current.reset(token)
         _persist_final(job)
+        _mark_snapshot_dirty()
 
 
 def _persist_final(job: Job) -> None:
@@ -1969,13 +1983,252 @@ async def _flusher() -> None:
                     pass
         await _sweep_resources()
         cells._sync()
+        if _SESSION and _snapshot_dirty and not _snapshot_busy and not _restoring:
+            # Fire-and-forget so a multi-second dump of a big namespace never
+            # stalls the live-output mirroring this loop exists for.
+            asyncio.ensure_future(_snapshot_tick())
 
 
-async def __ix_run(code: str, budget: float = 15.0, name: str | None = None) -> Job:
+# --------------------------------------------------------------------------- #
+# Session persistence: make the store file a reopenable notebook.
+#
+# With IX_MCP_SESSION=1 (set by `serve --session FILE`) the runtime checkpoints
+# the user namespace into the store after cells finish, and `__ix_restore`
+# (sent by the server when it reopens an existing file) loads the latest
+# checkpoint back -- instant state -- then re-runs only the successful cells
+# that finished after it. The failure mode is self-healing by construction: a
+# checkpoint that fails to save simply leaves the previous one in place, and
+# replay covers everything since it, so a reopen can be slower but never wrong.
+#
+# What a checkpoint holds: every name the USER bound (anything added to the
+# namespace after install()), serialized per-name with dill so functions and
+# classes defined in cells survive. Modules, underscore names, and values dill
+# cannot serialize (sockets, running jobs, live handles) are skipped and
+# reported -- no serializer can resurrect a live socket; the cell that made it
+# is in the log and replays or re-runs on demand.
+# --------------------------------------------------------------------------- #
+
+_SESSION = bool(os.environ.get("IX_MCP_SESSION"))
+_snapshot_dirty = False
+_snapshot_busy = False
+_snapshot_last = 0.0
+_baseline_names: frozenset[str] = frozenset()
+# True while __ix_restore is replaying. The debounced checkpoint must not fire
+# then: replayed cells' source rows carry ended_at from the PREVIOUS run, so a
+# mid-restore checkpoint would advance the anchor past the cells not yet
+# replayed -- a crash right after it would lose them. The restore takes one
+# explicit checkpoint when it completes instead.
+_restoring = False
+
+# At most one checkpoint per this many seconds: a burst of short cells costs one
+# dump, not one per cell.
+_SNAPSHOT_MIN_INTERVAL = 5.0
+
+# Per-value ceiling on a serialized binding. A frame this large makes every
+# checkpoint write (and the session file) balloon; past it the value is skipped
+# and the cell that built it replays on reopen instead.
+_SNAPSHOT_MAX_VALUE_BYTES = 64_000_000
+
+
+def _mark_snapshot_dirty() -> None:
+    global _snapshot_dirty
+    if _SESSION:
+        _snapshot_dirty = True
+
+
+def _dill():
+    """The serializer for checkpoints: dill (handles functions/classes defined
+    in cells, the common case for an agent session), else stdlib pickle so a
+    bare interpreter without dill still checkpoints plain data."""
+    try:
+        import dill
+
+        return dill
+    except Exception:
+        import pickle
+
+        return pickle
+
+
+def _snapshot_payload(candidates: dict) -> tuple[bytes, list[str], list[dict]]:
+    """Serialize ``candidates`` per-name (one unpicklable value must not void the
+    whole checkpoint). Returns (blob, kept names, skipped). Runs off the loop --
+    dumping a big namespace is CPU-bound."""
+    import pickle
+
+    dumper = _dill()
+    # recurse=True makes dill pickle only the globals a function actually
+    # references, instead of its entire ``__globals__`` (the whole user
+    # namespace, which drags every unpicklable live object into every helper).
+    # The restored function gets its own copy of those referenced globals; a
+    # helper that mutates module-level state through them is the one shape this
+    # cannot preserve, and the cell that defined it is in the log to re-run.
+    kwargs = {"recurse": True} if getattr(dumper, "__name__", "") == "dill" else {}
+    named: dict[str, bytes] = {}
+    skipped: list[dict] = []
+    for name, value in candidates.items():
+        try:
+            payload = dumper.dumps(value, **kwargs)
+        except Exception as exc:
+            skipped.append({"name": name, "reason": f"{type(exc).__name__}: {exc}"[:200]})
+            continue
+        if len(payload) > _SNAPSHOT_MAX_VALUE_BYTES:
+            skipped.append({"name": name, "reason": f"too large ({len(payload)} bytes)"})
+            continue
+        named[name] = payload
+    # The outer envelope is stdlib pickle (a dict of str -> bytes always
+    # pickles), so restore can open it even when dill versions drift; each inner
+    # value is tried independently there too.
+    return pickle.dumps(named), sorted(named), skipped
+
+
+def _snapshot_candidates(ns: dict) -> dict:
+    """The names a checkpoint covers: bound after install() (so the runtime's own
+    surface and the preamble never bloat the file), not underscored, not modules
+    (an import is one cheap replayed line; module objects pickle poorly)."""
+    return {
+        name: value
+        for name, value in ns.items()
+        if name not in _baseline_names
+        and not name.startswith("_")
+        and not isinstance(value, types.ModuleType)
+    }
+
+
+async def _snapshot_now() -> dict:
+    """Take one checkpoint now. The timestamp is taken BEFORE the namespace is
+    copied: a cell finishing mid-dump may or may not be captured, and an earlier
+    stamp errs toward replaying it -- re-running a captured cell overwrites equal
+    state, while the reverse (assuming an uncaptured cell was captured) would
+    lose it."""
+    if _store is None or _store_conn is None:
+        return {"names": [], "skipped": []}
+    ns = _user_ns if _user_ns is not None else globals()
+    created = time.time()
+    candidates = _snapshot_candidates(dict(ns))
+    blob, names, skipped = await asyncio.to_thread(_snapshot_payload, candidates)
+    _store.save_snapshot(
+        _store_conn, created_at=created, blob=blob, names=names, skipped=skipped
+    )
+    return {"names": names, "skipped": skipped}
+
+
+async def _snapshot_tick() -> None:
+    global _snapshot_busy, _snapshot_dirty, _snapshot_last
+    if _snapshot_busy or time.time() - _snapshot_last < _SNAPSHOT_MIN_INTERVAL:
+        return
+    _snapshot_busy = True
+    _snapshot_dirty = False
+    try:
+        await _snapshot_now()
+    except Exception:
+        # Leave the previous checkpoint in place; replay covers the gap on
+        # reopen. The next finished cell re-marks dirty, so this also cannot
+        # spin on a persistently failing dump.
+        pass
+    finally:
+        _snapshot_last = time.time()
+        _snapshot_busy = False
+
+
+async def __ix_snapshot() -> "Result":
+    """Checkpoint the namespace to the session store right now (the server sends
+    this on shutdown; callable any time)."""
+    info = await _snapshot_now()
+    kept, skipped = len(info["names"]), info["skipped"]
+    note = f"session checkpoint: {kept} names saved"
+    if skipped:
+        note += f", {len(skipped)} skipped ({', '.join(s['name'] for s in skipped[:10])})"
+    return Result.ok(note)
+
+
+# Ceiling on one replayed cell. Everything in the replay set completed once, so
+# this only trips on a cell whose duration is environment-dependent (it waited
+# on something external); such a cell is cancelled and reported, not allowed to
+# wedge the reopen forever.
+_REPLAY_BUDGET = 600.0
+
+
+async def __ix_restore() -> None:
+    """Reopen a session: load the latest checkpoint into the namespace (instant
+    state), then re-run the successful cells that finished after it, oldest
+    first. Prints its summary -- this runs as a raw execute outside any job, so
+    the prints reach the server's log, not a job buffer."""
+    global _restoring
+    if _store is None or _store_conn is None:
+        print("session restore: no store configured")
+        return
+    _restoring = True
+    try:
+        await _restore_body()
+    finally:
+        _restoring = False
+
+
+async def _restore_body() -> None:
+    ns = _user_ns if _user_ns is not None else globals()
+    import pickle
+
+    loader = _dill()
+    snap = None
+    try:
+        snap = _store.latest_snapshot(_store_conn)
+    except Exception as exc:
+        print(f"session restore: checkpoint read failed ({exc}); replaying the full log")
+    restored: list[str] = []
+    load_failed: list[str] = []
+    if snap is not None:
+        try:
+            named = pickle.loads(snap["blob"])
+        except Exception as exc:
+            print(f"session restore: checkpoint decode failed ({exc}); replaying the full log")
+            named, snap = {}, None
+        else:
+            for name, payload in named.items():
+                try:
+                    ns[name] = loader.loads(payload)
+                    restored.append(name)
+                except Exception:
+                    load_failed.append(name)
+    since = snap["created_at"] if snap is not None else None
+    rows: list[dict] = []
+    try:
+        rows = _store.replayable(_store_conn, since)
+    except Exception as exc:
+        print(f"session restore: could not read the replay set ({exc})")
+    replay_failed: list[str] = []
+    for row in rows:
+        job = await __ix_run(
+            row["code"], budget=_REPLAY_BUDGET, name=f"replay:{row['name'] or row['id']}", kind="replay"
+        )
+        if job.running():
+            job.cancel()
+            replay_failed.append(f"{row['id']} (exceeded {_REPLAY_BUDGET:.0f}s)")
+        elif job.status != "done":
+            replay_failed.append(row["id"])
+    if _SESSION:
+        # Fold the replayed state into a fresh checkpoint so the NEXT reopen is
+        # all-instant (and replays never feed future replays).
+        try:
+            await _snapshot_now()
+        except Exception:
+            pass
+    parts = [f"{len(restored)} names restored instantly"]
+    if snap is not None and snap.get("skipped"):
+        parts.append(f"{len(snap['skipped'])} not in checkpoint ({', '.join(s['name'] for s in snap['skipped'][:10])})")
+    if load_failed:
+        parts.append(f"{len(load_failed)} failed to load ({', '.join(load_failed[:10])})")
+    parts.append(f"{len(rows)} cells replayed")
+    if replay_failed:
+        parts.append(f"{len(replay_failed)} replays failed ({', '.join(replay_failed[:10])})")
+    print("session restore: " + "; ".join(parts))
+
+
+async def __ix_run(code: str, budget: float = 15.0, name: str | None = None, kind: str = "cell") -> Job:
     """Run ``code`` as a task; wait up to ``budget`` for it; return the Job either
     way (done, or still running in the background)."""
     ns = _user_ns if _user_ns is not None else globals()
-    job = Job(code, name, budget=budget)
+    job = Job(code, name, budget=budget, kind=kind)
     jobs[job.id] = job
     job.task = asyncio.ensure_future(_runner(job, ns))
     await asyncio.wait({job.task}, timeout=budget)
@@ -2352,6 +2605,8 @@ def install(user_ns: dict | None = None) -> None:
     target["__ix_run"] = __ix_run
     target["__ix_exec"] = __ix_exec
     target["__ix_read"] = __ix_read
+    target["__ix_snapshot"] = __ix_snapshot
+    target["__ix_restore"] = __ix_restore
     target["DASHBOARD_URL"] = os.environ.get("IX_MCP_DASHBOARD_URL", "")
     # `sh` is a bundled, callable module (see packages/mcp/src/sh). Bind it here
     # so `await sh(cmd)` works with no import, the way Result/cells/jobs do; an
@@ -2387,6 +2642,12 @@ def install(user_ns: dict | None = None) -> None:
     except Exception:
         pass
     target["api"] = api
+
+    # Everything in the namespace up to here is the runtime's own surface plus
+    # the kernel preamble -- not user state. Session checkpoints cover only the
+    # names bound after this line (see _snapshot_candidates).
+    global _baseline_names
+    _baseline_names = frozenset(target)
 
     try:
         asyncio.get_event_loop().create_task(_flusher())
