@@ -20,10 +20,10 @@ index.lib.mkFleet {
   nodes = {
     minecraft = {
       groups = [ eastWestGroup ];
-      deployment = {
-        ipv4 = true;
-        healthChecks = [ "minecraft" ];
-      };
+      # Every declared ix.healthChecks entry (the minecraft module's unit
+      # check included) is serialized into the plan and waited on by
+      # `ix fleet up`; there is no per-node selector (ENG-2416).
+      deployment.ipv4 = true;
       modules = [ ./minecraft.nix ];
     };
 
