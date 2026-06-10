@@ -78,6 +78,12 @@ MODULES: tuple[Module, ...] = (
         "generate and read the task-graph demo's SQLite DAG (`tasks.seed` / `load` / `frame`)",
     ),
     Module(
+        "mcp_client",
+        "call any MCP server's tools from Python: `await mcp_client.connect(url_or_command)` "
+        "returns a live server whose `.tools` is a polars frame and whose `await srv.call(tool, "
+        "**args)` runs a tool (stdio or streamable-HTTP, bearer-token / header auth)",
+    ),
+    Module(
         "worktree",
         "do risky or parallel work on a throwaway branch in its own checkout, leaving the main "
         "tree untouched",
