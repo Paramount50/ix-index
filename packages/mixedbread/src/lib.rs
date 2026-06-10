@@ -274,6 +274,17 @@ pub struct AnswerResponse {
     pub sources: Vec<Chunk>,
 }
 
+/// One reranked document from [`Client::rerank`]: its position in the submitted
+/// input list and its relevance score, already sorted most-relevant first by
+/// the API.
+#[derive(Debug, Clone, Copy)]
+pub struct RerankHit {
+    /// Index into the `input` slice the caller submitted.
+    pub index: usize,
+    /// Relevance score for the query.
+    pub score: f32,
+}
+
 /// Indexing progress for a store: how many files are still being processed.
 #[derive(Debug, Clone, Copy)]
 pub struct StoreStatus {
@@ -610,6 +621,47 @@ impl Client {
         })
     }
 
+    /// Rerank caller-supplied documents against a query on `/v1/reranking`.
+    ///
+    /// Unlike [`search`](Self::search), nothing is read from a store: the
+    /// candidate texts come from the caller (e.g. lines piped into the `search`
+    /// CLI) and only their ranking comes from the API. `model` names the
+    /// reranking model (see [`DEFAULT_RERANK_MODEL`]); `top_k` caps the
+    /// returned hits. The response is already sorted most-relevant first; each
+    /// [`RerankHit::index`] points back into `input`, so the documents
+    /// themselves are never echoed over the wire (`return_input: false`).
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or cannot be decoded.
+    pub async fn rerank(
+        &self,
+        model: &str,
+        query: &str,
+        input: &[String],
+        top_k: usize,
+    ) -> Result<Vec<RerankHit>> {
+        let request = RerankRequest {
+            model,
+            query,
+            input,
+            top_k,
+            return_input: false,
+        };
+        let rerank_url = self.url("/v1/reranking");
+        let resp = self
+            .send_retrying(|| Ok(self.http.post(rerank_url.as_str()).json(&request)))
+            .await?;
+        let response: RerankResponse = decode(resp).await?;
+        Ok(response
+            .data
+            .into_iter()
+            .map(|item| RerankHit {
+                index: item.index,
+                score: item.score,
+            })
+            .collect())
+    }
+
     /// Fetch indexing progress for a store (pending and in-progress file
     /// counts). Zero on both means everything uploaded so far is searchable.
     ///
@@ -782,6 +834,28 @@ struct GrepRequest<'a> {
 struct SearchResponse {
     #[serde(default)]
     data: Vec<RawChunk>,
+}
+
+#[derive(serde::Serialize)]
+struct RerankRequest<'a> {
+    model: &'a str,
+    query: &'a str,
+    input: &'a [String],
+    top_k: usize,
+    return_input: bool,
+}
+
+#[derive(Deserialize)]
+struct RerankResponse {
+    #[serde(default)]
+    data: Vec<RawRerankItem>,
+}
+
+#[derive(Deserialize)]
+struct RawRerankItem {
+    index: usize,
+    #[serde(default)]
+    score: f32,
 }
 
 // The public `AnswerResponse` is the projected shape; this is the raw wire
@@ -1033,6 +1107,60 @@ mod tests {
             captured.lock().expect("lock").as_deref(),
             Some("github:indexable-inc/index"),
             "the router must decode the segment back to the original id"
+        );
+    }
+
+    #[tokio::test]
+    async fn rerank_posts_documents_and_projects_index_score() {
+        // Pins the /v1/reranking wire contract: the request carries the model,
+        // query, documents (`input`), top_k, and `return_input: false`; the
+        // response's `data` items project to (index, score) pairs pointing back
+        // into the submitted slice.
+        let captured: Arc<std::sync::Mutex<Option<serde_json::Value>>> = Arc::default();
+        let app = Router::new().route(
+            "/v1/reranking",
+            axum::routing::post({
+                let captured = Arc::clone(&captured);
+                move |axum::extract::Json(body): axum::extract::Json<serde_json::Value>| {
+                    *captured.lock().expect("lock") = Some(body);
+                    async {
+                        (
+                            StatusCode::OK,
+                            r#"{"data":[{"index":2,"score":0.91},{"index":0,"score":0.12}]}"#,
+                        )
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        let docs = vec!["alpha".to_owned(), "beta".to_owned(), "gamma".to_owned()];
+        let hits = client
+            .rerank(DEFAULT_RERANK_MODEL, "which greek letter", &docs, 2)
+            .await
+            .expect("rerank");
+        assert_eq!(
+            hits.iter().map(|h| h.index).collect::<Vec<_>>(),
+            vec![2, 0],
+            "hits keep the API's most-relevant-first order"
+        );
+        assert!((hits[0].score - 0.91).abs() < 1e-6, "{}", hits[0].score);
+        assert_eq!(
+            captured.lock().expect("lock").take().expect("request body"),
+            serde_json::json!({
+                "model": DEFAULT_RERANK_MODEL,
+                "query": "which greek letter",
+                "input": ["alpha", "beta", "gamma"],
+                "top_k": 2,
+                "return_input": false,
+            })
         );
     }
 
