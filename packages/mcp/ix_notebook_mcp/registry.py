@@ -81,7 +81,8 @@ MODULES: tuple[Module, ...] = (
         "mcp_client",
         "call any MCP server's tools from Python: `await mcp_client.connect(url_or_command)` "
         "returns a live server whose `.tools` is a polars frame and whose `await srv.call(tool, "
-        "**args)` runs a tool (stdio or streamable-HTTP, bearer-token / header auth)",
+        "**args)` runs a tool (stdio or streamable-HTTP; bearer-token / header auth, plus "
+        "interactive OAuth + PKCE with cached, auto-refreshed tokens for remote servers)",
     ),
     Module(
         "worktree",

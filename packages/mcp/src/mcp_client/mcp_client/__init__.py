@@ -33,9 +33,16 @@ background task so the SDK's anyio cancel scopes never cross tasks.
 ``connect`` picks the transport from the target: an ``http(s)://`` URL uses the
 streamable-HTTP transport (pass ``transport="sse"`` for an older SSE server),
 anything else is treated as a stdio command (a string is split with ``shlex``;
-pass a list to skip splitting). Authentication for v1 is a static bearer
-``token=`` or arbitrary ``headers=``; servers that require an interactive OAuth
-browser flow are not yet supported (see the module's TODO).
+pass a list to skip splitting). Authentication: pass a static bearer ``token=``
+or arbitrary ``headers=`` and they are used as-is. Otherwise a remote server
+that answers 401 triggers the interactive OAuth 2.0 + PKCE flow automatically:
+the browser opens for consent (headless sessions get the URL printed instead),
+a loopback listener on ``127.0.0.1`` catches the redirect, and the tokens are
+cached under ``$XDG_STATE_HOME/ix-mcp/oauth`` (default
+``~/.local/state/ix-mcp/oauth``, files ``0600``) so the next ``connect`` needs
+no browser and expiring tokens refresh transparently. Servers without dynamic
+client registration take ``client_id=`` (and ``scopes=``); pass ``oauth=False``
+to disable the flow entirely.
 
 Open servers are tracked in :data:`mcp_client.servers` (like ``jobs``), so you
 can list and close them: ``mcp_client.servers`` is the live dict, and
@@ -458,6 +465,11 @@ async def connect(
     transport: str = "auto",
     timeout: float = 30,
     name: str | None = None,
+    oauth: bool | str = "auto",
+    client_id: str | None = None,
+    client_secret: str | None = None,
+    scopes: str | list[str] | None = None,
+    oauth_timeout: float = 300,
 ) -> Server:
     """Connect to an MCP server and return a ready :class:`Server`.
 
@@ -468,6 +480,15 @@ async def connect(
     a bearer ``token=`` or arbitrary ``headers=``; ``env`` / ``cwd`` apply to a
     stdio child process. The catalog (tools / resources / prompts) is fetched
     before returning, so ``srv.tools`` is populated immediately.
+
+    Remote servers that answer 401 get the interactive OAuth 2.0 + PKCE flow
+    by default (``oauth="auto"``: enabled whenever no ``token=`` and no
+    ``Authorization`` header is given). The browser opens for consent -- or, in
+    a headless session, the URL is printed -- and tokens are cached per server
+    so the next ``connect`` is silent; ``oauth_timeout`` bounds the wait for
+    the human. ``client_id=`` / ``client_secret=`` pin a pre-registered OAuth
+    client for servers without dynamic registration, ``scopes=`` requests
+    specific scopes, and ``oauth=False`` disables the flow entirely.
     """
     is_url = isinstance(target, str) and target.startswith(("http://", "https://"))
     if transport == "auto":
@@ -477,18 +498,42 @@ async def connect(
     if token:
         hdrs.setdefault("Authorization", f"Bearer {token}")
 
+    open_timeout = timeout + 5
     if transport in ("http", "sse"):
         if not isinstance(target, str):
             raise MCPError("an http/sse target must be a URL string")
         url = target
         if transport == "http":
 
-            def factory(url=url, hdrs=hdrs, timeout=timeout):
-                return streamablehttp_client(url, headers=hdrs or None, timeout=timeout)
+            def base_factory(auth=None, url=url, hdrs=hdrs, timeout=timeout):
+                return streamablehttp_client(
+                    url, headers=hdrs or None, timeout=timeout, auth=auth
+                )
         else:
 
-            def factory(url=url, hdrs=hdrs):
-                return sse_client(url, headers=hdrs or None)
+            def base_factory(auth=None, url=url, hdrs=hdrs):
+                return sse_client(url, headers=hdrs or None, auth=auth)
+
+        has_auth_header = any(k.lower() == "authorization" for k in hdrs)
+        use_oauth = oauth is True or (oauth == "auto" and not has_auth_header)
+        if use_oauth:
+            from . import _oauth
+
+            def factory(url=url):
+                return _oauth.oauth_transport(
+                    base_factory,
+                    url,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                    scopes=scopes,
+                    flow_timeout=oauth_timeout,
+                )
+
+            # The consent wait is human-paced: only the OAuth flow's own
+            # timeout should bound it, not the transport connect timeout.
+            open_timeout += oauth_timeout
+        else:
+            factory = base_factory
 
         label = name or url
         key = f"{transport}:{url}"
@@ -508,7 +553,7 @@ async def connect(
 
     srv = Server(key, factory, label)
     try:
-        await asyncio.wait_for(srv._open(), timeout=timeout + 5)
+        await asyncio.wait_for(srv._open(), timeout=open_timeout)
     except asyncio.TimeoutError as exc:
         await srv.close()
         raise MCPError(f"{label}: timed out connecting") from exc
