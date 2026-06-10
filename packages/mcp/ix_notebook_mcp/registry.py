@@ -109,6 +109,12 @@ MODULES: tuple[Module, ...] = (
         "`await x.posts(\"@handle\")` / `await x.posts(\"home\")` / `await x.posts(\"#tag\")` / a thread URL, "
         "scrolled until it has `limit` tweets (one row each, with author, time, text and counts). Reads the signed-in account's personal feed, so incognito sessions only (a shared room never sees your timeline)",
     ),
+    Module(
+        "linear",
+        "Linear issue tracker over GraphQL using LINEAR_API_KEY: "
+        "`await linear.issue(id)` / `issue_update(id, **fields)` / "
+        "`issue_create(team, title, **fields)` / `project_create(name, teams, **fields)`",
+    ),
 )
 
 # Always-present namespace builtins (installed by runtime.install; no import).

@@ -396,6 +396,26 @@ let
         cp -r ${tasksPythonSource}/tasks/. "$site/"
       ''
   );
+  # Linear issue-tracker GraphQL client: `import linear`, then
+  # `await linear.issue("ENG-123")` / `issue_update` / `issue_create` /
+  # `project_create`. Pure Python over the already-bundled httpx; reads
+  # LINEAR_API_KEY from the environment at call time.
+  linearPythonSource = builtins.path {
+    name = "ix-mcp-linear-python-source";
+    path = ./src/linear;
+  };
+  linearModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-mcp-linear-python-module"
+      {
+        strictDeps = true;
+        meta.description = "Linear GraphQL client bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/linear"
+        mkdir -p "$site"
+        cp -r ${linearPythonSource}/linear/. "$site/"
+      ''
+  );
   # `mcp_client`: connect to any Model Context Protocol server and call its tools
   # from the kernel. Pure Python over the already-bundled `mcp` SDK (no cdylib),
   # so it wraps the SDK's awkward `async with` transport/session context managers
@@ -628,6 +648,7 @@ let
       browserModule
       xModule
       tasksModule
+      linearModule
       mcpClientModule
     ]
     ++ darwinExtraPackages ps
@@ -3388,6 +3409,7 @@ let
   vmkitBundled = importTest "vmkit" "import vmkit; print('vmkit-ok', callable(vmkit.boot_linux), callable(vmkit.drive), callable(vmkit.screenshot))";
   imessageBundled = importTest "imessage" "import imessage; print('imessage-ok', all(callable(getattr(imessage, n)) for n in ('messages', 'chats', 'contacts', 'send')))";
   xBundled = importTest "x" "import x; print('x-ok', callable(x.posts), x.__version__)";
+  linearBundled = importTest "linear" "import linear; print('linear-ok', all(callable(getattr(linear, n)) for n in ('issue', 'issue_update', 'issue_create', 'project_create')), linear.__version__)";
 in
 package.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
@@ -3421,6 +3443,7 @@ package.overrideAttrs (old: {
         browserSmoke
         browserVdomSmoke
         xBundled
+        linearBundled
         ;
       site = dashboardSite;
     }
