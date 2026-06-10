@@ -88,12 +88,27 @@ def test_snapshot_candidates_filter(monkeypatch) -> None:
 
     ns = {
         "keep": 41,
-        "_private": 1,
-        "baseline": 2,
+        # A single-underscore USER name is real state and must be checkpointed
+        # (only dunders and IPython's history machinery are kernel-internal).
+        "_cfg": 1,
+        "__dunder": 2,
+        "baseline": 3,
         "module": types_mod,
+        # IPython's lazily-created machinery (not in the baseline): result and
+        # input caches, history dicts.
+        "_": 4,
+        "__": 5,
+        "_i": "code",
+        "_ii": "code",
+        "_i7": "code",
+        "_7": 6,
+        "_oh": {},
+        "_ih": [],
+        "_dh": [],
+        "_exit_code": 0,
     }
     monkeypatch.setattr(runtime, "_baseline_names", frozenset({"baseline"}))
-    assert set(runtime._snapshot_candidates(ns)) == {"keep"}
+    assert set(runtime._snapshot_candidates(ns)) == {"keep", "_cfg"}
 
 
 def test_snapshot_payload_skips_the_unpicklable() -> None:
@@ -128,7 +143,10 @@ def test_session_reopen_restores_instantly_and_replays_the_gap(tmp_path, monkeyp
         conn = store.connect(path)
         ns = {"Result": runtime.Result}
         _wire(monkeypatch, conn, ns)
-        await runtime.__ix_run("x = 40\ndef double(n):\n    return n * 2\nResult.ok('a')\n")
+        # _cfg is the review-confirmed loss window: an underscore name bound in
+        # a cell that is captured by the checkpoint (so replay never re-runs it)
+        # must come back from the checkpoint itself.
+        await runtime.__ix_run("x = 40\n_cfg = 'v1'\ndef double(n):\n    return n * 2\nResult.ok('a')\n")
         await runtime._snapshot_now()
         # A cell that finishes AFTER the checkpoint: only covered by replay.
         await runtime.__ix_run("y = double(x) + 4\nResult.ok('b')\n")
@@ -146,9 +164,10 @@ def test_session_reopen_restores_instantly_and_replays_the_gap(tmp_path, monkeyp
         return ns
 
     ns = asyncio.run(reopen())
-    # x and double came back from the checkpoint; y from replaying the last cell
-    # (which itself needs the restored names to evaluate).
+    # x, _cfg, and double came back from the checkpoint; y from replaying the
+    # last cell (which itself needs the restored names to evaluate).
     assert ns["x"] == 40
+    assert ns["_cfg"] == "v1"
     assert ns["double"](3) == 6
     assert ns["y"] == 84
 

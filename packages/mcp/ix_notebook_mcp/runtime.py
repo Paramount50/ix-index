@@ -2082,17 +2082,41 @@ def _snapshot_payload(candidates: dict) -> tuple[bytes, list[str], list[dict]]:
     return pickle.dumps(named), sorted(named), skipped
 
 
+# IPython's own underscore bindings, created lazily as cells run (so they are
+# NOT in the baseline): the result caches (`_`, `__`, `___`, `_1`, ...), the
+# input caches (`_i`, `_ii`, `_iii`, `_i1`, ...), and the history/state dicts.
+# These are kernel machinery, not user state; everything else a user binds --
+# including a single-underscore name like `_cfg` -- is real state and must be
+# checkpointed, not silently dropped.
+_IPYTHON_MACHINERY = re.compile(r"_+|_i+|_i\d+|_\d+|_oh|_dh|_ih|_exit_code")
+
+
 def _snapshot_candidates(ns: dict) -> dict:
     """The names a checkpoint covers: bound after install() (so the runtime's own
-    surface and the preamble never bloat the file), not underscored, not modules
-    (an import is one cheap replayed line; module objects pickle poorly)."""
+    surface and the preamble never bloat the file), not dunders or IPython's
+    history machinery, not modules (an import is one cheap replayed line; module
+    objects pickle poorly)."""
     return {
         name: value
         for name, value in ns.items()
         if name not in _baseline_names
-        and not name.startswith("_")
+        and not name.startswith("__")
+        and not _IPYTHON_MACHINERY.fullmatch(name)
         and not isinstance(value, types.ModuleType)
     }
+
+
+def _store_file() -> str | None:
+    """The on-disk path behind ``_store_conn`` (PRAGMA database_list), so a
+    worker thread can open its own connection to the same file. None for a
+    non-file store (in-memory test connections)."""
+    if _store_conn is None:
+        return None
+    try:
+        row = _store_conn.execute("PRAGMA database_list").fetchone()
+        return row[2] or None
+    except Exception:
+        return None
 
 
 async def _snapshot_now() -> dict:
@@ -2100,16 +2124,39 @@ async def _snapshot_now() -> dict:
     copied: a cell finishing mid-dump may or may not be captured, and an earlier
     stamp errs toward replaying it -- re-running a captured cell overwrites equal
     state, while the reverse (assuming an uncaptured cell was captured) would
-    lose it."""
+    lose it.
+
+    Both the serialization AND the SQLite write run in the worker thread: a
+    multi-hundred-MB blob INSERT on the event loop stalls every queued cell and
+    the live-output mirroring for the write's duration. ``_store_conn`` is bound
+    to the loop thread (check_same_thread), so the thread opens its own
+    connection to the same file; WAL + busy_timeout serialize it against the
+    kernel's writer."""
     if _store is None or _store_conn is None:
         return {"names": [], "skipped": []}
     ns = _user_ns if _user_ns is not None else globals()
     created = time.time()
     candidates = _snapshot_candidates(dict(ns))
-    blob, names, skipped = await asyncio.to_thread(_snapshot_payload, candidates)
-    _store.save_snapshot(
-        _store_conn, created_at=created, blob=blob, names=names, skipped=skipped
-    )
+    path = _store_file()
+
+    def _dump_and_save() -> tuple[list[str], list[dict]]:
+        blob, names, skipped = _snapshot_payload(candidates)
+        conn = _store.connect(path)
+        try:
+            _store.save_snapshot(conn, created_at=created, blob=blob, names=names, skipped=skipped)
+        finally:
+            conn.close()
+        return names, skipped
+
+    if path is not None:
+        names, skipped = await asyncio.to_thread(_dump_and_save)
+    else:
+        # A non-file store (in-memory test connection): the write must use the
+        # loop's own connection, and such a store is small by construction.
+        blob, names, skipped = await asyncio.to_thread(_snapshot_payload, candidates)
+        _store.save_snapshot(
+            _store_conn, created_at=created, blob=blob, names=names, skipped=skipped
+        )
     return {"names": names, "skipped": skipped}
 
 

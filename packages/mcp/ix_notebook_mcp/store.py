@@ -405,17 +405,13 @@ def replayable(conn: sqlite3.Connection, since: float | None) -> list[dict]:
     (it finished later, so ``ended_at`` > ``since``) overwrites the partial state
     with the full result."""
     conn.row_factory = sqlite3.Row
-    if since is None:
-        rows = conn.execute(
-            "SELECT id, name, code FROM executions "
-            "WHERE status = 'done' AND kind = 'cell' ORDER BY started_at ASC"
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT id, name, code FROM executions "
-            "WHERE status = 'done' AND kind = 'cell' AND ended_at > ? ORDER BY started_at ASC",
-            (since,),
-        ).fetchall()
+    anchor = "" if since is None else " AND ended_at > ?"
+    params = () if since is None else (since,)
+    rows = conn.execute(
+        "SELECT id, name, code FROM executions "
+        f"WHERE status = 'done' AND kind = 'cell'{anchor} ORDER BY started_at ASC",
+        params,
+    ).fetchall()
     return [dict(r) for r in rows]
 
 
