@@ -3667,7 +3667,6 @@ package.overrideAttrs (old: {
         browserSmoke
         browserVdomSmoke
         xBundled
-        slackBundled
         linearBundled
         ;
       site = dashboardSite;
