@@ -74,7 +74,11 @@ read-only dashboard, and the MCP transport, all on one event loop.
   captures per-job stdout under interleaving with a `ContextVar`, and writes each
   run to the SQLite store.
 - `store.py` is the append-only execution log (one SQLite file in WAL mode).
-- `dashboard.py` serves a one-page live view of that log.
+- `dashboard.py` serves a one-page live view of that log. The first tool call
+  of a session pops that page in the local browser (via Python's
+  platform-independent `webbrowser`, a no-op on headless machines), so the
+  human is watching the moment work begins; an embedder with no human at
+  this machine's display disables it with `IX_MCP_NO_BROWSER=1`.
 - `outputs.py` renders kernel messages for the agent (text, images).
 - `tools.py` is the MCP surface: the general `python_exec`, plus `read` (pull a
   file or kernel value into the model's context while the dashboard stays quiet)
