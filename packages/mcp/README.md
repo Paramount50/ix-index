@@ -72,7 +72,12 @@ read-only dashboard, and the MCP transport, all on one event loop.
 - `runtime.py` is the in-kernel runtime loaded by the IPython startup script: it
   defines `jobs`/`Job`/`__ix_exec`, runs each execution as an asyncio task,
   captures per-job stdout under interleaving with a `ContextVar`, and writes each
-  run to the SQLite store.
+  run to the SQLite store. It also samples the exact cell line a running job is
+  executing (off the suspended coroutine chain, no tracing overhead) and, when a
+  run fails, records the cell line the failure was raised on plus a traceback
+  trimmed to start at the cell -- the dashboard renders both: a live
+  program-counter highlight while a job runs, and the failing line highlighted in
+  red with the exception headline when it errors.
 - `store.py` is the append-only execution log (one SQLite file in WAL mode).
 - `dashboard.py` serves a one-page live view of that log. The first tool call
   of a session pops that page in the local browser (via Python's

@@ -205,6 +205,16 @@ class Job:
         # the dashboard draws a progress bar of elapsed-vs-budget while it runs.
         self.budget = float(budget)
         self.ended: float | None = None
+        # The cell line currently executing, sampled off the suspended coroutine
+        # chain by the flusher (see _current_line); None for a cell with no live
+        # async frame. The dashboard highlights this line while the job runs.
+        self.line: int | None = None
+        # The cell line a failure was raised on (the deepest user frame of the
+        # traceback, or a SyntaxError's reported line). None until/unless it fails.
+        self.error_line: int | None = None
+        # The cell's own coroutine / async generator, kept so _current_line can
+        # read its suspended frame chain while the job runs.
+        self._aobj = None
         # The cell's final value (a Result), exposed through the `result`
         # property; stored privately so an access while running can raise rather
         # than hand back a misleading None.
@@ -371,7 +381,8 @@ class Job:
 
     def __repr__(self) -> str:
         dur = (self.ended or time.time()) - self.started
-        head = f"<Job {self.id} ({self.name}) [{self.status}] {dur:.2f}s>"
+        at = f" L{line}" if self.running() and (line := _current_line(self)) else ""
+        head = f"<Job {self.id} ({self.name}) [{self.status}{at}] {dur:.2f}s>"
         out = self.tail(800)
         return head + ("\n" + out if out else "")
 
@@ -1066,6 +1077,78 @@ def _is_displayable(value) -> bool:
     return module.startswith("matplotlib") or module.startswith("PIL")
 
 
+def _current_line(job: "Job") -> int | None:
+    """The cell line ``job`` is executing right now, or None.
+
+    Read off the suspended coroutine chain: starting from the cell's own
+    coroutine (or async generator), follow what each frame is awaiting and keep
+    the deepest frame that belongs to this job's pseudo-file (``<job id>``).
+    That is exactly the line a human would point at: the cell line whose await
+    is in flight, even when the wait itself is deep inside a library. Costs one
+    attribute walk (no tracing), so the flusher can sample it every tick. None
+    for a purely synchronous cell (it has no suspended frame to read; it also
+    holds the loop, so nothing could repaint anyway)."""
+    obj = job._aobj
+    if obj is None or not job.running():
+        return None
+    target = f"<job {job.id}>"
+    line = None
+    for _ in range(128):  # defensive bound; await chains are short in practice
+        frame = (
+            getattr(obj, "cr_frame", None)
+            or getattr(obj, "ag_frame", None)
+            or getattr(obj, "gi_frame", None)
+        )
+        if frame is None:
+            break
+        if frame.f_code.co_filename == target:
+            line = frame.f_lineno
+        obj = (
+            getattr(obj, "cr_await", None)
+            or getattr(obj, "ag_await", None)
+            or getattr(obj, "gi_yieldfrom", None)
+        )
+        if obj is None:
+            break
+    return line
+
+
+def _user_traceback(exc: BaseException) -> str:
+    """``exc`` formatted with the kernel's own plumbing frames cut off.
+
+    The frames above the cell (``_runner``, the ``exec``/``eval`` trampoline)
+    are noise to both audiences, so the traceback starts at the first frame in
+    a ``<job ...>`` pseudo-file -- the cell itself -- like a notebook's. A
+    SyntaxError never enters the cell's frame, so it falls back to the
+    exception-only form, which already carries the offending line and caret;
+    anything else without a user frame keeps the full traceback."""
+    tb = exc.__traceback__
+    while tb is not None and not tb.tb_frame.f_code.co_filename.startswith("<job "):
+        tb = tb.tb_next
+    if tb is not None:
+        return "".join(traceback.format_exception(type(exc), exc, tb))
+    if isinstance(exc, SyntaxError):
+        return "".join(traceback.format_exception_only(type(exc), exc))
+    return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+
+
+def _error_line(exc: BaseException, job: "Job") -> int | None:
+    """The cell line the failure was raised on: a SyntaxError's reported line,
+    else the deepest traceback frame inside this job's own pseudo-file (the
+    cell line whose statement failed, even when the raise happened in a
+    library below it)."""
+    target = f"<job {job.id}>"
+    if isinstance(exc, SyntaxError) and exc.filename == target:
+        return exc.lineno
+    line = None
+    tb = exc.__traceback__
+    while tb is not None:
+        if tb.tb_frame.f_code.co_filename == target:
+            line = tb.tb_lineno
+        tb = tb.tb_next
+    return line
+
+
 async def _runner(job: Job, ns: dict) -> None:
     token = _ix_current.set(job)
     if _store is not None and _store_conn is not None:
@@ -1086,6 +1169,7 @@ async def _runner(job: Job, ns: dict) -> None:
             # yields ARE the results, so there is no trailing-Result requirement.
             exec(code_obj, ns)
             agen = ns.pop("__ix_cell__")()
+            job._aobj = agen  # sampled by _current_line while suspended
             emitted = 0
             async for item in agen:
                 if not isinstance(item, Result):
@@ -1109,6 +1193,7 @@ async def _runner(job: Job, ns: dict) -> None:
         else:
             maybe = eval(code_obj, ns)
             if inspect.iscoroutine(maybe):
+                job._aobj = maybe  # sampled by _current_line while suspended
                 await maybe
             value = ns.pop("__ix_result", None)
             if not isinstance(value, Result) and _is_displayable(value):
@@ -1133,7 +1218,7 @@ async def _runner(job: Job, ns: dict) -> None:
     except asyncio.CancelledError:
         job.status = "cancelled"
         raise
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as _kexc:
         job.status = "error"
         if job.interrupted_by_watchdog:
             # The server's wedge watchdog (SIGUSR2, fired after config.wedge_grace)
@@ -1147,8 +1232,10 @@ async def _runner(job: Job, ns: dict) -> None:
                 "anything slow as a background job."
             )
         else:
-            # The user's own code raised KeyboardInterrupt; keep its real traceback.
-            job.error = traceback.format_exc()
+            # The user's own code raised KeyboardInterrupt; keep its real
+            # traceback (trimmed to the cell's frames) and the failing line.
+            job.error = _user_traceback(_kexc)
+            job.error_line = _error_line(_kexc, job)
         job._append(job.error)
     except (Exception, SystemExit) as _exc:
         # Isolate user code from the kernel: a job's SyntaxError, exception, or
@@ -1157,7 +1244,10 @@ async def _runner(job: Job, ns: dict) -> None:
         # asyncio.CancelledError is BaseException, not caught here, so cooperative
         # cancellation (handled above) still propagates.
         job.status = "error"
-        tb = traceback.format_exc()
+        # Trim the kernel's plumbing frames so the traceback starts at the cell,
+        # and record the failing cell line for the dashboard's error highlight.
+        tb = _user_traceback(_exc)
+        job.error_line = _error_line(_exc, job)
         hint = _type_error_hint(_exc) if isinstance(_exc, TypeError) else ""
         job.error = tb + hint
         job._append(job.error)
@@ -1180,6 +1270,7 @@ def _persist_final(job: Job) -> None:
             output=job.output,
             result=result_repr,
             error=job.error,
+            error_line=job.error_line,
             outputs=_job_outputs(job),
             bindings=_cell_bindings(job),
         )
@@ -1868,8 +1959,11 @@ async def _flusher() -> None:
         await asyncio.sleep(0.5)
         for job in list(jobs.values()):
             if job.running():
+                job.line = _current_line(job)
                 try:
-                    _store.update_output(_store_conn, job.id, job.output, job._displays or None)
+                    _store.update_output(
+                        _store_conn, job.id, job.output, job._displays or None, line=job.line
+                    )
                 except Exception:
                     # Best-effort live output: a store write must not kill the loop.
                     pass
@@ -1924,6 +2018,9 @@ def _job_summary(job: Job) -> dict:
         "result": None if job._result is None else _safe_repr(job._result),
         "result_chars": len(_result_text(job)),
         "error": job.error,
+        # Where a still-running job is right now (cell line), so a budget-expired
+        # reply can say not just "running" but "running, on line N".
+        "line": _current_line(job) if job.running() else None,
     }
 
 

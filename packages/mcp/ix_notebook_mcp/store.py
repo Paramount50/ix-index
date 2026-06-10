@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS executions (
     output      TEXT NOT NULL DEFAULT '',
     result      TEXT,
     error       TEXT,
+    line        INTEGER,
+    error_line  INTEGER,
     outputs     TEXT NOT NULL DEFAULT '[]',
     bindings    TEXT NOT NULL DEFAULT '{}'
 );
@@ -89,6 +91,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE executions ADD COLUMN budget REAL NOT NULL DEFAULT 15")
         except sqlite3.OperationalError:
             pass
+    for column in ("line", "error_line"):
+        if column not in have:
+            try:
+                conn.execute(f"ALTER TABLE executions ADD COLUMN {column} INTEGER")
+            except sqlite3.OperationalError:
+                pass
 
 
 def start(conn: sqlite3.Connection, *, id: str, name: str, code: str, started_at: float, budget: float = 15.0) -> None:
@@ -104,16 +112,27 @@ def rename(conn: sqlite3.Connection, *, id: str, name: str) -> None:
     conn.execute("UPDATE executions SET name = ? WHERE id = ?", (name, id))
 
 
-def update_output(conn: sqlite3.Connection, id: str, output: str, outputs: list | None = None) -> None:
-    """Persist a running job's live output. When ``outputs`` is given (rich display
-    bundles captured so far), update that column too so the dashboard can show a
-    long job's in-progress tables/images, not only its text."""
+def update_output(
+    conn: sqlite3.Connection,
+    id: str,
+    output: str,
+    outputs: list | None = None,
+    *,
+    line: int | None = None,
+) -> None:
+    """Persist a running job's live output and the cell ``line`` it is executing
+    right now (the dashboard's live line highlight; None clears it). When
+    ``outputs`` is given (rich display bundles captured so far), update that
+    column too so the dashboard can show a long job's in-progress tables/images,
+    not only its text."""
     if outputs is None:
-        conn.execute("UPDATE executions SET output = ? WHERE id = ?", (output, id))
+        conn.execute(
+            "UPDATE executions SET output = ?, line = ? WHERE id = ?", (output, line, id)
+        )
     else:
         conn.execute(
-            "UPDATE executions SET output = ?, outputs = ? WHERE id = ?",
-            (output, json.dumps(outputs), id),
+            "UPDATE executions SET output = ?, line = ?, outputs = ? WHERE id = ?",
+            (output, line, json.dumps(outputs), id),
         )
 
 
@@ -126,20 +145,34 @@ def finish(
     output: str,
     result: str | None,
     error: str | None,
+    error_line: int | None = None,
     outputs: list | None = None,
     bindings: dict | None = None,
 ) -> None:
+    # `line` (the live executing line) is cleared: a finished job has no current
+    # line, only -- when it failed -- the `error_line` it failed on.
     conn.execute(
         "UPDATE executions SET status = ?, ended_at = ?, output = ?, result = ?, error = ?, "
-        "outputs = ?, bindings = ? WHERE id = ?",
-        (status, ended_at, output, result, error, json.dumps(outputs or []), json.dumps(bindings or {}), id),
+        "error_line = ?, line = NULL, outputs = ?, bindings = ? WHERE id = ?",
+        (
+            status,
+            ended_at,
+            output,
+            result,
+            error,
+            error_line,
+            json.dumps(outputs or []),
+            json.dumps(bindings or {}),
+            id,
+        ),
     )
 
 
 # The execution columns every reader projects, in one place so `recent` and
 # `get` return the identical shape (the embed contract in feed.py depends on it).
 _EXEC_COLUMNS = (
-    "id, name, code, status, started_at, ended_at, budget, output, result, error, outputs, bindings"
+    "id, name, code, status, started_at, ended_at, budget, output, result, error, "
+    "line, error_line, outputs, bindings"
 )
 
 

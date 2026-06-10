@@ -47,6 +47,11 @@ export interface Job {
   output: string;
   result: string | null;
   error: string | null;
+  // The cell line currently executing (running jobs only; sampled off the
+  // kernel's suspended coroutine chain) and the cell line a failure was raised
+  // on. Both 1-based, matching the data-line spans in `code_html`.
+  line: number | null;
+  error_line: number | null;
   outputs: RichOutput[];
   bindings: Record<string, Binding>;
 }
