@@ -14,14 +14,15 @@
   gnupg,
   formats,
   binName ? "claude",
-  # Default posture: start every session in bypass-permissions mode. We run a
-  # trusted config inside disposable sandboxes (ix guest VMs, the dev image,
-  # throwaway checkouts) where a per-tool approval dialog buys nothing and only
-  # stalls an agent that has nowhere unsafe to go. The upstream uid-0 guard still
-  # refuses bypass for an unsandboxed root user (no IS_SANDBOX=1 is baked here,
-  # since a bare host genuinely is not a sandbox), so it is a no-op exactly where
-  # it would be unsafe; sandboxed-root consumers (e.g. the dev image) keep their
-  # own IS_SANDBOX=1 wrapper and managed-settings layer. Turn it off with
+  # Default posture: bake `--dangerously-skip-permissions` into the wrapper so
+  # every session starts with the permission layer skipped. We run a trusted
+  # config inside disposable sandboxes (ix guest VMs, the dev image, throwaway
+  # checkouts) where a per-tool approval dialog buys nothing and only stalls an
+  # agent that has nowhere unsafe to go. Mind the upstream uid-0 guard: the CLI
+  # refuses this flag for an unsandboxed root user (no IS_SANDBOX=1 is baked
+  # here, since a bare host genuinely is not a sandbox), so root consumers
+  # either carry their own IS_SANDBOX=1 wrapper (the dev image does, plus a
+  # managed-settings layer) or turn this off with
   # `claude-code.override { dangerouslySkipPermissions = false; }`.
   dangerouslySkipPermissions ? true,
   # Opt-in alternative posture: confine the agent to a fixed allow-list and
@@ -38,6 +39,16 @@
   # avoided. Takes PRECEDENCE over `dangerouslySkipPermissions`, since bypass
   # would void the deny rules. `null` (default) leaves the normal posture.
   restrictToTools ? null,
+  # Tools dropped from the model's tool set via `--disallowedTools`, which works
+  # regardless of permission mode (a `permissions.deny` would be skipped under
+  # the default bypass posture). Empty by default: no tool blocking, every
+  # built-in ships enabled. The groups this package used to block by default are
+  # kept as data in `toolGroups` below (also on passthru), so the old lean
+  # posture is one override away:
+  #   claude-code.override {
+  #     disallowedTools = with claude-code.toolGroups; autonomy ++ meta;
+  #   }
+  disallowedTools ? [ ],
   # Extra settings.json keys to ship through the read-only flagSettings layer
   # (the `--settings` file below), deep-merged UNDER the computed defaults so the
   # security-relevant keys this package controls (the restrictToTools / bypass
@@ -130,12 +141,6 @@ let
     # settings key would, since flagSettings outranks user settings.json).
     # Re-enable 1M per machine: `export CLAUDE_CODE_DISABLE_1M_CONTEXT=`.
     CLAUDE_CODE_DISABLE_1M_CONTEXT = 1;
-    # Self-scheduling off fleet-wide: the cron family is dropped via
-    # `--disallowedTools` below, with this env knob as defense in depth.
-    # `--set-default`, so a machine opts back in with
-    # `export CLAUDE_CODE_DISABLE_CRON=`. Background tasks stay enabled: the
-    # house prompt tells the agent to background its subagents by default.
-    CLAUDE_CODE_DISABLE_CRON = 1;
   };
   envDefaultFlags = lib.concatLists (
     lib.mapAttrsToList (name: value: [
@@ -145,48 +150,44 @@ let
     ]) wrapperEnvDefaults
   );
 
-  # Autonomy tools removed from every session: self-watching (Monitor),
-  # self-scheduling (ScheduleWakeup, the cron family, and RemoteTrigger, which
-  # creates/runs claude.ai routines server-side), and the user-interrupting
-  # PushNotification. `--disallowedTools` drops them from the model's tool set
-  # regardless of permission mode; `permissions.deny` would not, since the
-  # default `bypassPermissions` posture skips the permission layer. Monitor,
-  # PushNotification, and RemoteTrigger are server-gated with no env knob, so
-  # this flag is their only off-switch.
-  disallowedAutonomyTools = [
-    "Monitor"
-    "ScheduleWakeup"
-    "RemoteTrigger"
-    "PushNotification"
-    "CronCreate"
-    "CronDelete"
-    "CronList"
-  ];
-
-  # Lean code-execution agent: the only surface this build needs is the index MCP
-  # (its `mcp__index__*` tools, e.g. python_exec, which MCP namespacing leaves
-  # untouched by `--disallowedTools`). Drop the built-in meta-tools so the model
-  # works turn-by-turn through code execution instead of branching into
-  # structured task lists, agent teams, worktrees, or multiple-choice prompts.
-  # Plan mode (EnterPlanMode/ExitPlanMode) is dropped too: this agent plans and
-  # executes turn-by-turn through code execution rather than branching into the
-  # built-in plan/approve flow.
-  # Removed regardless of permission mode, same as the autonomy list.
-  disallowedMetaTools = [
-    "AskUserQuestion"
-    "EnterPlanMode"
-    "ExitPlanMode"
-    "TaskCreate"
-    "TaskList"
-    "TaskGet"
-    "TaskUpdate"
-    "TeamCreate"
-    "TeamDelete"
-    "SendMessage"
-    "EnterWorktree"
-    "ExitWorktree"
-    "WaitForMcpServers"
-  ];
+  # Tool groups this package used to pass to `--disallowedTools` by default,
+  # kept as data (and exposed via `passthru.toolGroups`) so re-adding the old
+  # posture is one `disallowedTools` override rather than archaeology. Nothing
+  # here is blocked by default.
+  #  - autonomy: self-watching (Monitor), self-scheduling (ScheduleWakeup, the
+  #    cron family, and RemoteTrigger, which creates/runs claude.ai routines
+  #    server-side), and the user-interrupting PushNotification. Monitor,
+  #    PushNotification, and RemoteTrigger are server-gated with no env knob,
+  #    so `--disallowedTools` is their only off-switch.
+  #  - meta: the structured plan/task/team/worktree/question surface, dropped
+  #    for a lean code-execution agent that works turn-by-turn through an MCP
+  #    kernel instead of branching into those flows.
+  toolGroups = {
+    autonomy = [
+      "Monitor"
+      "ScheduleWakeup"
+      "RemoteTrigger"
+      "PushNotification"
+      "CronCreate"
+      "CronDelete"
+      "CronList"
+    ];
+    meta = [
+      "AskUserQuestion"
+      "EnterPlanMode"
+      "ExitPlanMode"
+      "TaskCreate"
+      "TaskList"
+      "TaskGet"
+      "TaskUpdate"
+      "TeamCreate"
+      "TeamDelete"
+      "SendMessage"
+      "EnterWorktree"
+      "ExitWorktree"
+      "WaitForMcpServers"
+    ];
+  };
 
   # Settings-key defaults that have no env knob, shipped as a JSON the wrapper
   # injects via `--settings`. The package wraps the binary, so it can carry env
@@ -210,15 +211,13 @@ let
   #     only un-lock is dropping the nix `restrictToTools` override. Caveat: a
   #     managed `bypassPermissions` skips the whole permission layer, so these
   #     deny rules would be inert under one.
-  #   permissions.defaultMode + skipDangerousModePermissionPrompt (the default,
-  #     unless `restrictToTools` takes precedence): start in bypass mode and
-  #     pre-accept the one-time dangerous-mode warning. Both keys are
-  #     required: managed/flag bypass alone does not suppress that warning.
-  #     skipDangerousModePermissionPrompt is honored in every scope except
-  #     *project* (a guard against untrusted repos), so it takes effect from this
-  #     flagSettings layer. Same two keys the dev image
-  #     (images/dev/development-base) enforces via managed settings; see its
-  #     comment for the full rationale.
+  #   skipDangerousModePermissionPrompt (the default, unless `restrictToTools`
+  #     takes precedence): pre-accept the one-time dangerous-mode warning, which
+  #     the baked `--dangerously-skip-permissions` flag alone does not suppress.
+  #     Honored in every scope except *project* (a guard against untrusted
+  #     repos), so it takes effect from this flagSettings layer. The dev image
+  #     (images/dev/development-base) enforces the same posture via managed
+  #     settings; see its comment for the full rationale.
   #
   # Bare tool names as deny rules remove the built-in tool from the model's
   # context entirely (per the permissions docs), not merely gate it behind a
@@ -264,17 +263,32 @@ let
         deny = lib.subtractLists restrictToTools deniedBuiltinTools;
       };
     }
-    # restrictToTools takes precedence: bypass would skip the permission layer and
-    # void its deny rules, so the two never co-set `permissions` (a shallow //
-    # merge would otherwise clobber allow/deny with defaultMode).
+    # restrictToTools takes precedence: bypass would skip the permission layer
+    # and void its deny rules, so the wrapper bakes the bypass flag (see
+    # `postureWrapperArgs`) and this warning pre-accept only when no allow-list
+    # is pinned.
     // lib.optionalAttrs (dangerouslySkipPermissions && !restrictTools) {
-      permissions.defaultMode = "bypassPermissions";
       skipDangerousModePermissionPrompt = true;
     }
   );
   settingsDefaultsFile =
     (formats.json { }).generate "claude-code-default-settings.json"
       settingsDefaults;
+
+  # Posture flags derived from the args above (see their comments): the
+  # opt-in `--disallowedTools` list and the default
+  # `--dangerously-skip-permissions`. Baked with `--add-flags` and rendered
+  # through escapeShellArgs, same as the system-prompt pair below; empty lists
+  # contribute nothing.
+  postureWrapperArgs =
+    lib.optionals (disallowedTools != [ ]) [
+      "--add-flags"
+      "--disallowedTools ${lib.concatStringsSep "," disallowedTools}"
+    ]
+    ++ lib.optionals (dangerouslySkipPermissions && !restrictTools) [
+      "--add-flags"
+      "--dangerously-skip-permissions"
+    ];
 
   # System-prompt override (see the `systemPrompt` arg). Materialize the text to
   # a store file and add `--system-prompt-file <path>` as makeBinaryWrapper args.
@@ -439,9 +453,7 @@ stdenv.mkDerivation {
       --inherit-argv0 \
       --add-flags --debug \
       --add-flags "--thinking-display summarized" \
-      --add-flags "--disallowedTools ${
-        lib.concatStringsSep "," (disallowedAutonomyTools ++ disallowedMetaTools)
-      }" \
+      ${lib.escapeShellArgs postureWrapperArgs} \
       --append-flags "--settings ${settingsDefaultsFile}" \
       ${lib.escapeShellArgs systemPromptWrapperArgs} \
       --set DISABLE_AUTOUPDATER 1 \
@@ -465,7 +477,10 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
 
-  passthru = lib.optionalAttrs (updateScript != null) {
+  passthru = {
+    inherit toolGroups;
+  }
+  // lib.optionalAttrs (updateScript != null) {
     inherit updateScript;
   };
 
