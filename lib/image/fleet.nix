@@ -60,6 +60,42 @@ let
       l7ProxyPorts = lib.unique (lib.concatMap (part: part.l7ProxyPorts or [ ]) parts);
     };
 
+  # Every deployment key the plan consumes. `deployment` is a plain attrset
+  # (not a NixOS module), so a typo or an imagined option would otherwise be
+  # merged and silently dropped. `healthChecks` gets a dedicated message
+  # because examples historically wrote `deployment.healthChecks = [ ... ]`
+  # as if it selected checks to wait for: checks are declared by the node's
+  # modules via `ix.healthChecks.<name>` (with `from`, `command`, retries)
+  # and `ix-fleet up` always waits for every declared check, so there is no
+  # per-deployment selector.
+  knownDeploymentKeys = [
+    "bootstrapImage"
+    "destination"
+    "env"
+    "ipv4"
+    "l7ProxyPorts"
+    "recreateOnUp"
+    "region"
+    "snapshot"
+    "switch"
+  ];
+  checkedDeployment =
+    name: deploy:
+    let
+      unknown = lib.subtractLists knownDeploymentKeys (attrNames deploy);
+    in
+    assert lib.assertMsg (!(elem "healthChecks" unknown)) ''
+      fleet node '${name}' sets deployment.healthChecks, but health checks are not selected per deployment:
+        declare checks as `ix.healthChecks.<name>` in one of the node's modules (service modules
+        such as minecraft and nginx already declare theirs), and `ix-fleet up` waits for every
+        declared check. Remove deployment.healthChecks; there is no allowlist to configure.
+    '';
+    assert lib.assertMsg (unknown == [ ]) ''
+      fleet node '${name}' deployment has unknown option(s): ${lib.concatStringsSep ", " unknown}
+        valid options: ${lib.concatStringsSep ", " knownDeploymentKeys}
+    '';
+    deploy;
+
   wrappedNodeKeys = [
     "module"
     "modules"
@@ -111,7 +147,7 @@ let
       modules = toList defaults ++ moduleList spec;
       tags = lib.unique (toList (spec.tags or [ ]));
       groups = lib.unique groups;
-      deployment = mergeDeployments deploymentParts;
+      deployment = checkedDeployment name (mergeDeployments deploymentParts);
       dependsOn = toList (spec.dependsOn or [ ]);
       replicas = spec.replicas or 1;
     };

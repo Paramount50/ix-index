@@ -1700,6 +1700,32 @@ let
       true
   );
 
+  # `deployment.healthChecks` was historically written as if it selected
+  # checks to wait for; nothing ever read it. The plan always carries every
+  # declared `ix.healthChecks`, so the dead key must fail eval, not be
+  # silently dropped.
+  fleetDeploymentHealthChecksEval = builtins.tryEval (
+    builtins.deepSeq
+      (ix.mkFleet {
+        nodes.web = {
+          deployment.healthChecks = [ "nginx" ];
+          modules = [ { } ];
+        };
+      }).planValue.nodes.web.region
+      true
+  );
+
+  fleetUnknownDeploymentKeyEval = builtins.tryEval (
+    builtins.deepSeq
+      (ix.mkFleet {
+        nodes.web = {
+          deployment.regoin = "us-west-1";
+          modules = [ { } ];
+        };
+      }).planValue.nodes.web.region
+      true
+  );
+
   fleetDependencyCycleEval = builtins.tryEval (
     builtins.deepSeq
       (ix.mkFleet {
@@ -4301,6 +4327,14 @@ let
       {
         assertion = !fleetUnknownDependencyEval.success;
         message = "fleet plans should reject unknown dependsOn entries during eval";
+      }
+      {
+        assertion = !fleetDeploymentHealthChecksEval.success;
+        message = "fleet plans should reject the dead deployment.healthChecks selector during eval";
+      }
+      {
+        assertion = !fleetUnknownDeploymentKeyEval.success;
+        message = "fleet plans should reject unknown deployment keys during eval";
       }
       {
         assertion = !fleetDependencyCycleEval.success;
