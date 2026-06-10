@@ -134,6 +134,25 @@ _shell = None  # the InteractiveShell, set in install(); used to format rich res
 _trace_file = None  # faulthandler dump target, kept open for the kernel's lifetime
 
 
+def _rename_current_job(name: str) -> None:
+    """Relabel the currently running job with ``name``.
+
+    Sets ``job.name`` on the live :class:`Job` and, when a store connection is
+    available, persists it so the dashboard reflects the new label immediately.
+    Called by :func:`sh.sh` when the caller passes ``name=``. Best-effort:
+    failures are silently swallowed so a store write never aborts user code.
+    """
+    job = _ix_current.get()
+    if job is None:
+        return
+    job.name = name
+    if _store is not None and _store_conn is not None:
+        try:
+            _store.rename(_store_conn, id=job.id, name=name)
+        except Exception:
+            pass
+
+
 class _Tee:
     """sys.stdout/err replacement that routes each write to the *current task's*
     job buffer (so concurrent jobs keep separate output) plus the real stream."""

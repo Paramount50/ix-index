@@ -99,6 +99,11 @@ def start(conn: sqlite3.Connection, *, id: str, name: str, code: str, started_at
     )
 
 
+def rename(conn: sqlite3.Connection, *, id: str, name: str) -> None:
+    """Update the display name for an execution already in the store."""
+    conn.execute("UPDATE executions SET name = ? WHERE id = ?", (name, id))
+
+
 def update_output(conn: sqlite3.Connection, id: str, output: str, outputs: list | None = None) -> None:
     """Persist a running job's live output. When ``outputs`` is given (rich display
     bundles captured so far), update that column too so the dashboard can show a

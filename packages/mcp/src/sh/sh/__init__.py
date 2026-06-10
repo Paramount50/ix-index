@@ -67,6 +67,11 @@ as it arrives, so it lands in ``jobs['<id>'].output`` live: a long command's log
 is pageable from the job even when the cell backgrounds (or is cancelled) before
 the ``Output`` value is ever bound. Cancelling the task kills the child's whole
 process group, never orphaning it.
+
+Pass ``name=`` to label the job in the dashboard and the ``jobs`` dict, mirroring
+the same parameter on ``python_exec``::
+
+    build = await sh("nix build .#mcp ...", cwd=wt, timeout=600, name="nix-build-mcp")
 """
 
 from __future__ import annotations
@@ -93,6 +98,7 @@ __version__ = "0.1.0"
 try:
     from ix_notebook_mcp.runtime import Result as _ResultBase
     from ix_notebook_mcp.runtime import _ANSI, _ansi_to_html, _ix_current, _strip_ansi
+    from ix_notebook_mcp.runtime import _rename_current_job
 
     _HAS_RESULT = True
 except Exception:  # pragma: no cover - exercised only outside the kernel
@@ -102,6 +108,7 @@ except Exception:  # pragma: no cover - exercised only outside the kernel
     _ResultBase = object
     _HAS_RESULT = False
     _ix_current = None
+    _rename_current_job = None  # type: ignore[assignment]
     # SGR color only; the full escape grammar is the runtime's to own.
     _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -411,6 +418,7 @@ async def sh(
     check: bool = False,
     color: bool = True,
     echo: bool | None = None,
+    name: str | None = None,
 ) -> Output:
     """Run ``cmd`` on the shared async loop and return its :class:`Output`.
 
@@ -422,6 +430,9 @@ async def sh(
     ``timeout`` (seconds) kills the child's whole process group and raises
     :class:`TimeoutError`; ``check=True`` raises :class:`ShellError` on a non-zero
     exit; ``color=False`` suppresses the forced-color environment.
+    ``name`` sets a human-readable label for the running job in the dashboard and
+    the ``jobs`` dict (mirrors the same parameter on ``python_exec``); outside
+    the kernel it is accepted and silently ignored.
 
     Output STREAMS as it arrives: inside the kernel each chunk is echoed
     (escape-stripped) to the running cell's stdout, so a long command's log is in
@@ -481,6 +492,9 @@ async def sh(
             "sh(['git', 'commit', '-m', msg]) to pass the message verbatim without shell "
             "parsing, or write it to a temp file and use git commit -F <file>."
         )
+    if name is not None and _in_kernel_job() and _rename_current_job is not None:
+        _rename_current_job(name)
+
     full_env = dict(os.environ)
     if color:
         full_env.update(_COLOR_ENV)
