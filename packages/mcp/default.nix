@@ -1088,6 +1088,76 @@ let
         mkdir -p "$out"
       '';
 
+  # Exercises _resolve_ssh_auth_sock: the helper must redirect SSH_AUTH_SOCK to
+  # the 1Password agent on darwin when the Apple launchd socket (or no socket)
+  # is present, must leave a custom non-Apple agent alone, and must always
+  # return None on non-darwin platforms. Dependency-free pure Python, so the
+  # build sandbox runs it.
+  sshAuthSockTest = pkgs.writeText "ix-mcp-ssh-auth-sock-test.py" ''
+    import os
+    import tempfile
+    from pathlib import Path
+
+    from ix_notebook_mcp.cli import _resolve_ssh_auth_sock
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        op_dir = home / "Library" / "Group Containers" / "2BUA8C4S2C.com.1password" / "t"
+        op_dir.mkdir(parents=True)
+        op_sock = op_dir / "agent.sock"
+        op_sock.touch()
+
+        # darwin + unset SSH_AUTH_SOCK -> forward to 1Password
+        result = _resolve_ssh_auth_sock(None, home, "darwin", exists=os.path.exists)
+        assert result == str(op_sock), f"expected op_sock, got {result!r}"
+
+        # darwin + Apple launchd socket -> forward to 1Password
+        apple = "/var/run/com.apple.launchd.XYZ123/Listeners"
+        result = _resolve_ssh_auth_sock(apple, home, "darwin", exists=os.path.exists)
+        assert result == str(op_sock), f"expected op_sock for apple agent, got {result!r}"
+
+        # darwin + custom non-Apple agent -> do not override
+        custom = "/run/user/1000/gnupg/S.gpg-agent.ssh"
+        result = _resolve_ssh_auth_sock(custom, home, "darwin", exists=os.path.exists)
+        assert result is None, f"must not clobber custom agent, got {result!r}"
+
+        # non-darwin platform -> always None, even with op sock present
+        for plat in ("linux", "win32"):
+            result = _resolve_ssh_auth_sock(None, home, plat, exists=os.path.exists)
+            assert result is None, f"expected None on {plat!r}, got {result!r}"
+            result = _resolve_ssh_auth_sock(apple, home, plat, exists=os.path.exists)
+            assert result is None, f"expected None on {plat!r} with apple sock, got {result!r}"
+
+        # darwin but 1Password socket absent -> None (do not crash)
+        missing_home = Path(tmp) / "missing"
+        missing_home.mkdir()
+        result = _resolve_ssh_auth_sock(None, missing_home, "darwin", exists=os.path.exists)
+        assert result is None, f"expected None when op sock absent, got {result!r}"
+
+    print("ssh-auth-sock-ok")
+  '';
+  sshAuthSockSmoke =
+    pkgs.runCommand "ix-mcp-ssh-auth-sock-smoke"
+      {
+        nativeBuildInputs = [ mcpPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        ${mcpPython}/bin/python3 ${sshAuthSockTest} >stdout 2>stderr || {
+          echo "ix-mcp ssh-auth-sock smoke failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        grep -qx 'ssh-auth-sock-ok' stdout || {
+          echo "ix-mcp ssh-auth-sock smoke did not confirm helper behaviour:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
+
   # Exercises the in-kernel runtime (ix_notebook_mcp/runtime.py) in-process: two
   # jobs run concurrently on one event loop, neither blocks the other, each keeps
   # its own captured stdout, and the trailing expression is captured as the
@@ -3435,6 +3505,7 @@ package.overrideAttrs (old: {
         yieldSmoke
         bindingsSmoke
         bindDefaultSmoke
+        sshAuthSockSmoke
         viewSmoke
         nixSmoke
         fleetSmoke

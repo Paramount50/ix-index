@@ -157,6 +157,39 @@ def _advertised_host(bind_host: str) -> str:
     return "127.0.0.1"
 
 
+# The path where 1Password puts its SSH agent socket on macOS.
+_1PASSWORD_AGENT_SOCK = "Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+
+
+def _resolve_ssh_auth_sock(
+    current: str | None,
+    home: Path,
+    platform: str,
+    exists=os.path.exists,
+) -> str | None:
+    """Return the 1Password agent socket path to use instead of *current*, or
+    ``None`` if no substitution should be made.
+
+    Substitution happens only when ALL of the following are true:
+    - the platform is Darwin (macOS),
+    - the 1Password agent socket exists under *home*, and
+    - *current* is either unset or points at the empty Apple launchd SSH agent
+      (its path always contains ``com.apple.launchd.``).
+
+    A deliberately set non-Apple agent (e.g. a custom ``SSH_AUTH_SOCK`` the
+    user exported) is never overridden.
+    """
+    if platform != "darwin":
+        return None
+    op_sock = str(home / _1PASSWORD_AGENT_SOCK)
+    if not exists(op_sock):
+        return None
+    # Don't clobber a custom, non-Apple agent.
+    if current and "com.apple.launchd." not in current:
+        return None
+    return op_sock
+
+
 def _serve(args: argparse.Namespace) -> int:
     wd = getattr(args, "workdir", None)
     workdir = Path(wd).resolve() if wd else Path.cwd()
@@ -213,6 +246,20 @@ def _serve(args: argparse.Namespace) -> int:
     # away (the agent should not have to spelunk the runtime dir to find it).
     os.environ["IX_MCP_DASHBOARD_URL"] = cfg.dashboard_url()
     os.environ["IPYTHONDIR"] = str(_prepare_ipython_startup(dashboard_port))
+
+    # On macOS the process env inherits the empty Apple launchd SSH agent
+    # socket, not the 1Password agent that op-ssh-sign (the configured
+    # gpg.ssh.program) needs for signed git commits.  Redirect SSH_AUTH_SOCK
+    # to the 1Password socket when it exists so every sh(...) subprocess -- and
+    # git commit signing -- work without manual overrides.
+    _op_sock = _resolve_ssh_auth_sock(
+        os.environ.get("SSH_AUTH_SOCK"),
+        Path.home(),
+        sys.platform,
+    )
+    if _op_sock is not None:
+        os.environ["SSH_AUTH_SOCK"] = _op_sock
+        print(f"[ix-mcp] SSH_AUTH_SOCK -> 1Password agent ({_op_sock})", file=sys.stderr, flush=True)
 
     asyncio.run(_run(cfg))
     return 0
