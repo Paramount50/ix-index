@@ -53,6 +53,15 @@ stdout and stderr are merged in emission order (terminal-style). A non-zero exit
 is surfaced, never swallowed: the model view appends an ``[exit N]`` marker, and
 ``await sh(cmd, check=True)`` raises :class:`ShellError` instead of returning.
 
+**Never pass prose through shell quoting.** Backticks in a string command are
+run as command substitution by the shell even when the string was produced by
+Python ``repr()`` (the backticks survive the quoting), and a multi-line string
+repr'd as a single-quoted argument loses its newlines (they become literal
+``\\n``). For any argument that contains prose -- a commit message, a PR body --
+use the argv-list form ``sh(['git', 'commit', '-m', msg])`` so the argument is
+passed verbatim with no shell parsing, or write the text to a file and use
+``git commit -F <file>``.
+
 Inside the kernel the child's output also streams to the running cell's stdout
 as it arrives, so it lands in ``jobs['<id>'].output`` live: a long command's log
 is pageable from the job even when the cell backgrounds (or is cancelled) before
@@ -435,11 +444,42 @@ async def sh(
     `fff.grep`, `fff.find`); reaching for ``ls``/``cat``/``grep``/``find``
     through the shell returns an Output carrying a hint to the structured
     alternative.
+
+    Never pass prose through shell quoting: backticks in a string command are
+    run as command substitution by the shell even when the string was produced
+    by Python ``repr()`` (the backticks survive the quoting), and a multi-line
+    message repr'd as a single-quoted string loses its newlines (they become
+    literal ``\\n``). For any command argument that contains prose -- a commit
+    message, a PR body, a description -- use the argv-list form
+    ``sh(['git', 'commit', '-m', msg])`` so the argument is passed verbatim
+    with no shell parsing, or write the text to a temporary file and pass
+    ``git commit -F <file>``.
     """
     if isinstance(cmd, str) and re.match(r"\s*cd\b", cmd):
         raise ValueError(
             "sh() takes no `cd ...` prefix: pass the working directory as cwd= and keep "
             "the command itself clean, e.g. await sh('ix trace <id>', cwd='/path/to/repo')."
+        )
+    if isinstance(cmd, str) and "`" in cmd:
+        raise ValueError(
+            "sh(): backticks in a string command are shell command substitution -- they run "
+            "even inside Python repr'd strings (the backticks survive repr quoting, then the "
+            "shell executes them when it processes the argument). This is how `git commit -m "
+            "{msg!r}` ended up executing `ix-mcp dashboard` and splicing its URL into the "
+            "commit message. If you want $(...) substitution, write it as $(...) explicitly. "
+            "If the backticks are prose (e.g. a commit message), use the argv-list form "
+            "instead: sh(['git', 'commit', '-m', msg]) runs with no shell parsing and passes "
+            "msg verbatim, or write the message to a temp file and use git commit -F <file>."
+        )
+    if isinstance(cmd, str) and re.search(
+        r"git\s+commit\b.*\s(-m|--message)\s*['\"].*(?:\\n|\n).*['\"]", cmd, re.DOTALL
+    ):
+        raise ValueError(
+            "sh(): a git commit -m/--message argument containing a newline (real or "
+            "escaped \\n) will be flattened by the shell into a single line full of literal "
+            r"'\n' characters when passed through Python repr. Use the argv-list form "
+            "sh(['git', 'commit', '-m', msg]) to pass the message verbatim without shell "
+            "parsing, or write it to a temp file and use git commit -F <file>."
         )
     full_env = dict(os.environ)
     if color:

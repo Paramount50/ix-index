@@ -127,7 +127,13 @@ NO_SHELL = (
     "DATA, not text: when the CLI has a JSON mode (`gh --json`, `cargo metadata`, `nix "
     "--json`) use it and parse with `.json()` / `.jsonl()` / `.df()` on the Output (`.df()` "
     "is a polars frame ready to filter and render), one command per `sh()` call -- never "
-    "`cmd1; echo ===; cmd2` chains scraped apart with string splitting."
+    "`cmd1; echo ===; cmd2` chains scraped apart with string splitting. Never pass prose "
+    "through shell quoting: backticks in a string command run as command substitution even "
+    "inside Python repr'd strings (this is how a commit message once executed `ix-mcp "
+    "dashboard` and spliced its URL into the message), and a repr'd multi-line string loses "
+    "its newlines. For any argument that contains prose -- a commit message, a PR body -- "
+    "use the argv-list form `sh(['git', 'commit', '-m', msg])` so the argument bypasses "
+    "shell parsing entirely, or write the text to a temp file and use `git commit -F <file>`."
 )
 
 VERIFY = (
