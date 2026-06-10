@@ -737,7 +737,7 @@ class FileFinder:
         self,
         *,
         query: str,
-        mode: str,
+        mode: str = "plain",
         limit: int = 50,
         max_matches_per_file: int = 0,
         smart_case: bool = True,
@@ -750,8 +750,9 @@ class FileFinder:
     ) -> GrepResult:
         """Content search across indexed files.
 
-        ``mode`` is required (no default): ``"plain"`` (fast SIMD literal;
-        aliases ``"literal"`` and ``"text"``), ``"regex"``, or ``"fuzzy"``.
+        ``mode`` defaults to ``"plain"`` (fast SIMD literal; aliases
+        ``"literal"`` and ``"text"``); pass ``"regex"`` or ``"fuzzy"`` when
+        needed.
         """
         self._check_open()
         if mode not in _GREP_MODES:
@@ -1039,15 +1040,15 @@ def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
     return SearchResult(hits=hits, total_matched=len(hits), total_files=len(hits))
 
 
-def grep(query: str | list[str], path=".", *, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
+def grep(query: str | list[str], path=".", *, mode: str = "plain", limit: int = 50, glob: str | None = None) -> GrepResult:
     """Content grep over `path=` (root directory or file), reusing a cached watched (content-indexed) index.
 
     `query` and `path` are positional like the shell's `grep PATTERN PATH`
     (path defaults to the current directory); the options stay keyword-only.
     `query` is one pattern, or a list of patterns matched as literals in a single
     OR pass (Aho-Corasick) -- the one call for "where does any of these appear?",
-    so you never loop grep over a list. `mode` is required (no default), so each
-    call states its intent:
+    so you never loop grep over a list. `mode` defaults to ``"plain"``; pass
+    ``"regex"`` or ``"fuzzy"`` when needed:
       - one string: ``"plain"`` (fast SIMD literal; aliases ``"literal"`` and
         ``"text"``), ``"regex"``, or ``"fuzzy"``;
       - a list: matched literally, so pass ``"plain"`` or ``"literal"`` (for a
@@ -1116,7 +1117,7 @@ async def afind(query: str, path=".", *, limit: int = 100) -> SearchResult:
     return await asyncio.to_thread(find, query=query, path=path, limit=limit)
 
 
-async def agrep(query: str | list[str], path=".", *, mode: str, limit: int = 50, glob: str | None = None) -> GrepResult:
+async def agrep(query: str | list[str], path=".", *, mode: str = "plain", limit: int = 50, glob: str | None = None) -> GrepResult:
     """Async content grep: runs off the event loop (non-blocking)."""
     return await asyncio.to_thread(grep, query=query, path=path, mode=mode, limit=limit, glob=glob)
 
@@ -1248,7 +1249,7 @@ class CodeMap:
         )
 
 
-def map(*, query: str | list[str], path, mode: str, limit: int = 200, glob: str | None = None) -> CodeMap:
+def map(*, query: str | list[str], path, mode: str = "plain", limit: int = 200, glob: str | None = None) -> CodeMap:
     """Content grep grouped into a :class:`CodeMap`: hits per file with
     definitions ranked first. A glanceable answer to "where is X defined and
     used?" built straight on :func:`grep`. Accepts the same ``glob`` filter as
@@ -1256,7 +1257,7 @@ def map(*, query: str | list[str], path, mode: str, limit: int = 200, glob: str 
     return CodeMap(query=query, matches=grep(query=query, path=path, mode=mode, limit=limit, glob=glob).matches)
 
 
-async def amap(*, query: str | list[str], path, mode: str, limit: int = 200, glob: str | None = None) -> CodeMap:
+async def amap(*, query: str | list[str], path, mode: str = "plain", limit: int = 200, glob: str | None = None) -> CodeMap:
     """Async :func:`map`: the same code map, off the event loop."""
     res = await agrep(query=query, path=path, mode=mode, limit=limit, glob=glob)
     return CodeMap(query=query, matches=res.matches)

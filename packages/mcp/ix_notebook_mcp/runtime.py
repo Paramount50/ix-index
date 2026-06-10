@@ -1088,14 +1088,16 @@ async def _runner(job: Job, ns: dict) -> None:
             # The user's own code raised KeyboardInterrupt; keep its real traceback.
             job.error = traceback.format_exc()
         job._append(job.error)
-    except (Exception, SystemExit):
+    except (Exception, SystemExit) as _exc:
         # Isolate user code from the kernel: a job's SyntaxError, exception, or
         # even sys.exit()/exit() becomes a failed job (traceback captured) instead
         # of escaping the task and tearing down the shared kernel session.
         # asyncio.CancelledError is BaseException, not caught here, so cooperative
         # cancellation (handled above) still propagates.
         job.status = "error"
-        job.error = traceback.format_exc()
+        tb = traceback.format_exc()
+        hint = _type_error_hint(_exc) if isinstance(_exc, TypeError) else ""
+        job.error = tb + hint
         job._append(job.error)
     finally:
         job.ended = time.time()
@@ -1703,6 +1705,50 @@ def api(filter: str | None = None):
     except Exception:
         width = max((len(r["sig"]) for r in rows), default=0)
         return "\n".join(f'{r["where"]:>6}  {r["sig"]:<{width}}  {r["summary"]}' for r in rows)
+
+
+_TYPEERROR_CALL_RE = re.compile(
+    r"^(\w+)\(\) (got an unexpected keyword argument|missing \d+ required (keyword-only argument|positional argument))"
+)
+
+
+def _type_error_hint(exc: TypeError) -> str:
+    """Return a one-line signature hint when *exc* is a call-binding TypeError.
+
+    Matches errors like:
+      - ``grep() got an unexpected keyword argument 'max_results'``
+      - ``grep() missing 1 required keyword-only argument: 'mode'``
+
+    Looks the callable up in the user namespace (and a set of well-known module
+    prefixes like ``fff.``) so the hint shows the live signature. Returns an
+    empty string on any failure so callers can unconditionally append it.
+    """
+    try:
+        msg = str(exc)
+        m = _TYPEERROR_CALL_RE.match(msg)
+        if not m:
+            return ""
+        func_name = m.group(1)
+        # Resolve the callable: check user namespace and well-known module attrs.
+        ns = _user_ns if _user_ns is not None else globals()
+        obj = ns.get(func_name)
+        if obj is None:
+            # Try module-qualified names (e.g. the error says "grep" but the
+            # callable lives as fff.grep in the namespace).
+            for mod_name in ("fff", "view", "nix", "fleet"):
+                mod = ns.get(mod_name)
+                if mod is not None:
+                    candidate = getattr(mod, func_name, None)
+                    if candidate is not None:
+                        obj = candidate
+                        func_name = f"{mod_name}.{func_name}"
+                        break
+        if obj is None or not callable(obj):
+            return ""
+        sig = inspect.signature(obj)
+        return f"\nHint: the signature is {func_name}{sig}; see doc({func_name})."
+    except Exception:
+        return ""
 
 
 async def _sweep_resources() -> None:
