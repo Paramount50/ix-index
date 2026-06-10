@@ -61,7 +61,8 @@ PAGING = (
     "jobs['<id>'].tail(n) / .head(n) / .slice(a, b) / .grep('pat') / .lines(a, b), or read "
     "jobs['<id>'].output (stdout) and, once it has finished, jobs['<id>'].result (the value — "
     "it raises while the job is still running rather than return a misleading None, so `await "
-    "jobs['<id>']` to wait for it); history() lists recent runs."
+    "jobs['<id>']` to wait for it; `.result` and `.result()` both work, and a finished Result's "
+    "`.text` is its rendered text); history() lists recent runs."
 )
 
 BLOCKING = (

@@ -330,7 +330,12 @@ class Job:
         Accessing it while the job is still running raises `JobStillRunning`,
         instead of returning a misleading `None`: background the work, then
         `await jobs['id']` to get the result, or poll `.done()` / `.running()`
-        first. Once finished this is exactly what `await jobs['id']` yields."""
+        first. Once finished this is exactly what `await jobs['id']` yields.
+
+        ``Job.result`` is a **property** (not a method), but since ``Result``
+        is callable, both ``job.result`` and ``job.result()`` hand back the
+        value. The returned Result's ``.text`` attribute is the rendered model
+        text (same as ``.llm_result``), so ``job.result.text[-100:]`` pages it."""
         if self.running():
             dur = time.time() - self.started
             raise JobStillRunning(
@@ -389,6 +394,31 @@ def _llm_text(value):
     return _safe_repr(value)
 
 
+def _result_from_text(cls, value, *, html: str | None = None) -> "Result":
+    """The ``Result.text(...)`` constructor body (see :class:`_TextDescriptor`):
+    a Result that shows the same text to the human and the model. Pass ``html``
+    to give the human a richer view than the plain text."""
+    body = value if isinstance(value, str) else _safe_repr(value)
+    user = html if html is not None else f"<pre class=\"ix-result\">{_escape_html(body)}</pre>"
+    return cls(user_html=user, llm_result=body)
+
+
+class _TextDescriptor:
+    """Let ``Result.text`` mean both things without colliding.
+
+    On the class, ``Result.text("hi")`` is the constructor it has always been.
+    On an instance, ``some_result.text`` is the already-rendered model text (the
+    same string as ``.llm_result``), so reading a finished job's value works the
+    way ``sh()``'s ``Output.text`` does: ``(await jobs['id']).text[-100:]``
+    pages the text instead of dying with "'method' object is not subscriptable"
+    (the bound constructor the old classmethod handed back)."""
+
+    def __get__(self, obj, objtype=None):
+        if obj is None:
+            return types.MethodType(_result_from_text, objtype)
+        return obj.llm_result or ""
+
+
 class Result:
     """Split a cell's final value into a human view and a model view.
 
@@ -421,6 +451,13 @@ class Result:
     ``text/html`` carries ``user_html`` and, when present, ``IX_LLM_MIME`` carries
     the model's text+images (unpacked by the server); ``text/plain`` carries the
     text as a fallback for plain hosts.
+
+    On an instance, ``.text`` returns the already-rendered model text (same as
+    ``.llm_result``), so ``(await jobs['id']).text[-100:]`` works. On the class,
+    ``Result.text("hi")`` is the constructor it has always been. Calling a
+    Result (``result()``) returns it unchanged, so ``jobs['id'].result()`` --
+    the natural method-call guess at the ``Job.result`` property -- hands back
+    the value instead of raising "'Result' object is not callable".
     """
 
     # Construct it however reads best. Pass the value(s) you want shown and it
@@ -451,13 +488,12 @@ class Result:
         self.llm_result = built.llm_result
         self.llm_images = list(llm_images) if llm_images else built.llm_images
 
-    @classmethod
-    def text(cls, value, *, html: str | None = None) -> "Result":
-        """A Result that shows the same text to the human and the model. Pass
-        ``html`` to give the human a richer view than the plain text."""
-        body = value if isinstance(value, str) else _safe_repr(value)
-        user = html if html is not None else f"<pre class=\"ix-result\">{_escape_html(body)}</pre>"
-        return cls(user_html=user, llm_result=body)
+    # ``Result.text("hi")`` constructs (the classic constructor); on an instance,
+    # ``.text`` is the rendered model text (same as ``.llm_result``) -- see
+    # _TextDescriptor. The two meanings used to collide: ``(await job).text``
+    # returned the bound constructor, a guessing-game error when inspecting a
+    # finished job.
+    text = _TextDescriptor()
 
     @classmethod
     def ok(cls, message: str = "done") -> "Result":
@@ -578,6 +614,13 @@ class Result:
         if images:
             bundle[IX_LLM_MIME] = {"text": self.llm_result or "", "images": images}
         return bundle
+
+    def __call__(self) -> "Result":
+        """Calling a Result returns it unchanged. ``Job.result`` is a property,
+        so ``jobs['id'].result()`` -- the natural method-call guess while
+        polling a finished job -- used to die with "'Result' object is not
+        callable". Property and call now both hand over the value."""
+        return self
 
     def __repr__(self) -> str:
         # Plain-text fallback (the stored result repr, non-rich hosts): the model
