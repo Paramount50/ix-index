@@ -1158,6 +1158,88 @@ let
         mkdir -p "$out"
       '';
 
+  # Exercises the env-var preflight added by ENG-2479: `_missing_env` returns every
+  # unset required var, `_serve` with them absent exits 1 and names all missing vars,
+  # IX_MCP_SHARED=1 drops the GOOGLE_OAUTH_* requirement, and the escape hatch
+  # (--no-env-check / IX_MCP_SKIP_ENV_CHECK=1) bypasses the check so the Nix build
+  # sandbox (which never carries real secrets) can run `ix-mcp serve` in other tests.
+  envPreflightTest = pkgs.writeText "ix-mcp-env-preflight-test.py" ''
+    import os
+    import sys
+    from unittest.mock import patch
+
+    # Strip all the required keys from the environment so we start from a clean slate.
+    for _v in ("EXA_API_KEY", "IX_GCAL_BIN", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET",
+               "IX_MCP_SHARED", "IX_MCP_SKIP_ENV_CHECK"):
+        os.environ.pop(_v, None)
+
+    from ix_notebook_mcp import cli
+
+    # (a) All required vars missing -> every one appears in _missing_env().
+    missing = cli._missing_env(shared=False)
+    missing_vars = {v for v, _ in missing}
+    assert {"EXA_API_KEY", "IX_GCAL_BIN", "GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"} == missing_vars, missing_vars
+
+    # (b) With all vars set (dummy values) _missing_env() returns an empty list.
+    os.environ["EXA_API_KEY"] = "dummy-exa"
+    os.environ["IX_GCAL_BIN"] = "/nonexistent/gcal"
+    os.environ["GOOGLE_OAUTH_CLIENT_ID"] = "dummy-id"
+    os.environ["GOOGLE_OAUTH_CLIENT_SECRET"] = "dummy-secret"
+    assert cli._missing_env(shared=False) == [], cli._missing_env(shared=False)
+
+    # (c) IX_MCP_SHARED=1 drops the GOOGLE_OAUTH_* vars from the required set.
+    os.environ.pop("GOOGLE_OAUTH_CLIENT_ID")
+    os.environ.pop("GOOGLE_OAUTH_CLIENT_SECRET")
+    assert cli._missing_env(shared=True) == [], "GOOGLE_OAUTH_* must not be required in shared mode"
+    # But they ARE still required in incognito mode.
+    assert {v for v, _ in cli._missing_env(shared=False)} == {"GOOGLE_OAUTH_CLIENT_ID", "GOOGLE_OAUTH_CLIENT_SECRET"}
+
+    # (d) main(["serve"]) with missing vars exits 1 and names every missing var.
+    os.environ.pop("EXA_API_KEY", None)
+    os.environ.pop("IX_GCAL_BIN", None)
+    os.environ.pop("GOOGLE_OAUTH_CLIENT_ID", None)
+    os.environ.pop("GOOGLE_OAUTH_CLIENT_SECRET", None)
+    rc = cli.main(["serve"])
+    assert rc == 1, f"expected exit 1, got {rc}"
+
+    # (e) The escape hatch --no-env-check skips the check (serve then fails for an
+    # unrelated reason -- missing kernel deps -- but exits != 1 from the preflight).
+    # We patch asyncio.run to avoid actually booting a kernel.
+    import asyncio
+    with patch.object(asyncio, "run", return_value=None):
+        rc2 = cli.main(["serve", "--no-env-check"])
+    assert rc2 == 0, f"--no-env-check should bypass preflight, got {rc2}"
+
+    # (f) IX_MCP_SKIP_ENV_CHECK=1 has the same effect.
+    os.environ["IX_MCP_SKIP_ENV_CHECK"] = "1"
+    with patch.object(asyncio, "run", return_value=None):
+        rc3 = cli.main(["serve"])
+    assert rc3 == 0, f"IX_MCP_SKIP_ENV_CHECK=1 should bypass preflight, got {rc3}"
+    os.environ.pop("IX_MCP_SKIP_ENV_CHECK")
+
+    print("env-preflight-ok")
+  '';
+  envPreflightSmoke =
+    pkgs.runCommand "ix-mcp-env-preflight-smoke"
+      {
+        nativeBuildInputs = [ mcpPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        ${mcpPython}/bin/python3 ${envPreflightTest} >stdout 2>stderr || {
+          echo "ix-mcp env-preflight smoke failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        grep -qx 'env-preflight-ok' stdout || {
+          echo "ix-mcp env-preflight smoke did not confirm the preflight check:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
   # Exercises the in-kernel runtime (ix_notebook_mcp/runtime.py) in-process: two
   # jobs run concurrently on one event loop, neither blocks the other, each keeps
   # its own captured stdout, and the trailing expression is captured as the
@@ -3506,6 +3588,7 @@ package.overrideAttrs (old: {
         bindingsSmoke
         bindDefaultSmoke
         sshAuthSockSmoke
+        envPreflightSmoke
         viewSmoke
         nixSmoke
         fleetSmoke
