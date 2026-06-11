@@ -196,6 +196,14 @@ let
   #     guard against untrusted repos), so it takes effect from this flagSettings
   #     layer. The dev image (images/dev/development-base) enforces the same
   #     posture via managed settings; see its comment for the full rationale.
+  #   permissions.deny WebSearch/WebFetch (only while the exa MCP server is in
+  #     the baked `mcpServers`): one web surface, not two. Exa's
+  #     web_search_exa/web_fetch_exa cover both built-ins, so denying the
+  #     stock pair stops the model from splitting identical lookups across two
+  #     toolsets. Deny rules are enforced in every permission mode, including
+  #     the baked `--dangerously-skip-permissions`. Scoped to `mcpServers ?
+  #     exa` so a consumer who overrides the server set away gets the
+  #     built-ins back instead of no web access at all.
 
   # Caller's extraSettings first, then the computed defaults recursively merged
   # ON TOP, so the keys below always win a conflict while the caller's other
@@ -206,6 +214,12 @@ let
     }
     // lib.optionalAttrs dangerouslySkipPermissions {
       skipDangerousModePermissionPrompt = true;
+    }
+    // lib.optionalAttrs (mcpServers ? exa) {
+      permissions.deny = [
+        "WebSearch"
+        "WebFetch"
+      ];
     }
   );
   settingsDefaultsFile =
