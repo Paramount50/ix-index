@@ -38,33 +38,68 @@
   # runtime. `{ }` (default) ships only the computed defaults.
   extraSettings ? { },
 
+  # Sibling repo packages from the flake package set. lib/packages.nix threads
+  # the lazily-recursive set in under this one name so a repo package can
+  # depend on another by id without a flat merge into callPackage's top-level
+  # namespace (where ids like `btop` or `kitty` would shadow the nixpkgs attrs
+  # other packages resolve, and a self-named override like packages/btop would
+  # recurse into itself). The overlay eval context does not provide it (the
+  # `mcp` package needs `ix.rustWorkspace` rebound to the caller's pkgs, which
+  # only the flake package set does), so the overlay build of
+  # `pkgs.claude-code` falls back to `{ }` and drops the defaults below that
+  # need a sibling.
+  repoPackages ? { },
+
   # MCP servers baked into the wrapper as a generated `--mcp-config=<file>`
   # layer, one plain server per entry (tool prefix `mcp__<name>`). Values use
   # Claude's mcpServers schema (`{ type = "stdio"; command = ...; }` /
   # `{ type = "http"; url = ...; }`). CLI `--mcp-config` layers MERGE: a user's
   # own `--mcp-config` and a discovered project `.mcp.json` still load alongside
   # this set, so baking the flag here replaces the old pattern of consumers
-  # symlinkJoin-wrapping this wrapper a second time just to add it. `{ }`
-  # (default) bakes no flag.
-  mcpServers ? { },
+  # symlinkJoin-wrapping this wrapper a second time just to add it. Defaults to
+  # the house pair, additions only (no stock tool is disabled or overridden):
+  #  - `index`: the ix notebook kernel (`ix-mcp serve`, packages/mcp) over
+  #    stdio. Present only when the `mcp` sibling is in scope, i.e. in the
+  #    flake package set but not the overlay (see `repoPackages`).
+  #  - `exa`: Exa's hosted web-search server over streamable HTTP at
+  #    https://mcp.exa.ai/mcp. Keyless works with rate limits; for higher
+  #    limits add a keyed copy in user scope (`claude mcp add --transport http
+  #    exa "https://mcp.exa.ai/mcp?exaApiKey=..."`), which merges alongside and
+  #    is preferred over baking a secret into the world-readable store.
+  # `{ }` bakes no flag.
+  mcpServers ? {
+    exa = {
+      type = "http";
+      url = "https://mcp.exa.ai/mcp";
+    };
+  }
+  // lib.optionalAttrs (repoPackages ? mcp) {
+    index = {
+      type = "stdio";
+      command = lib.getExe repoPackages.mcp;
+      args = [ "serve" ];
+    };
+  },
 
-  # Replace Claude Code's entire system prompt with this text. The string is
+  # Text APPENDED to Claude Code's stock system prompt. The string is
   # materialized to a store file and baked into the wrapper as
-  # `--system-prompt-file=<path>`: passing by path (not inline text) keeps
-  # arbitrary content free of shell quoting, and the store path makes the flag
-  # one self-contained argv token (see `wrapperFlags` for why every injected
-  # option-argument uses the `=` form).
-  # This DROPS the default prompt wholesale (tool guidance, safety rules, coding
-  # conventions), so the agent only knows what this text says. Prepended before
-  # the user argv so an explicit `--system-prompt`/`--system-prompt-file` on the
-  # CLI still wins (single-value options are last-wins). Defaults to the
-  # house prompt below (the shokunin craft ethos plus the pre-v1
+  # `--append-system-prompt-file=<path>`: passing by path (not inline text)
+  # keeps arbitrary content free of shell quoting, and the store path makes the
+  # flag one self-contained argv token (see `wrapperFlags` for why every
+  # injected option-argument uses the `=` form).
+  # Append, never replace: the stock prompt (tool guidance, safety rules,
+  # coding conventions) stays intact and these house rules ride on top.
+  # Prepended before the user argv so an explicit
+  # `--append-system-prompt`/`--append-system-prompt-file` on the CLI still
+  # wins (single-value options are last-wins), and a caller who really wants a
+  # wholesale replacement can still pass `--system-prompt[-file]`. Defaults to
+  # the house prompt below (the shokunin craft ethos plus the pre-v1
   # backward-compatibility engineering rule, plus a preference for working in git
-  # worktrees); set to `null` to bake no flag and keep Claude Code's stock prompt.
+  # worktrees); set to `null` to bake no flag and ship the stock prompt alone.
   # Authored as one paragraph per list element and joined with blank lines, so a
   # rule reads as a self-contained line of source instead of buried in a wall of
   # indented-string prose.
-  systemPrompt ? lib.concatStringsSep "\n\n" [
+  appendSystemPrompt ? lib.concatStringsSep "\n\n" [
     "Work as a shokunin. Be concise, readable, and clean by default, in code and in prose: it just works."
     "This codebase is pre-v1: no backward compatibility. Design the correct API and migrate every call site in the same change; add aliases, shims, or deprecated paths only when explicitly asked or when a real external consumer is out of reach."
     "One concept, one implementation. When you find duplicated logic or divergent variants, consolidate them into one composable path instead of adding another."
@@ -239,9 +274,9 @@ let
     "--thinking-display=summarized"
   ]
   ++ lib.optional dangerouslySkipPermissions "--dangerously-skip-permissions"
-  ++ lib.optional (
-    systemPrompt != null
-  ) "--system-prompt-file=${builtins.toFile "claude-code-system-prompt.txt" systemPrompt}"
+  ++
+    lib.optional (appendSystemPrompt != null)
+      "--append-system-prompt-file=${builtins.toFile "claude-code-append-system-prompt.txt" appendSystemPrompt}"
   ++ lib.optional (mcpServers != { }) "--mcp-config=${mcpConfigFile}";
 
   # The wrapper itself: a plain shell script rather than a compiled
