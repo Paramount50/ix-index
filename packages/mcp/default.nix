@@ -498,9 +498,10 @@ let
   # Native macOS iMessage access, bundled like `screen`/`vmkit` so every session
   # can `import imessage` on Darwin. Pure Python over the bundled sqlite3/polars
   # (plus Foundation's NSUnarchiver to decode the archived message text): it reads
-  # the Messages and Contacts SQLite databases into polars frames and sends new
-  # messages through the Messages app over AppleScript. macOS-only; the module
-  # raises off Darwin.
+  # the Messages and Contacts SQLite databases into polars frames, sends new
+  # messages through the Messages app over AppleScript, and edits contacts
+  # through the Contacts app over JXA (so edits sync to iCloud). macOS-only; the
+  # module raises off Darwin.
   imessagePythonSource = builtins.path {
     name = "ix-mcp-imessage-python-source";
     path = ./src/imessage;
