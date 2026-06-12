@@ -19,10 +19,11 @@ defensive. The Nix-specific checks on top:
 ## Nix style (astlog enforced)
 
 Run `nix run .#lint` before committing. It runs nixfmt, Statix, Deadnix, the
-repo's astlog rules (`astlog-rules/nix.astlog`, gated with
-`astlog query --deny-all`), and the remaining ast-grep rules (rust, plus
-`prefer-sri-hash`). The lint app is the mechanical source of truth. The
-common hard rules are:
+repo's astlog rules (`astlog-rules/nix.astlog`, gated with `astlog scan`),
+and the remaining ast-grep rules (rust only). The lint app is the mechanical
+source of truth. A legitimate exception to an astlog rule is suppressed in
+place with an `# astlog-ignore: <rule>` comment on the finding's line or the
+line above it, with a comment naming the reason. The common hard rules are:
 
 ### Scope / access
 
@@ -114,7 +115,7 @@ common hard rules are:
   `npmDepsSha256` builder attrs are one rule (`prefer-sri-hash`, error). The
   only exception is a hex digest that must round-trip verbatim (e.g. a
   Cargo.lock checksum fed back into `.cargo-checksum.json`, which cargo verifies
-  as hex): keep it on `sha256` and add a `# ast-grep-ignore: prefer-sri-hash`
+  as hex): keep it on `sha256` and add a `# astlog-ignore: prefer-sri-hash`
   comment naming the reason.
 - Commit real hashes, never fake hash helpers or placeholders.
 - `meta.license` should reference `lib.licenses.<id>`, never a raw SPDX

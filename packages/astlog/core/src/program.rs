@@ -5,6 +5,7 @@
 //! ```text
 //! (rule (name vars...) body-atom...)
 //! (rewrite name body-atom... (replace var "template"))
+//! (lint relation-name <error|warning> "message template")
 //! ```
 //!
 //! Body atoms are either `(match <lang> "<tree-sitter query>")`, which binds
@@ -18,8 +19,8 @@ use std::collections::{HashMap, HashSet};
 use ast_merge_langs::Lang;
 
 use crate::error::{
-    ArityMismatchSnafu, BuiltinAritySnafu, DslSnafu, Error, UnknownLangNameSnafu,
-    UnknownRelationSnafu,
+    ArityMismatchSnafu, BuiltinAritySnafu, DslSnafu, Error, LintSeveritySnafu, LintVarSnafu,
+    UnknownLangNameSnafu, UnknownRelationSnafu,
 };
 use crate::sexpr::{self, Sexpr};
 
@@ -91,10 +92,40 @@ pub struct Rewrite {
     pub line: usize,
 }
 
+/// Severity of a lint declaration: errors gate `astlog scan`'s exit code,
+/// warnings report without failing (unless promoted with `--error`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+}
+
+impl Severity {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+        }
+    }
+}
+
+/// A `(lint relation severity "message")` declaration: every row the named
+/// relation derives becomes a scan finding rendered through the message
+/// template.
+#[derive(Debug)]
+pub struct Lint {
+    pub relation: String,
+    pub severity: Severity,
+    pub message: Template,
+    pub line: usize,
+}
+
 #[derive(Debug)]
 pub struct Program {
     pub rules: Vec<Rule>,
     pub rewrites: Vec<Rewrite>,
+    pub lints: Vec<Lint>,
 }
 
 impl Program {
@@ -104,28 +135,38 @@ impl Program {
     ///
     /// Returns [`Error::Dsl`] for malformed forms, [`Error::UnknownLangName`]
     /// for an unrecognized `match` language, [`Error::UnknownRelation`] /
-    /// [`Error::ArityMismatch`] for applications that resolve to nothing, and
+    /// [`Error::ArityMismatch`] for applications that resolve to nothing,
     /// [`Error::TemplateVar`] when a rewrite template references a variable
-    /// its body does not mention.
+    /// its body does not mention, [`Error::LintSeverity`] for a lint severity
+    /// other than `error` / `warning`, and [`Error::LintVar`] when a lint
+    /// message references a variable outside its relation's head.
     pub fn parse(src: &str) -> Result<Self, Error> {
         let forms = sexpr::parse(src)?;
         let mut rules = Vec::new();
         let mut rewrites = Vec::new();
+        let mut lints = Vec::new();
         for form in forms {
             let (head, items) = expect_list(&form, "top-level form")?;
             match head {
                 "rule" => rules.push(parse_rule(items, form.line())?),
                 "rewrite" => rewrites.push(parse_rewrite(items, form.line())?),
+                "lint" => lints.push(parse_lint(items, form.line())?),
                 other => {
                     return DslSnafu {
                         line: form.line(),
-                        message: format!("expected (rule ...) or (rewrite ...), got `{other}`"),
+                        message: format!(
+                            "expected (rule ...), (rewrite ...), or (lint ...), got `{other}`"
+                        ),
                     }
                     .fail();
                 }
             }
         }
-        let program = Self { rules, rewrites };
+        let program = Self {
+            rules,
+            rewrites,
+            lints,
+        };
         program.check()?;
         Ok(program)
     }
@@ -167,6 +208,35 @@ impl Program {
         for rewrite in &self.rewrites {
             check_atoms(&rewrite.body, &arities)?;
             check_template(rewrite)?;
+        }
+        for lint in &self.lints {
+            self.check_lint(lint)?;
+        }
+        Ok(())
+    }
+
+    /// A lint must name a defined relation, and its message may only splice
+    /// that relation's head variables.
+    fn check_lint(&self, lint: &Lint) -> Result<(), Error> {
+        let Some(rule) = self.rules.iter().find(|rule| rule.name == lint.relation) else {
+            return UnknownRelationSnafu {
+                name: lint.relation.clone(),
+                line: lint.line,
+            }
+            .fail();
+        };
+        for segment in &lint.message.segments {
+            let Segment::Var(var) = segment else {
+                continue;
+            };
+            if !rule.head_vars.contains(var) {
+                return LintVarSnafu {
+                    relation: lint.relation.clone(),
+                    var: var.clone(),
+                    line: lint.message.line,
+                }
+                .fail();
+            }
         }
         Ok(())
     }
@@ -384,6 +454,44 @@ fn parse_rewrite(items: &[Sexpr], line: usize) -> Result<Rewrite, Error> {
         body: parse_body(body)?,
         target: target.clone(),
         template: parse_template(template, *template_line)?,
+        line,
+    })
+}
+
+fn parse_lint(items: &[Sexpr], line: usize) -> Result<Lint, Error> {
+    let [
+        Sexpr::Atom { text: relation, .. },
+        Sexpr::Atom {
+            text: severity,
+            line: severity_line,
+        },
+        Sexpr::Str {
+            text: message,
+            line: message_line,
+        },
+    ] = items
+    else {
+        return DslSnafu {
+            line,
+            message: "lint form is (lint <relation> <error|warning> \"message\")".to_owned(),
+        }
+        .fail();
+    };
+    let severity = match severity.as_str() {
+        "error" => Severity::Error,
+        "warning" => Severity::Warning,
+        other => {
+            return LintSeveritySnafu {
+                got: other.to_owned(),
+                line: *severity_line,
+            }
+            .fail();
+        }
+    };
+    Ok(Lint {
+        relation: relation.clone(),
+        severity,
+        message: parse_template(message, *message_line)?,
         line,
     })
 }

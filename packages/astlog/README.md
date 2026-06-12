@@ -12,7 +12,7 @@ identifier text across two unrelated subtrees. astlog makes both one rule.
 
 ## The language
 
-A rules file is S-expressions, three forms:
+A rules file is S-expressions, four forms:
 
 ```lisp
 ;; tree-sitter query matches become relations: one row per match,
@@ -40,6 +40,11 @@ A rules file is S-expressions, three forms:
 ;; splicing bound variables
 (rewrite unwrap-to-try (fixable call e)
   (replace call "{e}?"))
+
+;; derived rows become findings: `astlog scan` reports every `fixable` row
+;; as an error located at the row's first node-valued column, rendering the
+;; message template against the relation's head variables
+(lint fixable error "unwrap inside a Result-returning function: `{e}`")
 ```
 
 Rules may be recursive (`(rule (up x z) (up y z) (parent x y))`); every value
@@ -63,15 +68,35 @@ the Datalog layer subsumes.
 
 - **Library**: `astlog-core` (this directory's `core/`), the only place with
   logic.
-- **CLI**: `astlog query rules.astlog src/ [--relation r] [--json] [--deny r]
-  [--deny-all]` and `astlog fix rules.astlog src/ [--write]`. `--deny` exits
-  nonzero when a relation derived rows, which turns a rules file into a CI
-  lint gate; `--deny-all` denies every relation the rules file defines, so
-  adding a rule extends the gate without touching the invocation (this is how
-  `nix run .#lint` runs `astlog-rules/nix.astlog`).
+- **CLI**:
+  - `astlog query rules.astlog src/ [--relation r] [--json]` prints derived
+    relations (pure inspection, always exits zero on success).
+  - `astlog scan rules.astlog [paths...] [--json] [--error]` is the lint
+    gate: one finding per row of each `(lint ...)`-declared relation, located
+    at the row's first node-valued column, sorted by (file, line, column,
+    rule). Exit code is nonzero iff an error-severity finding survives
+    suppression; `--error` promotes warnings for the exit decision (parity
+    with `ast-grep scan --error`). `--json` emits an array of
+    `{"rule","severity","message","file","line","column","endLine",
+    "endColumn","text"}` objects; this shape is a contract for downstream
+    consumers. Adding a `(lint ...)` form extends the gate without touching
+    the invocation (this is how `nix run .#lint` runs
+    `astlog-rules/nix.astlog`).
+  - `astlog fix rules.astlog src/ [--write]` applies rewrites.
 - **Python**: `import astlog` in the ix kernel (bundled like `search`/`tui`);
   `astlog.query(rules, paths)`, `astlog.fixes(...)`, `astlog.fix(...,
   write=True)`. Bindings are conversion-only.
+
+## Suppression
+
+A comment whose text contains `astlog-ignore` suppresses findings located on
+the comment's own line (trailing comment) or the line immediately below it.
+`astlog-ignore: name1, name2` limits suppression to those rule names; a bare
+`astlog-ignore` suppresses every rule there. Comment nodes are any
+tree-sitter node whose kind contains "comment" (nix `comment`, rust
+`line_comment`/`block_comment`, ...). Suppression filters findings at scan
+emission only: the underlying Datalog rows still exist for joins and `query`
+output.
 
 Languages come from `ast-merge-langs`: every grammar that crate registers
 (Rust, Python, TypeScript, Go, Nix, ...) works here, detected by file
@@ -141,16 +166,14 @@ Deliberately written here, after evaluating the alternatives:
 ## In production
 
 The repo's nix lint rules live in `astlog-rules/nix.astlog` (ported from the
-old ast-grep YAML rules, #1060) and gate `nix run .#lint` via
-`astlog query --deny-all`. Each rule has a committed good/bad fixture pair
-under `astlog-rules/tests/`, validated by the `astlog-nix-rules` flake check.
-One rule (`prefer-sri-hash`) stays on ast-grep because its single legitimate
-exception relies on an `ast-grep-ignore` suppression comment.
+old ast-grep YAML rules, #1060; `prefer-sri-hash` followed in #1062 once
+suppression comments landed) and gate `nix run .#lint` via `astlog scan`.
+Each lint has a committed good/bad fixture pair under `astlog-rules/tests/`,
+validated by the `astlog-nix-rules` flake check through the same
+`astlog scan --json` surface the gate uses.
 
 ## Planned
 
-- Suppression comments (`astlog-ignore: <relation>`), which would let
-  `prefer-sri-hash` move over from ast-grep.
 - A concrete-syntax pattern front end (`$X.unwrap()` style, likely via
   `ast-grep-core`) compiling into the same relations, so simple rules need no
   tree-sitter query vocabulary.

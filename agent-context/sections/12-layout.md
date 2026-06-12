@@ -17,7 +17,7 @@ users/<github-username>/                    # personal-but-shareable home-manage
 skills/                                    # Claude Code skills, one dir per skill
 agent-context/                             # source fragments for generated AGENTS.md/CLAUDE.md
 astlog-rules/                              # astlog nix lint rules and test fixtures
-ast-grep/                                  # remaining ast-grep lint rules (rust, prefer-sri-hash)
+ast-grep/                                  # remaining ast-grep lint rules (rust only)
 ```
 
 Skills are this repo's custom agent-skill system: each `skills/<name>/SKILL.md`

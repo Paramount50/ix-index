@@ -1,10 +1,10 @@
 //! Thin CLI over `astlog-core`: evaluate a rules file against paths, print
-//! derived relations or apply rewrites.
+//! derived relations, emit lint findings, or apply rewrites.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use astlog_core::{Analysis, Value};
+use astlog_core::{Analysis, Finding, Severity, Value, one_line};
 use clap::{Parser, Subcommand};
 use snafu::{ResultExt as _, Snafu};
 
@@ -17,7 +17,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Evaluate rules and print derived relations.
+    /// Evaluate rules and print derived relations (pure inspection; `scan`
+    /// is the lint gate).
     Query {
         /// Rules file (`.astlog`).
         rules: PathBuf,
@@ -30,14 +31,21 @@ enum Command {
         /// Emit JSON instead of text.
         #[arg(long)]
         json: bool,
-        /// Exit nonzero when this relation derived any row (repeatable).
-        /// Turns a rules file into a lint gate for CI.
+    },
+    /// Evaluate rules and emit one finding per row of each `(lint ...)`
+    /// relation, minus `astlog-ignore` suppressions. Exits nonzero when any
+    /// error-severity finding survives.
+    Scan {
+        /// Rules file (`.astlog`).
+        rules: PathBuf,
+        /// Files or directories to scan (default: the current directory).
+        paths: Vec<PathBuf>,
+        /// Emit a JSON array of findings instead of text.
         #[arg(long)]
-        deny: Vec<String>,
-        /// Deny every relation the rules file defines, so adding a rule
-        /// extends the lint gate without touching the invocation.
+        json: bool,
+        /// Promote warnings to errors for the exit-code decision.
         #[arg(long)]
-        deny_all: bool,
+        error: bool,
     },
     /// Evaluate rules and apply `(rewrite ...)` edits.
     Fix {
@@ -72,8 +80,8 @@ enum Error {
         source: std::io::Error,
     },
 
-    #[snafu(display("denied: {findings}"))]
-    Denied { findings: String },
+    #[snafu(display("{count} blocking finding(s)"))]
+    Findings { count: usize },
 }
 
 fn main() -> ExitCode {
@@ -100,8 +108,6 @@ fn run(cli: &Cli) -> Result<(), Error> {
             paths,
             relation,
             json,
-            deny,
-            deny_all,
         } => {
             let analysis = load(rules, paths)?;
             let selected = select(&analysis, relation.as_deref())?;
@@ -110,8 +116,30 @@ fn run(cli: &Cli) -> Result<(), Error> {
             } else {
                 print_text(&analysis, &selected);
             }
-            let denied = effective_deny(deny, *deny_all, analysis.database.relations.keys());
-            check_denied(&analysis, &denied)
+            Ok(())
+        }
+        Command::Scan {
+            rules,
+            paths,
+            json,
+            error,
+        } => {
+            let paths = if paths.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                paths.clone()
+            };
+            let analysis = load(rules, &paths)?;
+            let findings = analysis.findings()?;
+            if *json {
+                print_findings_json(&findings);
+            } else {
+                print_findings_text(&findings);
+            }
+            match blocking_count(&findings, *error) {
+                0 => Ok(()),
+                count => FindingsSnafu { count }.fail(),
+            }
         }
         Command::Fix {
             rules,
@@ -138,56 +166,54 @@ fn load(rules: &PathBuf, paths: &[PathBuf]) -> Result<Analysis, Error> {
     Ok(astlog_core::analyze(&source, paths)?)
 }
 
-/// The deny list a query run enforces: the explicit `--deny` names, extended
-/// by every defined relation when `--deny-all` is set. Names stay
-/// deduplicated and sorted by first appearance so failure output is stable.
-fn effective_deny<'a>(
-    deny: &[String],
-    deny_all: bool,
-    relations: impl Iterator<Item = &'a String>,
-) -> Vec<String> {
-    let mut denied: Vec<String> = deny.to_vec();
-    if deny_all {
-        for name in relations {
-            if !denied.contains(name) {
-                denied.push(name.clone());
-            }
-        }
-    }
-    denied
+/// How many findings gate the exit code: every error, plus every warning when
+/// `--error` promotes warnings (parity with `ast-grep scan --error`).
+fn blocking_count(findings: &[Finding], promote_warnings: bool) -> usize {
+    findings
+        .iter()
+        .filter(|finding| match finding.severity {
+            Severity::Error => true,
+            Severity::Warning => promote_warnings,
+        })
+        .count()
 }
 
-/// Fail when any `--deny` relation derived rows, naming each with its count.
-/// A `--deny` name that no rule defines is itself an error, never a silent pass.
-fn check_denied(analysis: &Analysis, deny: &[String]) -> Result<(), Error> {
-    let mut findings = Vec::new();
-    for name in deny {
-        let relation = analysis.database.relations.get(name).ok_or_else(|| {
-            NoRelationSnafu {
-                name,
-                available: analysis
-                    .database
-                    .relations
-                    .keys()
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            }
-            .build()
-        })?;
-        let rows = relation.rows().len();
-        if rows > 0 {
-            findings.push(format!("{name} ({rows} row(s))"));
-        }
+fn print_findings_text(findings: &[Finding]) {
+    for finding in findings {
+        println!(
+            "{file}:{line}:{column}: {severity}[{rule}]: {message} `{text}`",
+            file = finding.file.display(),
+            line = finding.line,
+            column = finding.column,
+            severity = finding.severity.as_str(),
+            rule = finding.rule,
+            message = finding.message,
+            text = finding.text,
+        );
     }
-    if findings.is_empty() {
-        Ok(())
-    } else {
-        DeniedSnafu {
-            findings: findings.join(", "),
-        }
-        .fail()
-    }
+}
+
+/// The `scan --json` contract consumed by CI and sibling repos: an array of
+/// `{"rule","severity","message","file","line","column","endLine",
+/// "endColumn","text"}` objects.
+fn print_findings_json(findings: &[Finding]) {
+    let rows: Vec<serde_json::Value> = findings
+        .iter()
+        .map(|finding| {
+            serde_json::json!({
+                "rule": finding.rule,
+                "severity": finding.severity.as_str(),
+                "message": finding.message,
+                "file": finding.file,
+                "line": finding.line,
+                "column": finding.column,
+                "endLine": finding.end_line,
+                "endColumn": finding.end_column,
+                "text": finding.text,
+            })
+        })
+        .collect();
+    println!("{}", serde_json::Value::Array(rows));
 }
 
 fn select(analysis: &Analysis, relation: Option<&str>) -> Result<Vec<String>, Error> {
@@ -214,16 +240,6 @@ fn render_value(analysis: &Analysis, value: &Value) -> String {
         }
         Value::Text(text) => format!("\"{text}\""),
     }
-}
-
-/// Collapse a node's source text to one bounded line for terminal output.
-fn one_line(text: &str) -> String {
-    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = flat.chars().take(60).collect();
-    if out.chars().count() < flat.chars().count() {
-        out.push('…');
-    }
-    out
 }
 
 fn print_text(analysis: &Analysis, selected: &[String]) {
@@ -284,21 +300,37 @@ fn json_value(analysis: &Analysis, value: &Value) -> serde_json::Value {
 
 #[cfg(test)]
 mod tests {
-    use super::effective_deny;
+    use std::path::PathBuf;
 
-    #[test]
-    fn deny_all_extends_explicit_denies_without_duplicates() {
-        let relations = ["a".to_owned(), "b".to_owned(), "c".to_owned()];
-        let explicit = ["b".to_owned()];
-        let denied = effective_deny(&explicit, true, relations.iter());
-        assert_eq!(denied, ["b", "a", "c"]);
+    use astlog_core::{Finding, Severity};
+
+    use super::blocking_count;
+
+    fn finding(severity: Severity) -> Finding {
+        Finding {
+            rule: "r".to_owned(),
+            severity,
+            message: "m".to_owned(),
+            file: PathBuf::from("f.nix"),
+            line: 1,
+            column: 1,
+            end_line: 1,
+            end_column: 2,
+            text: "t".to_owned(),
+        }
     }
 
     #[test]
-    fn without_deny_all_only_explicit_names_are_denied() {
-        let relations = ["a".to_owned(), "b".to_owned()];
-        let explicit = ["a".to_owned()];
-        let denied = effective_deny(&explicit, false, relations.iter());
-        assert_eq!(denied, ["a"]);
+    fn errors_always_block_warnings_only_when_promoted() {
+        let findings = [finding(Severity::Error), finding(Severity::Warning)];
+        assert_eq!(blocking_count(&findings, false), 1);
+        assert_eq!(blocking_count(&findings, true), 2);
+    }
+
+    #[test]
+    fn warnings_alone_pass_without_promotion() {
+        let findings = [finding(Severity::Warning)];
+        assert_eq!(blocking_count(&findings, false), 0);
+        assert_eq!(blocking_count(&findings, true), 1);
     }
 }

@@ -50,20 +50,20 @@ let
       }
       def "main statix" [] { statix check . }
       def "main deadnix" [] { deadnix --fail --no-lambda-pattern-names . }
-      # The Nix style rules as astlog relations (astlog-rules/nix.astlog),
-      # ported from the old ast-grep nix rules (#1060). --deny-all gates on
-      # every relation the rules file defines, so adding a rule needs no
-      # change here. Only .nix files are handed to the corpus: astlog would
-      # otherwise parse every known-grammar file in the repo to run
-      # nix-only rules.
+      # The Nix style rules as astlog lint declarations
+      # (astlog-rules/nix.astlog, #1060/#1062). `astlog scan` emits one
+      # finding per lint-declared relation row and exits nonzero on any
+      # error-severity finding, so adding a (lint ...) extends the gate
+      # without touching this invocation. Legitimate exceptions are
+      # suppressed in place with `astlog-ignore: <rule>` comments. Only
+      # .nix files are handed to the corpus: astlog would otherwise parse
+      # every known-grammar file in the repo to run nix-only rules.
       def "main astlog" [] {
         let nix_files = (fd --extension nix | lines)
-        astlog query astlog-rules/nix.astlog ...$nix_files --deny-all
+        astlog scan astlog-rules/nix.astlog ...$nix_files
       }
-      # ast-grep keeps the rust rules plus the one nix rule astlog cannot
-      # express: prefer-sri-hash needs its `ast-grep-ignore` suppression
-      # comment in lib/rust/vendor.nix, and astlog v0 has no suppression
-      # mechanism.
+      # ast-grep keeps only the rust rules; the nix rules (including
+      # prefer-sri-hash, #1062) all live in astlog now.
       def "main ast-grep" [] { ast-grep scan --error . }
       # Rule self-test: every fixture under ast-grep/*/tests must flag its
       # invalid cases and ignore its valid ones. Catches rules whose pattern
@@ -766,15 +766,20 @@ let
             pkgs.runCommand "loader-manifests-check" { } ''
               printf '%s\n' '${forced}' > "$out"
             '';
-          # Rule self-test for the astlog nix lint rules: every relation in
-          # astlog-rules/nix.astlog must have a committed fixture pair and
-          # fire exactly on the violating one. A rule that never fires in
-          # tests is unproven (its query may have silently stopped matching),
-          # so a missing or non-firing fixture fails the build. Fixtures are
-          # stored as `.fixture` (not `.nix`) so the repo lint stages
+          # Rule self-test for the astlog nix lint rules: every (lint ...)
+          # declaration in astlog-rules/nix.astlog must have a committed
+          # fixture pair and fire exactly on the violating one, driven
+          # through the same `astlog scan --json` surface the lint gate
+          # uses. A lint that never fires in tests is unproven (its query
+          # may have silently stopped matching), so a missing or non-firing
+          # fixture fails the build, as does a rule without a lint
+          # declaration (it would silently drop out of the gate). Fixtures
+          # are stored as `.fixture` (not `.nix`) so the repo lint stages
           # (nixfmt / statix / deadnix / astlog itself) never scan the
           # deliberately-violating snippets; the check stages them back to
-          # `.nix` before running the binary.
+          # `.nix` before running the binary. `scan` exits nonzero on the
+          # violating fixture by design, so the jq pipelines deliberately
+          # take the JSON regardless of exit code.
           astlog-nix-rules =
             pkgs.runCommand "astlog-nix-rules-check"
               {
@@ -788,30 +793,36 @@ let
                 tests=${astlogRulesSource}/astlog-rules/tests
                 fail=0
                 for rule in $(sed -n 's/^(rule (\([a-z0-9-]*\).*/\1/p' "$rules" | sort -u); do
+                  if ! grep -q "^(lint $rule " "$rules"; then
+                    echo "rule $rule has no (lint ...) declaration, so the scan gate skips it" >&2
+                    fail=1
+                  fi
+                done
+                for rule in $(sed -n 's/^(lint \([a-z0-9-]*\).*/\1/p' "$rules" | sort -u); do
                   dir="$tests/$rule"
                   if [ ! -f "$dir/bad.fixture" ] || [ ! -f "$dir/good.fixture" ]; then
-                    echo "rule $rule has no fixture pair under astlog-rules/tests/$rule" >&2
+                    echo "lint $rule has no fixture pair under astlog-rules/tests/$rule" >&2
                     fail=1
                     continue
                   fi
                   work=$(mktemp -d)
                   cp "$dir/bad.fixture" "$work/bad.nix"
                   cp "$dir/good.fixture" "$work/good.nix"
-                  bad=$(astlog query "$rules" "$work/bad.nix" --relation "$rule" --json | jq --arg r "$rule" '.[$r] | length')
-                  good=$(astlog query "$rules" "$work/good.nix" --relation "$rule" --json | jq --arg r "$rule" '.[$r] | length')
+                  bad=$(astlog scan "$rules" "$work/bad.nix" --json | jq --arg r "$rule" '[.[] | select(.rule == $r)] | length')
+                  good=$(astlog scan "$rules" "$work/good.nix" --json | jq --arg r "$rule" '[.[] | select(.rule == $r)] | length')
                   if [ "$bad" = 0 ]; then
-                    echo "rule $rule did not fire on its violating fixture" >&2
+                    echo "lint $rule did not fire on its violating fixture" >&2
                     fail=1
                   fi
                   if [ "$good" != 0 ]; then
-                    echo "rule $rule fired $good row(s) on its valid fixture" >&2
+                    echo "lint $rule fired $good finding(s) on its valid fixture" >&2
                     fail=1
                   fi
                 done
                 for dir in "$tests"/*/; do
                   rule=$(basename "$dir")
-                  if ! grep -q "^(rule ($rule " "$rules"; then
-                    echo "fixture dir astlog-rules/tests/$rule matches no rule" >&2
+                  if ! grep -q "^(lint $rule " "$rules"; then
+                    echo "fixture dir astlog-rules/tests/$rule matches no lint" >&2
                     fail=1
                   fi
                 done

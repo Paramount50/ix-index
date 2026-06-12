@@ -3,9 +3,11 @@
 //! Tree-sitter query matches become relations (one row per match, columns
 //! named by `@capture`), Datalog rules join them — structurally (`ancestor`,
 //! `parent`, `same-file`), by value (`text`, `same-text`, `kind`), or
-//! recursively — and rewrites turn derived rows into byte-range edits built
-//! from templates. See `packages/astlog/README.md` for the language and the
-//! prior art this composes.
+//! recursively — rewrites turn derived rows into byte-range edits built from
+//! templates, and `(lint ...)` declarations turn derived rows into located
+//! findings filtered by `astlog-ignore` suppression comments. See
+//! `packages/astlog/README.md` for the language and the prior art this
+//! composes.
 //!
 //! ```text
 //! (rule (unwrap-call call e)
@@ -33,6 +35,7 @@ mod error;
 mod eval;
 mod program;
 mod rewrite;
+mod scan;
 mod sexpr;
 
 #[cfg(test)]
@@ -45,13 +48,15 @@ pub use ast_merge_langs::Lang;
 pub use crate::corpus::{Corpus, LineCol, NodeInfo, NodeRef, SourceFile, Value};
 pub use crate::error::Error;
 pub use crate::eval::{Database, Relation, Row};
-pub use crate::program::Program;
+pub use crate::program::{Lint, Program, Severity};
 pub use crate::rewrite::{Edit, FileRewrite};
+pub use crate::scan::{Finding, one_line};
 
-/// A finished run: the loaded corpus, every derived relation, and the edits
-/// every `(rewrite ...)` produced.
+/// A finished run: the checked program, the loaded corpus, every derived
+/// relation, and the edits every `(rewrite ...)` produced.
 #[derive(Debug)]
 pub struct Analysis {
+    pub program: Program,
     pub corpus: Corpus,
     pub database: Database,
     pub edits: Vec<Edit>,
@@ -69,6 +74,17 @@ impl Analysis {
     pub fn diff(&self) -> String {
         rewrite::unified_diff(&self.corpus, &self.rewritten())
     }
+
+    /// Findings from every `(lint ...)` declaration, with `astlog-ignore`
+    /// suppression applied and sorted by (file, line, column, rule).
+    ///
+    /// # Errors
+    ///
+    /// Fails when a lint relation derives a row with no node-valued column
+    /// to locate the finding at.
+    pub fn findings(&self) -> Result<Vec<Finding>, Error> {
+        scan::findings(&self.program, &self.corpus, &self.database)
+    }
 }
 
 /// Parse `rules`, load `paths`, run rules to a fixpoint, and plan rewrites.
@@ -84,7 +100,9 @@ pub fn analyze(rules: &str, paths: &[PathBuf]) -> Result<Analysis, Error> {
     let evaluator = eval::Evaluator::new(&program, &corpus)?;
     let database = evaluator.fixpoint()?;
     let edits = rewrite::collect(&program, &corpus, &evaluator, &database)?;
+    drop(evaluator);
     Ok(Analysis {
+        program,
         corpus,
         database,
         edits,

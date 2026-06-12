@@ -1,4 +1,4 @@
-use crate::{Value, analyze};
+use crate::{Severity, Value, analyze};
 
 type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -276,6 +276,174 @@ fn dirty() { danger(); }
         return Err("danger-free column 0 should be a node".into());
     };
     assert!(analysis.corpus.node_text(*node).contains("clean"));
+    Ok(())
+}
+
+/// One rule flagging every `.unwrap()` receiver, lint-declared as an error
+/// with a `{e}` splice.
+const LINT_RULES: &str = r#"
+(rule (unwrap-call call e)
+  (match rust "
+    (call_expression
+      function: (field_expression value: (_) @e field: (field_identifier) @m)
+      arguments: (arguments)) @call")
+  (text m "unwrap"))
+
+(lint unwrap-call error "do not unwrap `{e}`")
+"#;
+
+#[test]
+fn lint_unknown_relation_is_a_load_error() {
+    let rules = r#"(lint no-such-rel error "boom")"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("lint on an unknown relation must be rejected");
+    };
+    let message = error.to_string();
+    assert!(message.contains("no-such-rel"), "got: {message}");
+    assert!(message.contains("rules:1"), "got: {message}");
+}
+
+#[test]
+fn lint_bad_severity_is_a_typed_error() {
+    let rules = r#"
+(rule (brk b) (match rust "(break_expression) @b"))
+(lint brk fatal "no breaks")
+"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("bad lint severity must be rejected");
+    };
+    let crate::Error::LintSeverity { got, line } = error else {
+        panic!("expected LintSeverity, got: {error}");
+    };
+    assert_eq!(got, "fatal");
+    assert_eq!(line, 3);
+}
+
+#[test]
+fn lint_template_var_must_be_a_head_variable() {
+    let rules = r#"
+(rule (brk b) (match rust "(break_expression) @b"))
+(lint brk error "break at {other}")
+"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("lint message variable outside the head must be rejected");
+    };
+    let crate::Error::LintVar { relation, var, .. } = error else {
+        panic!("expected LintVar, got: {error}");
+    };
+    assert_eq!(relation, "brk");
+    assert_eq!(var, "other");
+}
+
+#[test]
+fn scan_emits_located_findings_with_spliced_message() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", RUST_SAMPLE)?;
+    let analysis = analyze(LINT_RULES, &[dir.path().to_path_buf()])?;
+    let findings = analysis.findings()?;
+    assert_eq!(findings.len(), 2, "both unwrap sites become findings");
+    let first = &findings[0];
+    assert_eq!(first.rule, "unwrap-call");
+    assert_eq!(first.severity, Severity::Error);
+    assert_eq!(first.message, "do not unwrap `compute()`");
+    assert_eq!(first.text, "compute().unwrap()");
+    assert_eq!((first.line, first.column), (3, 13));
+    assert!(first.end_line == 3 && first.end_column > first.column);
+    assert!(
+        findings.windows(2).all(|pair| {
+            (&pair[0].file, pair[0].line) <= (&pair[1].file, pair[1].line)
+        }),
+        "findings are sorted by position"
+    );
+    Ok(())
+}
+
+#[test]
+fn scan_requires_a_node_column() -> TestResult {
+    // The lint relation's only column is derived text, so a finding has no
+    // location: a typed error, not a panic.
+    let rules = r#"
+(rule (kinds k)
+  (match rust "(break_expression) @b")
+  (kind b k))
+(lint kinds error "saw kind {k}")
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", "fn main() { loop { break; } }\n")?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+    let Err(error) = analysis.findings() else {
+        return Err("a lint row without a node column must fail scan".into());
+    };
+    let crate::Error::LintNoNode { rule, .. } = error else {
+        return Err(format!("expected LintNoNode, got: {error}").into());
+    };
+    assert_eq!(rule, "kinds");
+    Ok(())
+}
+
+#[test]
+fn suppression_filters_same_line_and_line_below() -> TestResult {
+    let source = "
+fn f() -> u32 {
+    a().unwrap(); // astlog-ignore
+    // astlog-ignore
+    b().unwrap();
+    c().unwrap();
+    0
+}
+";
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(LINT_RULES, &[dir.path().to_path_buf()])?;
+    let findings = analysis.findings()?;
+    assert_eq!(findings.len(), 1, "only the uncommented site survives");
+    assert_eq!(findings[0].text, "c().unwrap()");
+    // The rows themselves are untouched: suppression filters emission only.
+    assert_eq!(analysis.database.relations["unwrap-call"].rows().len(), 3);
+    Ok(())
+}
+
+#[test]
+fn named_suppression_matches_only_its_rules() -> TestResult {
+    // Blank lines isolate each site: a trailing suppression also covers the
+    // line below it, and these cases must not bleed into each other.
+    let source = "
+fn f() -> u32 {
+    a().unwrap(); // astlog-ignore: unwrap-call
+
+    b().unwrap(); // astlog-ignore: some-other-rule
+
+    c().unwrap(); // astlog-ignore: some-other-rule, unwrap-call
+
+    0
+}
+";
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(LINT_RULES, &[dir.path().to_path_buf()])?;
+    let findings = analysis.findings()?;
+    assert_eq!(
+        findings.len(),
+        1,
+        "the wrong-name suppression must not suppress"
+    );
+    assert_eq!(findings[0].text, "b().unwrap()");
+    Ok(())
+}
+
+#[test]
+fn warning_severity_is_carried_through() -> TestResult {
+    let rules = r#"
+(rule (brk b) (match rust "(break_expression) @b"))
+(lint brk warning "loop break")
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", "fn main() { loop { break; } }\n")?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+    let findings = analysis.findings()?;
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].severity, Severity::Warning);
+    assert_eq!(findings[0].message, "loop break");
     Ok(())
 }
 

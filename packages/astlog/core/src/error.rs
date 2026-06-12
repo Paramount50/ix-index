@@ -103,6 +103,23 @@ pub enum Error {
     #[snafu(display("rules:{line}: template references unbound variable `{var}`"))]
     TemplateVar { var: String, line: usize },
 
+    #[snafu(display("rules:{line}: lint severity must be `error` or `warning`, got `{got}`"))]
+    LintSeverity { got: String, line: usize },
+
+    #[snafu(display(
+        "rules:{line}: lint message references `{{{var}}}`, which is not a head variable of `{relation}`"
+    ))]
+    LintVar {
+        relation: String,
+        var: String,
+        line: usize,
+    },
+
+    #[snafu(display(
+        "lint `{rule}` (rules:{line}): relation row has no node-valued column to locate the finding"
+    ))]
+    LintNoNode { rule: String, line: usize },
+
     #[snafu(display(
         "overlapping rewrites in {}: bytes {first_start}..{first_end} and {second_start}..{second_end}",
         path.display()
