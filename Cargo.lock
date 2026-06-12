@@ -6774,11 +6774,13 @@ dependencies = [
 name = "source-codex"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "nix 0.31.3",
  "serde",
  "serde_json",
  "snafu",
  "source-meta",
+ "tempfile",
 ]
 
 [[package]]

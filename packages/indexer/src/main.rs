@@ -121,6 +121,12 @@ struct Cli {
     #[arg(long)]
     codex_file: Option<PathBuf>,
 
+    /// Codex session-rollout directory (default with `--local`:
+    /// `~/.codex/sessions`). Rollouts carry the full sessions — assistant
+    /// turns and tool calls — where the history file has user prompts only.
+    #[arg(long)]
+    codex_sessions: Option<PathBuf>,
+
     /// atuin history db (default with `--local`: `~/.local/share/atuin/history.db`).
     #[arg(long)]
     atuin_db: Option<PathBuf>,
@@ -273,7 +279,7 @@ async fn main() -> anyhow::Result<()> {
     }
     if !any_source_selected(&cli) {
         anyhow::bail!(
-            "no sources selected: pass --local, --user NAME:HOME, --claude-dir/--codex-file/--atuin-db/--slack-export/--linear-export/--github-export/--git-repo, or --code-repo"
+            "no sources selected: pass --local, --user NAME:HOME, --claude-dir/--codex-file/--codex-sessions/--atuin-db/--slack-export/--linear-export/--github-export/--git-repo, or --code-repo"
         );
     }
 
@@ -576,6 +582,7 @@ const fn any_source_selected(cli: &Cli) -> bool {
     cli.local
         || cli.claude_dir.is_some()
         || cli.codex_file.is_some()
+        || cli.codex_sessions.is_some()
         || cli.atuin_db.is_some()
         || cli.slack_export.is_some()
         || cli.linear_export.is_some()
@@ -603,6 +610,10 @@ async fn run_sources(
         .codex_file
         .clone()
         .or_else(|| cli.local.then(|| default(".codex/history.jsonl")).flatten());
+    let codex_sessions = cli
+        .codex_sessions
+        .clone()
+        .or_else(|| cli.local.then(|| default(".codex/sessions")).flatten());
     let atuin = cli.atuin_db.clone().or_else(|| {
         cli.local
             .then(|| default(".local/share/atuin/history.db"))
@@ -623,10 +634,15 @@ async fn run_sources(
         .await;
         record("claude", result, &mut counts);
     }
-    if let Some(file) = codex {
+    if codex.is_some() || codex_sessions.is_some() {
+        // One adapter (and one `run_source`) covers both codex inputs: the
+        // parquet sink overwrites `source=codex/data.parquet` in full per
+        // reconcile, so two separate runs would clobber each other's rows.
         let result = async {
-            let adapter = source_codex::CodexHistory::open(&file)
-                .with_context(|| format!("parsing Codex history at {}", file.display()))?;
+            let adapter = source_codex::CodexHistory::open(codex.as_deref(), codex_sessions.as_deref())
+                .with_context(|| {
+                    format!("parsing Codex history at {codex:?} / sessions at {codex_sessions:?}")
+                })?;
             run_source("codex", &adapter, mixedbread, parquet, lake).await
         }
         .await;
@@ -949,16 +965,20 @@ async fn index_user(
         record(&label, result, counts);
     }
 
-    if let Some(codex_file) = safe_path_under(home, &[".codex", "history.jsonl"], false) {
+    // Codex: the flat prompt log plus the full session rollouts, one adapter
+    // (and one parquet overwrite) for both, like the `--local` path.
+    let codex_file = safe_path_under(home, &[".codex", "history.jsonl"], false);
+    let codex_sessions = safe_path_under(home, &[".codex", "sessions"], true);
+    if codex_file.is_some() || codex_sessions.is_some() {
         let label = format!("codex:{name}");
         let result = async {
-            let adapter = source_codex::CodexHistory::open_with(&codex_file, host, name)
-                .with_context(|| {
-                    format!(
-                        "parsing Codex history for {name} at {}",
-                        codex_file.display()
-                    )
-                })?;
+            let adapter = source_codex::CodexHistory::open_with(
+                codex_file.as_deref(),
+                codex_sessions.as_deref(),
+                host,
+                name,
+            )
+            .with_context(|| format!("parsing Codex history for {name} under {}", home.display()))?;
             run_source(&label, &adapter, mixedbread, parquet, lake).await
         }
         .await;
