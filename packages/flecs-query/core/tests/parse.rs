@@ -513,3 +513,11 @@ fn deep_scope_nesting_is_an_error_not_a_stack_overflow() {
     let nested = format!("{}TagA{}", "!{".repeat(depth), "}".repeat(depth));
     roundtrip(&nested, 1);
 }
+
+#[test]
+fn template_arguments_keep_multibyte_chars() {
+    // The <...> branch used to copy byte-wise, turning é into mojibake.
+    let query = roundtrip("Rel<Posé>", 1);
+    assert_eq!(id(&query.terms[0]).first.expr, name("Rel<Posé>"));
+    roundtrip("Map<string, vé<int>>", 1);
+}

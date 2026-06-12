@@ -314,21 +314,23 @@ fn lex_ident(src: &str, start: usize, pos: &mut usize) -> Result<Token, ParseErr
                 *pos += 1;
             }
             b'<' => {
-                let mut depth = 0usize;
+                let mut depth = 0_usize;
                 loop {
-                    let Some(&t) = bytes.get(*pos) else {
+                    // Decode whole chars, as everywhere else: byte-wise
+                    // copying turns multi-byte template arguments to mojibake.
+                    let Some(t) = src[*pos..].chars().next() else {
                         return Err(ParseError::new(
                             "< without > in identifier",
                             Span::at(start),
                         ));
                     };
                     match t {
-                        b'<' => depth += 1,
-                        b'>' => depth -= 1,
+                        '<' => depth += 1,
+                        '>' => depth -= 1,
                         _ => {}
                     }
-                    text.push(char::from(t));
-                    *pos += 1;
+                    text.push(t);
+                    *pos += t.len_utf8();
                     if depth == 0 {
                         break;
                     }
