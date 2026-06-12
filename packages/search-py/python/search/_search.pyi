@@ -1,9 +1,9 @@
 """Type stubs for the native PyO3 module.
 
 Hand-maintained to mirror packages/search-py/src/lib.rs. Keep in sync
-when changing the binding. `semantic` and `grep` each return a native
-asyncio-awaitable coroutine produced by pyo3-async-runtimes; awaiting it drives
-the underlying tokio future.
+when changing the binding. `semantic`, `grep`, and `recent` each return a
+native asyncio-awaitable coroutine produced by pyo3-async-runtimes; awaiting it
+drives the underlying tokio future.
 """
 
 from __future__ import annotations
@@ -13,8 +13,12 @@ from typing import TypedDict
 
 __version__: str
 
-class Hit(TypedDict):
-    """One scored search result from the shared corpus store."""
+class Hit(TypedDict, total=False):
+    """One scored search result from the shared corpus store.
+
+    The first six keys are always present; the provenance keys (``timestamp``
+    through ``project``) appear only when the record carries them.
+    """
 
     path: str
     score: float
@@ -22,6 +26,14 @@ class Hit(TypedDict):
     num_lines: int | None
     text: str
     source: str
+    timestamp: int
+    user: str
+    host: str
+    session_id: str
+    external_id: str
+    url: str
+    repo: str
+    project: str
 
 def semantic(
     query: str,
@@ -38,6 +50,9 @@ def semantic(
     project: list[str] | None = ...,
     agentic: bool = ...,
     reranker: str | None = ...,
+    since: int | str | None = ...,
+    until: int | str | None = ...,
+    compact: bool = ...,
 ) -> Awaitable[list[Hit]]: ...
 def grep(
     pattern: str,
@@ -51,4 +66,21 @@ def grep(
     user: list[str] | None = ...,
     host: list[str] | None = ...,
     project: list[str] | None = ...,
+    since: int | str | None = ...,
+    until: int | str | None = ...,
+    compact: bool = ...,
+) -> Awaitable[list[Hit]]: ...
+def recent(
+    top_k: int = ...,
+    store: str | None = ...,
+    base_url: str | None = ...,
+    source: list[str] | None = ...,
+    not_source: list[str] | None = ...,
+    repo: str | None = ...,
+    user: list[str] | None = ...,
+    host: list[str] | None = ...,
+    project: list[str] | None = ...,
+    since: int | str | None = ...,
+    until: int | str | None = ...,
+    compact: bool = ...,
 ) -> Awaitable[list[Hit]]: ...

@@ -85,6 +85,10 @@ fn hit_from_chunk(chunk: mixedbread::Chunk) -> SearchHit {
         score: chunk.score,
         start_line: chunk.start_line.map(|line| line.saturating_sub(1)),
         num_lines: chunk.num_lines.map(|span| span.saturating_add(1)),
+        // Carry the stored identity/recency metadata through instead of
+        // discarding it: hits without a timestamp or session id are dead ends
+        // for a consumer judging staleness or fetching surrounding context.
+        provenance: crate::backend::provenance_of(metadata),
     }
 }
 
@@ -196,6 +200,21 @@ impl Store for MixedbreadStore {
                 options.targets.api_targets(),
                 filters,
             )
+            .await
+            .context(BackendSnafu)?;
+        Ok(chunks.into_iter().map(hit_from_chunk).collect())
+    }
+
+    async fn list_chunks(
+        &self,
+        stores: &[String],
+        top_k: usize,
+        filters: Option<&Filter>,
+        sort_by: Option<&mixedbread::SortBy>,
+    ) -> Result<Vec<SearchHit>> {
+        let chunks = self
+            .client
+            .list_chunks(stores, top_k, filters, sort_by)
             .await
             .context(BackendSnafu)?;
         Ok(chunks.into_iter().map(hit_from_chunk).collect())

@@ -79,7 +79,10 @@ MODULES: tuple[Module, ...] = (
     Module("fleet", "async polars SSH fan-out across hosts (`read_ndjson` / `scan`)"),
     Module(
         "search",
-        "meaning-based semantic recall across an indexed corpus",
+        "meaning-based recall across the fleet corpus (code + agent/shell history): "
+        "`await search.semantic(q, since='7d', compact=True)` / `grep(pattern)` / "
+        "`recent(source=['shell'], since='6h')` newest-first; hits carry timestamp/"
+        "user/host/session_id provenance",
         # Mirrors the resolution order owned by packages/mixedbread/src/auth.rs
         # (env key, else the `mgrep login` token), which the bundled module
         # reaches through search-py.

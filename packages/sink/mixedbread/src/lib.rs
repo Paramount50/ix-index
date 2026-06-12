@@ -590,6 +590,15 @@ mod tests {
         ) -> search_core::Result<Vec<search_core::SearchHit>> {
             self.0.grep(stores, pattern, top_k, options, filters).await
         }
+        async fn list_chunks(
+            &self,
+            stores: &[String],
+            top_k: usize,
+            filters: Option<&search_core::Filter>,
+            sort_by: Option<&search_core::SortBy>,
+        ) -> search_core::Result<Vec<search_core::SearchHit>> {
+            self.0.list_chunks(stores, top_k, filters, sort_by).await
+        }
         async fn ask(
             &self,
             stores: &[String],

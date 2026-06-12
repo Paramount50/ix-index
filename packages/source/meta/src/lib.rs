@@ -49,6 +49,29 @@ use snafu::{ResultExt as _, Snafu, ensure};
 #[serde(transparent)]
 pub struct Source(String);
 
+/// The source tags the fleet's adapters actually write, compiled from each
+/// adapter crate's `SOURCE_TAG` const (plus `code` and `web`, the two tags the
+/// pipeline treats specially).
+///
+/// [`Source`] itself stays an open set — adding a corpus is a new tag value,
+/// never an enum variant — but the *query* edges (the `search` CLI, the Python
+/// binding) validate user-supplied scope values against this list, because a
+/// mistyped tag is silently accepted by the store and returns zero hits,
+/// indistinguishable from an empty corpus. When an adapter crate gains a new
+/// `SOURCE_TAG`, add it here so the query surfaces accept it.
+pub const KNOWN_SOURCE_TAGS: &[&str] = &[
+    "claude_history", // packages/source/claude
+    "codex",          // packages/source/codex
+    "shell",          // packages/source/atuin
+    "claude_debug",   // packages/source/debug
+    "git",            // packages/source/git
+    "github",         // packages/source/github
+    "slack",          // packages/source/slack
+    "linear",         // packages/source/linear
+    "code",           // checkout sync (search-core)
+    "web",            // hosted web-search store
+];
+
 impl Source {
     /// Wrap a tag value (e.g. `"slack"`, `"claude_history"`).
     #[must_use]

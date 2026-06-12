@@ -13,7 +13,7 @@ use crate::db::Db;
 use crate::error::Result;
 use crate::manifest::Manifest;
 use crate::repo::repo_slug;
-use crate::search::{AnswerView, CodeScope, DisplayHit, ask, grep, semantic};
+use crate::search::{AnswerView, CodeScope, DisplayHit, RenderMode, ask, grep, semantic};
 use crate::sync::{sync, wait_until_indexed};
 
 /// What to query and how, independent of the backend and progress reporting.
@@ -149,6 +149,7 @@ pub async fn index_and_semantic(
         query.include_web,
         query.filters,
         query.code_scope,
+        RenderMode::Full,
     )
     .await
 }
@@ -180,6 +181,7 @@ pub async fn index_and_grep(
         options,
         query.filters,
         query.code_scope,
+        RenderMode::Full,
     )
     .await
 }

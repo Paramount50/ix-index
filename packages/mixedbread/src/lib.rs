@@ -4,7 +4,8 @@
 //!
 //! Endpoints covered: store create/get (`/v1/stores`), the two-step file upload
 //! (`/v1/files` then `/v1/stores/{store}/files`), file listing and deletion,
-//! search (`/v1/stores/search`), regex grep (`/v1/stores/grep`), and
+//! search (`/v1/stores/search`), regex grep (`/v1/stores/grep`),
+//! metadata-only chunk listing (`/v1/stores/list-chunks`), and
 //! question-answering (`/v1/stores/question-answering`).
 
 use std::path::PathBuf;
@@ -214,6 +215,47 @@ impl Rerank {
     #[must_use]
     pub fn listwise() -> Self {
         Self::model(DEFAULT_RERANK_MODEL)
+    }
+}
+
+/// Sort order for [`Client::list_chunks`]: a metadata field path and direction.
+///
+/// Serializes to the API's `[field_path, ascending]` tuple form. An unprefixed
+/// dot path targets file metadata (e.g. `timestamp`); `generated_metadata.*`
+/// targets chunk metadata.
+#[derive(Debug, Clone)]
+pub struct SortBy {
+    /// Metadata field path to sort on.
+    pub field: String,
+    /// Ascending (`true`) or descending (`false`).
+    pub ascending: bool,
+}
+
+impl SortBy {
+    /// Sort ascending on `field`.
+    #[must_use]
+    pub fn asc(field: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            ascending: true,
+        }
+    }
+
+    /// Sort descending on `field` (e.g. newest-first on a timestamp).
+    #[must_use]
+    pub fn desc(field: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            ascending: false,
+        }
+    }
+}
+
+impl serde::Serialize for SortBy {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // The API accepts `string | [field_path, ascending]`; always emit the
+        // tuple so the direction is explicit on the wire.
+        (&self.field, self.ascending).serialize(serializer)
     }
 }
 
@@ -591,6 +633,42 @@ impl Client {
         Ok(response.data.into_iter().map(Chunk::from).collect())
     }
 
+    /// List chunks from one or more stores purely by metadata filters — no
+    /// embeddings, no semantic similarity, no reranking — on the server's
+    /// `/v1/stores/list-chunks` endpoint.
+    ///
+    /// This is the API for deterministic ranked retrieval over numeric
+    /// metadata: combined with a `timestamp` range filter and
+    /// `sort_by = SortBy::desc("timestamp")` it answers "what happened in the
+    /// last N hours, newest first". `top_k` caps the returned chunks (the
+    /// endpoint has no cursor; ask for more to get more). The response decodes
+    /// the same way [`search`](Self::search) does, so a listed chunk and a
+    /// search hit share the [`Chunk`] shape (`score` is meaningless here and
+    /// arrives as the API's placeholder).
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or cannot be decoded.
+    pub async fn list_chunks(
+        &self,
+        stores: &[String],
+        top_k: usize,
+        filters: Option<&filter::Filter>,
+        sort_by: Option<&SortBy>,
+    ) -> Result<Vec<Chunk>> {
+        let request = ListChunksRequest {
+            store_identifiers: stores,
+            top_k,
+            filters,
+            sort_by,
+        };
+        let list_url = self.url("/v1/stores/list-chunks");
+        let resp = self
+            .send_retrying(|| Ok(self.http.post(list_url.as_str()).json(&request)))
+            .await?;
+        let response: SearchResponse = decode(resp).await?;
+        Ok(response.data.into_iter().map(Chunk::from).collect())
+    }
+
     /// Ask a natural-language question against one or more stores.
     ///
     /// # Errors
@@ -820,6 +898,16 @@ struct SearchRequest<'a> {
 }
 
 #[derive(serde::Serialize)]
+struct ListChunksRequest<'a> {
+    store_identifiers: &'a [String],
+    top_k: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filters: Option<&'a filter::Filter>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sort_by: Option<&'a SortBy>,
+}
+
+#[derive(serde::Serialize)]
 struct GrepRequest<'a> {
     store_identifiers: &'a [String],
     pattern: &'a str,
@@ -933,9 +1021,9 @@ mod tests {
 
     use super::{
         BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL, Error, HttpClient,
-        ListRequest, MAX_RETRIES, RawChunk, Rerank, backoff,
+        ListChunksRequest, ListRequest, MAX_RETRIES, RawChunk, Rerank, SortBy, backoff,
     };
-    use crate::Filter;
+    use crate::{Filter, Operator};
 
     #[test]
     fn list_request_sends_its_filter_as_metadata_filter() {
@@ -954,6 +1042,111 @@ mod tests {
             serde_json::json!({
                 "limit": 100,
                 "metadata_filter": { "key": "source", "operator": "eq", "value": "code" }
+            })
+        );
+    }
+
+    #[test]
+    fn sort_by_serializes_to_the_field_ascending_tuple() {
+        // The API accepts `string | [field_path, ascending]`; we always emit
+        // the tuple so the direction is explicit. Pin both directions.
+        assert_eq!(
+            serde_json::to_value(SortBy::desc("timestamp")).expect("serialize"),
+            serde_json::json!(["timestamp", false])
+        );
+        assert_eq!(
+            serde_json::to_value(SortBy::asc("generated_metadata.start_line")).expect("serialize"),
+            serde_json::json!(["generated_metadata.start_line", true])
+        );
+    }
+
+    #[test]
+    fn list_chunks_request_matches_the_documented_wire_shape() {
+        // Pins the `/v1/stores/list-chunks` body: store_identifiers, top_k, the
+        // shared recursive `filters` (NOT `metadata_filter` — that is the
+        // file-list endpoint's quirk), and the `[field, ascending]` sort tuple.
+        let filter = Filter::condition("timestamp", Operator::Gte, 1_780_000_000_i64);
+        let sort = SortBy::desc("timestamp");
+        let request = ListChunksRequest {
+            store_identifiers: &["index".to_owned()],
+            top_k: 20,
+            filters: Some(&filter),
+            sort_by: Some(&sort),
+        };
+        assert_eq!(
+            serde_json::to_value(&request).expect("serialize"),
+            serde_json::json!({
+                "store_identifiers": ["index"],
+                "top_k": 20,
+                "filters": { "key": "timestamp", "operator": "gte", "value": 1_780_000_000_i64 },
+                "sort_by": ["timestamp", false],
+            })
+        );
+        // Unset filter/sort are omitted entirely (the API treats absent and
+        // null differently for some fields; never send nulls).
+        let bare = ListChunksRequest {
+            store_identifiers: &["index".to_owned()],
+            top_k: 5,
+            filters: None,
+            sort_by: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&bare).expect("serialize"),
+            serde_json::json!({ "store_identifiers": ["index"], "top_k": 5 })
+        );
+    }
+
+    #[tokio::test]
+    async fn list_chunks_posts_the_endpoint_and_decodes_chunks() {
+        // Round-trip through a real router: the request must hit
+        // `/v1/stores/list-chunks` and the response decodes through the same
+        // RawChunk -> Chunk projection search uses.
+        let captured: Arc<std::sync::Mutex<Option<serde_json::Value>>> = Arc::default();
+        let app = Router::new().route(
+            "/v1/stores/list-chunks",
+            axum::routing::post({
+                let captured = Arc::clone(&captured);
+                move |axum::extract::Json(body): axum::extract::Json<serde_json::Value>| {
+                    *captured.lock().expect("lock") = Some(body);
+                    async {
+                        (
+                            StatusCode::OK,
+                            r#"{"data":[{"text":"gt sync","score":1.0,"metadata":{"source":"shell","timestamp":1781248268}}]}"#,
+                        )
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        let sort = SortBy::desc("timestamp");
+        let chunks = client
+            .list_chunks(&["index".to_owned()], 1, None, Some(&sort))
+            .await
+            .expect("list chunks");
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].text.as_deref(), Some("gt sync"));
+        assert_eq!(
+            chunks[0]
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("timestamp"))
+                .and_then(serde_json::Value::as_i64),
+            Some(1_781_248_268)
+        );
+        assert_eq!(
+            captured.lock().expect("lock").take().expect("request body"),
+            serde_json::json!({
+                "store_identifiers": ["index"],
+                "top_k": 1,
+                "sort_by": ["timestamp", false],
             })
         );
     }

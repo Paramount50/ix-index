@@ -35,8 +35,8 @@ mod sync;
 
 pub use adapter::MixedbreadStore;
 pub use backend::{
-    Answer, GrepOptions, GrepTargets, MemoryStore, SearchHit, SearchOptions, Store, StoreStatus,
-    StoredRecord,
+    Answer, GrepOptions, GrepTargets, MemoryStore, Provenance, SearchHit, SearchOptions, Store,
+    StoreStatus, StoredRecord,
 };
 pub use config::{Config, DEFAULT_STORE, WEB_STORE};
 pub use content::ContentHash;
@@ -44,12 +44,17 @@ pub use db::{Db, db_path};
 pub use error::{Error, Result};
 pub use manifest::{FileEntry, Manifest};
 pub use pipeline::{Query, index_and_answer, index_and_grep, index_and_semantic};
-pub use query_filter::{FilterSpec, build_filter};
+pub use query_filter::{FilterSpec, InvalidTimeSpec, build_filter, parse_time_spec};
 pub use repo::repo_slug;
-pub use search::{AnswerView, CodeScope, DisplayHit, ask, grep, hits_to_json, semantic};
+pub use search::{
+    AnswerView, CodeScope, COMPACT_SNIPPET_CHARS, DisplayHit, RenderMode, ask, grep, hits_to_json,
+    recent, semantic,
+};
 pub use sync::{SyncReport, sync, wait_until_indexed};
 
 // Re-export the shared metadata and filter types so binaries depend only on
 // search-core.
-pub use mixedbread::{Condition, DEFAULT_RERANK_MODEL, Filter, Group, Operator, Rerank};
-pub use source_meta::{Document, RepoSlug, Source, SourceAdapter};
+pub use mixedbread::{
+    Condition, DEFAULT_RERANK_MODEL, Filter, Group, Operator, Rerank, SortBy,
+};
+pub use source_meta::{Document, KNOWN_SOURCE_TAGS, RepoSlug, Source, SourceAdapter};

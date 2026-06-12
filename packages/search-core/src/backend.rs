@@ -81,6 +81,32 @@ pub struct SearchHit {
     pub start_line: Option<u32>,
     /// Number of lines in the chunk (a count, not a span), when known.
     pub num_lines: Option<u32>,
+    /// Provenance read from the stored metadata, when present. These are what
+    /// let a consumer judge staleness (timestamp) and pivot from a hit to its
+    /// origin (session, repo, URL) instead of hitting a dead end.
+    pub provenance: Provenance,
+}
+
+/// Identity and recency metadata carried by a hit, all optional because each
+/// source writes a different subset (see `source-meta`'s `keys`).
+#[derive(Debug, Clone, Default)]
+pub struct Provenance {
+    /// Epoch-second timestamp of the record (the primary recency axis).
+    pub timestamp: Option<i64>,
+    /// OS user that authored the record.
+    pub user: Option<String>,
+    /// Short hostname the record was recorded on.
+    pub host: Option<String>,
+    /// Session id (Claude Code transcript, codex, or shell session).
+    pub session_id: Option<String>,
+    /// The record's caller-assigned external id (e.g. `claude:{session}:{uuid}`).
+    pub external_id: Option<String>,
+    /// Canonical web URL (GitHub items, Linear issues, web hits).
+    pub url: Option<String>,
+    /// Repository slug for code and git-commit records.
+    pub repo: Option<String>,
+    /// Project slug (the working directory a transcript was recorded under).
+    pub project: Option<String>,
 }
 
 /// A question-answering response: a synthesized answer plus its sources.
@@ -196,6 +222,20 @@ pub trait Store {
         top_k: usize,
         options: GrepOptions,
         filters: Option<&Filter>,
+    ) -> impl Future<Output = Result<Vec<SearchHit>>> + Send;
+
+    /// List chunks purely by metadata `filters` — no semantic scoring — sorted
+    /// by `sort_by` (e.g. descending `timestamp` for a newest-first feed).
+    /// `top_k` caps the result; the endpoint has no cursor.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or the response cannot be decoded.
+    fn list_chunks(
+        &self,
+        stores: &[String],
+        top_k: usize,
+        filters: Option<&Filter>,
+        sort_by: Option<&mixedbread::SortBy>,
     ) -> impl Future<Output = Result<Vec<SearchHit>>> + Send;
 
     /// Ask a natural-language question against one or more stores, optionally
@@ -370,6 +410,61 @@ impl Store for MemoryStore {
         Ok(self.scan(top_k, filters, |line| regex.is_match(line)))
     }
 
+    async fn list_chunks(
+        &self,
+        _stores: &[String],
+        top_k: usize,
+        filters: Option<&Filter>,
+        sort_by: Option<&mixedbread::SortBy>,
+    ) -> Result<Vec<SearchHit>> {
+        let inner = self.lock();
+        let mut hits: Vec<SearchHit> = inner
+            .files
+            .values()
+            .filter(|stored| filters.is_none_or(|f| matches_filter(&stored.document.meta_json, f)))
+            .map(|stored| {
+                let meta = &stored.document.meta_json;
+                SearchHit {
+                    source: stored.source.clone(),
+                    hash: Some(stored.document.content_hash.clone()),
+                    path: meta
+                        .get(source_meta::keys::PATH)
+                        .or_else(|| meta.get(source_meta::keys::TITLE))
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                    text: String::from_utf8_lossy(&stored.document.body).into_owned(),
+                    // No semantic scoring on this path; mirror the API's
+                    // placeholder.
+                    score: 1.0,
+                    start_line: None,
+                    num_lines: None,
+                    provenance: provenance_of(Some(meta)),
+                }
+            })
+            .collect();
+        drop(inner);
+        if let Some(sort) = sort_by {
+            // The double models numeric metadata sorts (timestamps); a missing
+            // key sorts last in either direction, like SQL NULLS LAST.
+            hits.sort_by(|a, b| {
+                let key = |hit: &SearchHit| match sort.field.as_str() {
+                    "timestamp" => hit.provenance.timestamp,
+                    _ => None,
+                };
+                let (ka, kb) = (key(a), key(b));
+                match (ka, kb) {
+                    (Some(a), Some(b)) if sort.ascending => a.cmp(&b),
+                    (Some(a), Some(b)) => b.cmp(&a),
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            });
+        }
+        hits.truncate(top_k);
+        Ok(hits)
+    }
+
     async fn ask(
         &self,
         stores: &[String],
@@ -430,6 +525,7 @@ impl MemoryStore {
                         score: 1.0,
                         start_line: u32::try_from(index).ok(),
                         num_lines: Some(1),
+                        provenance: provenance_of(Some(&stored.document.meta_json)),
                     });
                 }
             }
@@ -442,10 +538,40 @@ impl MemoryStore {
     }
 }
 
+/// Read the provenance fields out of a record's flat metadata object.
+///
+/// Shared by the production adapter and the test double so a hit's identity
+/// fields are extracted in exactly one place.
+// `pub(crate)`: only the adapter and this module's double need it; the lint
+// fires because the module is private, but the function is re-shared via the
+// crate, not the public API.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn provenance_of(metadata: Option<&serde_json::Value>) -> Provenance {
+    let get_str = |key: &str| {
+        metadata
+            .and_then(|m| m.get(key))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+    };
+    Provenance {
+        timestamp: metadata
+            .and_then(|m| m.get(source_meta::keys::TIMESTAMP))
+            .and_then(serde_json::Value::as_i64),
+        user: get_str(source_meta::keys::USER),
+        host: get_str(source_meta::keys::HOST),
+        session_id: get_str(source_meta::keys::SESSION_ID),
+        external_id: get_str(source_meta::keys::EXTERNAL_ID),
+        url: get_str(source_meta::keys::URL),
+        repo: get_str(source_meta::keys::REPO),
+        project: get_str(source_meta::keys::PROJECT),
+    }
+}
+
 /// Evaluate a metadata filter against a flat metadata object. Covers the
-/// operators the offline test double needs; comparison operators it does not
-/// model evaluate to `false` so a test never silently passes on an unsupported
-/// shape.
+/// operators the offline test double needs (including numeric `gt`/`gte`/
+/// `lt`/`lte`, which model the server's timestamp range filters); operators it
+/// does not model evaluate to `false` so a test never silently passes on an
+/// unsupported shape.
 fn matches_filter(meta: &serde_json::Value, filter: &Filter) -> bool {
     match filter {
         Filter::Condition(condition) => matches_condition(meta, condition),
@@ -487,6 +613,22 @@ fn matches_condition(meta: &serde_json::Value, condition: &Condition) -> bool {
             (Some(value), Some(needle)) => value.contains(needle),
             _ => false,
         },
+        Operator::Gt | Operator::Gte | Operator::Lt | Operator::Lte => {
+            // Numeric comparison only (the production use is epoch-second
+            // timestamps); a non-numeric side evaluates to false.
+            match (
+                actual.and_then(serde_json::Value::as_f64),
+                condition.value.as_f64(),
+            ) {
+                (Some(value), Some(bound)) => match condition.operator {
+                    Operator::Gt => value > bound,
+                    Operator::Gte => value >= bound,
+                    Operator::Lt => value < bound,
+                    _ => value <= bound,
+                },
+                _ => false,
+            }
+        }
         _ => false,
     }
 }

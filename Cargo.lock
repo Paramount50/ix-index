@@ -6270,6 +6270,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "anyhow",
+ "chrono",
  "clap",
  "code-highlight",
  "indicatif",

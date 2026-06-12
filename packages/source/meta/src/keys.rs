@@ -11,6 +11,11 @@ pub const SOURCE: &str = "source";
 pub const CONTENT_HASH: &str = "content_hash";
 /// Human display label for a record.
 pub const TITLE: &str = "title";
+/// The record's caller-assigned external id (e.g. `claude:{session}:{uuid}`).
+pub const EXTERNAL_ID: &str = "external_id";
+/// Canonical web URL of a record, when it has one (GitHub items, Linear
+/// issues).
+pub const URL: &str = "url";
 
 // Code.
 /// Repository slug (git remote, or directory name when there is no remote).
