@@ -16,11 +16,14 @@
 //!    typed gate, so an over-budget record fails observably before upload rather
 //!    than as an opaque 400 mid-bulk-ingest.
 //!
-//! This crate is pure data and traits: serde, a hash helper, and the trait. It
-//! has no network or filesystem dependency, so both `search-core` and each
-//! source adapter can depend on it without pulling in a client.
+//! This crate is pure data and traits: serde, a hash helper, the trait, and
+//! the shared body [`sanitize`] pipeline every adapter applies before hashing
+//! and embedding. It has no network or filesystem dependency, so both
+//! `search-core` and each source adapter can depend on it without pulling in a
+//! client.
 
 pub mod keys;
+pub mod sanitize;
 
 use std::fmt;
 use std::future::Future;
