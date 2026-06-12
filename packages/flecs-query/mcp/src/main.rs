@@ -55,6 +55,10 @@ impl FlecsQueryMcp {
 }
 
 #[tool_router(router = tool_router)]
+#[allow(
+    clippy::unused_self,
+    reason = "rmcp tool methods must take &self for the ToolRouter even though this server is stateless"
+)]
 impl FlecsQueryMcp {
     #[tool(
         description = "Parse a Flecs Query Language expression \
