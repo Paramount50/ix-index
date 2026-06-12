@@ -29,6 +29,7 @@ sink-mixedbread.workspace = true
 sink-parquet.workspace = true
 mixedbread.workspace = true
 anyhow.workspace = true
+serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
