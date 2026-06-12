@@ -107,3 +107,16 @@ pub const NUMBER: &str = "number";
 pub const STATE: &str = "state";
 /// Whether the GitHub item is a pull request (vs an issue).
 pub const IS_PR: &str = "is_pr";
+
+// GitHub CI runs. `repo`, `commit`, `url`, and `timestamp` above are reused.
+/// Document grain within a source (`ci_run` for GitHub CI failures); absent on
+/// a source's default grain (issues/PRs for GitHub).
+pub const KIND: &str = "kind";
+/// GitHub Actions workflow name.
+pub const WORKFLOW: &str = "workflow";
+/// Branch a CI run ran against.
+pub const BRANCH: &str = "branch";
+/// CI run conclusion (`failure`/`timed_out`/`cancelled`).
+pub const CONCLUSION: &str = "conclusion";
+/// GitHub Actions run number (per workflow, the `#N` in the UI).
+pub const RUN_NUMBER: &str = "run_number";
