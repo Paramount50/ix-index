@@ -18,7 +18,7 @@ use tree_sitter::StreamingIterator as _;
 use crate::corpus::{Corpus, NodeRef, Value};
 use crate::error::{
     BuiltinNotNodeSnafu, CaptureIndexSnafu, Error, InternalSnafu, PredicateUnsupportedSnafu,
-    QuerySnafu, UnboundBuiltinArgSnafu, UnboundHeadVarSnafu, UnknownRelationSnafu,
+    QuerySnafu, RegexSnafu, UnboundBuiltinArgSnafu, UnboundHeadVarSnafu, UnknownRelationSnafu,
 };
 use crate::program::{AppAtom, BodyAtom, MatchAtom, Program, Term, builtin_arity};
 
@@ -75,35 +75,62 @@ pub struct Evaluator<'a> {
     program: &'a Program,
     corpus: &'a Corpus,
     matches: HashMap<MatchKey, Vec<Binding>>,
+    /// `text-match` patterns compiled once at setup, keyed by pattern source.
+    regexes: HashMap<String, regex::Regex>,
 }
 
 impl<'a> Evaluator<'a> {
-    /// Compile and run every distinct `match` query in the program.
+    /// Compile and run every distinct `match` query in the program, and
+    /// compile every distinct `text-match` regex.
     ///
     /// # Errors
     ///
     /// Fails on an invalid tree-sitter query, a query using `#` predicates,
-    /// or a capture index the compiled query does not know.
+    /// a capture index the compiled query does not know, or an invalid
+    /// `text-match` regex.
     pub fn new(program: &'a Program, corpus: &'a Corpus) -> Result<Self, Error> {
         let mut matches = HashMap::new();
+        let mut regexes = HashMap::new();
         let rule_atoms = program.rules.iter().flat_map(|rule| &rule.body);
         let rewrite_atoms = program.rewrites.iter().flat_map(|rewrite| &rewrite.body);
         for atom in rule_atoms.chain(rewrite_atoms) {
-            let BodyAtom::Match(m) = atom else {
-                continue;
-            };
-            let key = MatchKey {
-                lang: m.lang,
-                query: m.query.clone(),
-            };
-            if let std::collections::hash_map::Entry::Vacant(entry) = matches.entry(key) {
-                entry.insert(materialize(corpus, m)?);
+            match atom {
+                BodyAtom::Match(m) => {
+                    let key = MatchKey {
+                        lang: m.lang,
+                        query: m.query.clone(),
+                    };
+                    if let std::collections::hash_map::Entry::Vacant(entry) = matches.entry(key) {
+                        entry.insert(materialize(corpus, m)?);
+                    }
+                }
+                BodyAtom::App(app) if app.name == "text-match" => {
+                    // Program checking guarantees the pattern is a literal.
+                    let Some(Term::Text(pattern)) = app.args.get(1) else {
+                        return InternalSnafu {
+                            what: format!(
+                                "text-match at line {} survived checking without a literal pattern",
+                                app.line
+                            ),
+                        }
+                        .fail();
+                    };
+                    if !regexes.contains_key(pattern) {
+                        let compiled = regex::Regex::new(pattern).context(RegexSnafu {
+                            line: app.line,
+                            pattern: pattern.clone(),
+                        })?;
+                        regexes.insert(pattern.clone(), compiled);
+                    }
+                }
+                BodyAtom::App(_) => {}
             }
         }
         Ok(Self {
             program,
             corpus,
             matches,
+            regexes,
         })
     }
 
@@ -285,6 +312,34 @@ impl<'a> Evaluator<'a> {
                 let equal = first.file == second.file;
                 Ok(equal.then(|| env.clone()).into_iter().collect())
             }
+            "text-match" => {
+                let value = bound_value(app, env, 0)?;
+                let Term::Text(pattern) = &app.args[1] else {
+                    return InternalSnafu {
+                        what: format!("text-match at line {} has a non-literal pattern", app.line),
+                    }
+                    .fail();
+                };
+                let regex = self.regexes.get(pattern).ok_or_else(|| {
+                    InternalSnafu {
+                        what: format!("regex `{pattern}` was not compiled at setup"),
+                    }
+                    .build()
+                })?;
+                let matched = regex.is_match(self.corpus.value_text(&value));
+                Ok(matched.then(|| env.clone()).into_iter().collect())
+            }
+            "no-descendant" => {
+                let root = bound_node(app, env, 0)?;
+                let kind = bound_value(app, env, 1)?;
+                let text = bound_value(app, env, 2)?;
+                let absent = !self.has_descendant(
+                    root,
+                    self.corpus.value_text(&kind),
+                    self.corpus.value_text(&text),
+                );
+                Ok(absent.then(|| env.clone()).into_iter().collect())
+            }
             other => InternalSnafu {
                 what: format!("builtin `{other}` has no evaluator"),
             }
@@ -292,6 +347,27 @@ impl<'a> Evaluator<'a> {
         }
     }
 
+    /// Whether `root` has a strict descendant with this kind and exact source
+    /// text. Candidates are filtered by kind and text first (both cheap), so
+    /// the parent-chain walk only runs for the rare textual matches.
+    fn has_descendant(&self, root: NodeRef, kind: &str, text: &str) -> bool {
+        let file = &self.corpus.files[root.file];
+        file.nodes.iter().enumerate().any(|(index, info)| {
+            index != root.node
+                && info.kind == kind
+                && &file.text[info.start..info.end] == text
+                && {
+                    let mut current = info.parent;
+                    loop {
+                        match current {
+                            Some(parent) if parent == root.node => break true,
+                            Some(parent) => current = file.nodes[parent].parent,
+                            None => break false,
+                        }
+                    }
+                }
+        })
+    }
 }
 
 fn bound_value(app: &AppAtom, env: &Env, arg: usize) -> Result<Value, Error> {

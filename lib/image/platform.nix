@@ -108,7 +108,7 @@ let
       };
 
       # `unit` sugar lives here, not in `command`'s default: a public option's
-      # default must be a self-contained literal (repo ast-grep rule), so the
+      # default must be a self-contained literal (repo astlog rule), so the
       # `unit` -> command branch is seeded in config as an mkDefault a real
       # `command` (priority 100) still overrides.
       config = lib.mkIf (config.unit != null) {

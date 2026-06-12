@@ -205,3 +205,95 @@ fn builtin_arity_gets_the_builtin_message() {
         "got: {message}"
     );
 }
+
+#[test]
+fn text_match_filters_by_regex() -> TestResult {
+    let source = "fn main() { run(fetch_url); run(parse); run(fetch_git); }\n";
+    let rules = r#"
+(rule (fetchy x)
+  (match rust "(call_expression arguments: (arguments (identifier) @x))")
+  (text-match x "^fetch_"))
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+    let fetchy = &analysis.database.relations["fetchy"];
+    assert_eq!(fetchy.rows().len(), 2, "fetch_url and fetch_git match");
+    Ok(())
+}
+
+#[test]
+fn text_match_rejects_invalid_regex() -> TestResult {
+    let rules = r#"
+(rule (m x)
+  (match rust "(identifier) @x")
+  (text-match x "(unclosed"))
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", "fn main() {}\n")?;
+    let Err(error) = analyze(rules, &[dir.path().to_path_buf()]) else {
+        return Err("invalid regex must be rejected".into());
+    };
+    let message = error.to_string();
+    assert!(message.contains("invalid regex"), "got: {message}");
+    assert!(message.contains("rules:4"), "got: {message}");
+    Ok(())
+}
+
+#[test]
+fn text_match_pattern_must_be_a_literal() {
+    let rules = r#"
+(rule (m x p)
+  (match rust "(identifier) @x (identifier) @p")
+  (text-match x p))
+"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("variable text-match pattern must be rejected");
+    };
+    let message = error.to_string();
+    assert!(message.contains("string literal"), "got: {message}");
+}
+
+#[test]
+fn no_descendant_requires_kind_and_text_absence() -> TestResult {
+    // Two functions: one calls danger(), one does not. `no-descendant`
+    // keeps only the function whose subtree has no `danger` identifier.
+    let source = "
+fn clean() { safe(); }
+fn dirty() { danger(); }
+";
+    let rules = r#"
+(rule (danger-free f)
+  (match rust "(function_item) @f")
+  (no-descendant f "identifier" "danger"))
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+    let rows = analysis.database.relations["danger-free"].rows();
+    assert_eq!(rows.len(), 1, "only the clean function qualifies");
+    let Value::Node(node) = &rows[0][0] else {
+        return Err("danger-free column 0 should be a node".into());
+    };
+    assert!(analysis.corpus.node_text(*node).contains("clean"));
+    Ok(())
+}
+
+#[test]
+fn no_descendant_is_strict() -> TestResult {
+    // The root node itself never counts as its own descendant, even when
+    // kind and text both coincide.
+    let source = "fn main() { x; }\n";
+    let rules = r#"
+(rule (ident-without-self x)
+  (match rust "(identifier) @x")
+  (text x "x")
+  (no-descendant x "identifier" "x"))
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+    let rows = analysis.database.relations["ident-without-self"].rows();
+    assert_eq!(rows.len(), 1, "the identifier has no matching descendant");
+    Ok(())
+}

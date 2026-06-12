@@ -32,6 +32,8 @@ pub const BUILTINS: &[(&str, usize)] = &[
     ("kind", 2),
     ("same-text", 2),
     ("same-file", 2),
+    ("text-match", 2),
+    ("no-descendant", 3),
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +192,16 @@ fn check_atoms(atoms: &[BodyAtom], arities: &HashMap<&str, usize>) -> Result<(),
                     expected,
                     got: app.args.len(),
                     line: app.line,
+                }
+                .fail();
+            }
+            // The pattern is compiled once at evaluator setup, which requires
+            // it to be a literal; a variable pattern would also make match
+            // results depend on corpus text, which no rule legitimately needs.
+            if app.name == "text-match" && !matches!(app.args.get(1), Some(Term::Text(_))) {
+                return DslSnafu {
+                    line: app.line,
+                    message: "text-match pattern must be a string literal".to_owned(),
                 }
                 .fail();
             }

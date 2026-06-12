@@ -34,13 +34,14 @@ let
   # up in the `lint` derivation build, not at `nix run` time.
   lintStage = ix.writeNushellApplication pkgs {
     name = "lint-stage";
-    meta.description = "One lint stage (nixfmt | statix | deadnix | ast-grep | ast-grep-test); driven by `lint`";
+    meta.description = "One lint stage (nixfmt | statix | deadnix | astlog | ast-grep | ast-grep-test); driven by `lint`";
     runtimeInputs = [
       pkgs.ast-grep
       pkgs.deadnix
       pkgs.fd
       pkgs.nixfmt
       pkgs.statix
+      repoPackages.astlog
     ];
     text = ''
       def "main nixfmt" [] {
@@ -49,15 +50,31 @@ let
       }
       def "main statix" [] { statix check . }
       def "main deadnix" [] { deadnix --fail --no-lambda-pattern-names . }
+      # The Nix style rules as astlog relations (astlog-rules/nix.astlog),
+      # ported from the old ast-grep nix rules (#1060). --deny-all gates on
+      # every relation the rules file defines, so adding a rule needs no
+      # change here. Only .nix files are handed to the corpus: astlog would
+      # otherwise parse every known-grammar file in the repo to run
+      # nix-only rules.
+      def "main astlog" [] {
+        let nix_files = (fd --extension nix | lines)
+        astlog query astlog-rules/nix.astlog ...$nix_files --deny-all
+      }
+      # ast-grep keeps the rust rules plus the one nix rule astlog cannot
+      # express: prefer-sri-hash needs its `ast-grep-ignore` suppression
+      # comment in lib/rust/vendor.nix, and astlog v0 has no suppression
+      # mechanism.
       def "main ast-grep" [] { ast-grep scan --error . }
-      # Rule self-test: every fixture under ast-grep/nix/tests must flag its
+      # Rule self-test: every fixture under ast-grep/*/tests must flag its
       # invalid cases and ignore its valid ones. Catches rules whose pattern
       # silently stops matching (e.g. a bare `attr = val` that parses as an
       # expression, not a binding). --skip-snapshot-tests keeps it to match
-      # presence/absence without baseline snapshot files.
+      # presence/absence without baseline snapshot files. The astlog rules
+      # have the same self-test as the `astlog-nix-rules` flake check, which
+      # runs the binary over the committed fixture pairs.
       def "main ast-grep-test" [] { ast-grep test --skip-snapshot-tests }
       def main [] {
-        error make { msg: "specify a stage: nixfmt | statix | deadnix | ast-grep | ast-grep-test" }
+        error make { msg: "specify a stage: nixfmt | statix | deadnix | astlog | ast-grep | ast-grep-test" }
       }
     '';
   };
@@ -75,6 +92,10 @@ let
       deadnix.command = [
         (lib.getExe lintStage)
         "deadnix"
+      ];
+      astlog.command = [
+        (lib.getExe lintStage)
+        "astlog"
       ];
       "ast-grep".command = [
         (lib.getExe lintStage)
@@ -568,6 +589,14 @@ let
     fileset = fs.gitTracked paths.root;
   };
 
+  # Just the astlog rules file plus its fixture pairs, so the rules self-test
+  # below only rebuilds when the rules or fixtures change, not on every
+  # tracked-file edit the way `lintSource` does.
+  astlogRulesSource = fs.toSource {
+    inherit (paths) root;
+    fileset = fs.intersection (fs.gitTracked paths.root) (paths.root + "/astlog-rules");
+  };
+
   tests = import paths.tests { inherit nixpkgs ix; };
 
   exampleFleets = ix.exampleFleetsFor { hostSystem = system; };
@@ -737,6 +766,60 @@ let
             pkgs.runCommand "loader-manifests-check" { } ''
               printf '%s\n' '${forced}' > "$out"
             '';
+          # Rule self-test for the astlog nix lint rules: every relation in
+          # astlog-rules/nix.astlog must have a committed fixture pair and
+          # fire exactly on the violating one. A rule that never fires in
+          # tests is unproven (its query may have silently stopped matching),
+          # so a missing or non-firing fixture fails the build. Fixtures are
+          # stored as `.fixture` (not `.nix`) so the repo lint stages
+          # (nixfmt / statix / deadnix / astlog itself) never scan the
+          # deliberately-violating snippets; the check stages them back to
+          # `.nix` before running the binary.
+          astlog-nix-rules =
+            pkgs.runCommand "astlog-nix-rules-check"
+              {
+                nativeBuildInputs = [
+                  repoPackages.astlog
+                  pkgs.jq
+                ];
+              }
+              ''
+                rules=${astlogRulesSource}/astlog-rules/nix.astlog
+                tests=${astlogRulesSource}/astlog-rules/tests
+                fail=0
+                for rule in $(sed -n 's/^(rule (\([a-z0-9-]*\).*/\1/p' "$rules" | sort -u); do
+                  dir="$tests/$rule"
+                  if [ ! -f "$dir/bad.fixture" ] || [ ! -f "$dir/good.fixture" ]; then
+                    echo "rule $rule has no fixture pair under astlog-rules/tests/$rule" >&2
+                    fail=1
+                    continue
+                  fi
+                  work=$(mktemp -d)
+                  cp "$dir/bad.fixture" "$work/bad.nix"
+                  cp "$dir/good.fixture" "$work/good.nix"
+                  bad=$(astlog query "$rules" "$work/bad.nix" --relation "$rule" --json | jq --arg r "$rule" '.[$r] | length')
+                  good=$(astlog query "$rules" "$work/good.nix" --relation "$rule" --json | jq --arg r "$rule" '.[$r] | length')
+                  if [ "$bad" = 0 ]; then
+                    echo "rule $rule did not fire on its violating fixture" >&2
+                    fail=1
+                  fi
+                  if [ "$good" != 0 ]; then
+                    echo "rule $rule fired $good row(s) on its valid fixture" >&2
+                    fail=1
+                  fi
+                done
+                for dir in "$tests"/*/; do
+                  rule=$(basename "$dir")
+                  if ! grep -q "^(rule ($rule " "$rules"; then
+                    echo "fixture dir astlog-rules/tests/$rule matches no rule" >&2
+                    fail=1
+                  fi
+                done
+                if [ "$fail" != 0 ]; then
+                  exit 1
+                fi
+                mkdir -p "$out"
+              '';
           run-records-session = repoPackages.run.passthru.tests.recordsSession;
           # Symphony's required quality lane (compile -Werror, mix format,
           # credo, mix test) as a sandboxed derivation; see

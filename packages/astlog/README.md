@@ -45,8 +45,13 @@ A rules file is S-expressions, three forms:
 Rules may be recursive (`(rule (up x z) (up y z) (parent x y))`); every value
 is a syntax node or text derived from one, so the universe is finite and
 naive fixpoint iteration terminates. Builtins: `ancestor`, `parent` (tree
-position), `text`, `kind`, `same-text` (values), `same-file`. Negation and
-aggregates are deliberately absent in v0.
+position), `text`, `kind`, `same-text` (values), `same-file`,
+`(text-match <node-or-text> "<regex>")` (regex over the value's text; the
+pattern must be a string literal and is compiled once at setup), and
+`(no-descendant <node> "<kind>" "<text>")` (holds when the node has no strict
+descendant with that kind and exact source text, the narrowest absence check
+the lint rules need). General negation and aggregates are deliberately absent
+in v0.
 
 Because patterns are verbatim tree-sitter queries, `Query::new` validates
 node kinds and field names against the grammar at load: a misspelled node
@@ -58,9 +63,12 @@ the Datalog layer subsumes.
 
 - **Library**: `astlog-core` (this directory's `core/`), the only place with
   logic.
-- **CLI**: `astlog query rules.astlog src/ [--relation r] [--json] [--deny r]`
-  and `astlog fix rules.astlog src/ [--write]`. `--deny` exits nonzero when a
-  relation derived rows, which turns a rules file into a CI lint gate.
+- **CLI**: `astlog query rules.astlog src/ [--relation r] [--json] [--deny r]
+  [--deny-all]` and `astlog fix rules.astlog src/ [--write]`. `--deny` exits
+  nonzero when a relation derived rows, which turns a rules file into a CI
+  lint gate; `--deny-all` denies every relation the rules file defines, so
+  adding a rule extends the gate without touching the invocation (this is how
+  `nix run .#lint` runs `astlog-rules/nix.astlog`).
 - **Python**: `import astlog` in the ix kernel (bundled like `search`/`tui`);
   `astlog.query(rules, paths)`, `astlog.fixes(...)`, `astlog.fix(...,
   write=True)`. Bindings are conversion-only.
@@ -130,11 +138,19 @@ Deliberately written here, after evaluating the alternatives:
 - `ancestor`/`parent` need their lower argument bound by atoms to their left
   (left-to-right evaluation), and report exactly that when violated.
 
+## In production
+
+The repo's nix lint rules live in `astlog-rules/nix.astlog` (ported from the
+old ast-grep YAML rules, #1060) and gate `nix run .#lint` via
+`astlog query --deny-all`. Each rule has a committed good/bad fixture pair
+under `astlog-rules/tests/`, validated by the `astlog-nix-rules` flake check.
+One rule (`prefer-sri-hash`) stays on ast-grep because its single legitimate
+exception relies on an `ast-grep-ignore` suppression comment.
+
 ## Planned
 
-- Port the repo's ast-grep lint rules (`ast-grep/nix/rules/*.yml`) to astlog
-  rules and gate them in `nix run .#lint` via `astlog query --deny`, replacing
-  the ast-grep scanner with one expressed in this relational model.
+- Suppression comments (`astlog-ignore: <relation>`), which would let
+  `prefer-sri-hash` move over from ast-grep.
 - A concrete-syntax pattern front end (`$X.unwrap()` style, likely via
   `ast-grep-core`) compiling into the same relations, so simple rules need no
   tree-sitter query vocabulary.

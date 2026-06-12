@@ -16,7 +16,8 @@ packages/                                  # repo-owned packages (Rust crates, a
 users/<github-username>/                    # personal-but-shareable home-manager modules
 skills/                                    # Claude Code skills, one dir per skill
 agent-context/                             # source fragments for generated AGENTS.md/CLAUDE.md
-ast-grep/                                  # ast-grep lint rules and test fixtures
+astlog-rules/                              # astlog nix lint rules and test fixtures
+ast-grep/                                  # remaining ast-grep lint rules (rust, prefer-sri-hash)
 ```
 
 Skills are this repo's custom agent-skill system: each `skills/<name>/SKILL.md`

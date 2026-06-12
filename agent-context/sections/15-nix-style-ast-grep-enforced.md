@@ -1,7 +1,7 @@
 ---
 name: nix-style
 disclosure: progressive
-description: "Nix code style, general and mechanical: a design and idiom checklist for new code, plus the rules enforced by ast-grep and lint (no with/rec/mkForce, derivation hygiene, typed options, fetchers, licenses). Use when writing or reviewing Nix, or fixing a lint failure."
+description: "Nix code style, general and mechanical: a design and idiom checklist for new code, plus the rules enforced by astlog and lint (no with/rec/mkForce, derivation hygiene, typed options, fetchers, licenses). Use when writing or reviewing Nix, or fixing a lint failure."
 ---
 
 ## Adding a new Nix thing
@@ -16,10 +16,12 @@ defensive. The Nix-specific checks on top:
 - Reify latent structure, parse rather than validate, and leave room for future
   needs in the design without writing dead code.
 
-## Nix style (ast-grep enforced)
+## Nix style (astlog enforced)
 
-Run `nix run .#lint` before committing. It runs nixfmt, Statix, Deadnix, and the
-repo's ast-grep rules. The lint app is the mechanical source of truth. The
+Run `nix run .#lint` before committing. It runs nixfmt, Statix, Deadnix, the
+repo's astlog rules (`astlog-rules/nix.astlog`, gated with
+`astlog query --deny-all`), and the remaining ast-grep rules (rust, plus
+`prefer-sri-hash`). The lint app is the mechanical source of truth. The
 common hard rules are:
 
 ### Scope / access
@@ -117,7 +119,7 @@ common hard rules are:
 - Commit real hashes, never fake hash helpers or placeholders.
 - `meta.license` should reference `lib.licenses.<id>`, never a raw SPDX
   string. The bare `gpl2` / `gpl3` / `lgpl2` / `lgpl3` / `agpl3` aliases are
-  banned by ast-grep — pick the explicit `*Only` / `*Plus` flavor
+  banned by lint — pick the explicit `*Only` / `*Plus` flavor
   (`agpl3Plus`, not `gpl3Plus`, when the upstream is AGPL).
 
 ### Errors and warnings

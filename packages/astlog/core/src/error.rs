@@ -47,6 +47,13 @@ pub enum Error {
     ))]
     PredicateUnsupported { line: usize },
 
+    #[snafu(display("rules:{line}: invalid regex `{pattern}` in text-match"))]
+    Regex {
+        line: usize,
+        pattern: String,
+        source: regex::Error,
+    },
+
     #[snafu(display("rules:{line}: head variable `{var}` is not bound by the body"))]
     UnboundHeadVar { line: usize, var: String },
 

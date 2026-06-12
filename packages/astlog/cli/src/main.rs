@@ -34,6 +34,10 @@ enum Command {
         /// Turns a rules file into a lint gate for CI.
         #[arg(long)]
         deny: Vec<String>,
+        /// Deny every relation the rules file defines, so adding a rule
+        /// extends the lint gate without touching the invocation.
+        #[arg(long)]
+        deny_all: bool,
     },
     /// Evaluate rules and apply `(rewrite ...)` edits.
     Fix {
@@ -97,6 +101,7 @@ fn run(cli: &Cli) -> Result<(), Error> {
             relation,
             json,
             deny,
+            deny_all,
         } => {
             let analysis = load(rules, paths)?;
             let selected = select(&analysis, relation.as_deref())?;
@@ -105,7 +110,8 @@ fn run(cli: &Cli) -> Result<(), Error> {
             } else {
                 print_text(&analysis, &selected);
             }
-            check_denied(&analysis, deny)
+            let denied = effective_deny(deny, *deny_all, analysis.database.relations.keys());
+            check_denied(&analysis, &denied)
         }
         Command::Fix {
             rules,
@@ -130,6 +136,25 @@ fn run(cli: &Cli) -> Result<(), Error> {
 fn load(rules: &PathBuf, paths: &[PathBuf]) -> Result<Analysis, Error> {
     let source = std::fs::read_to_string(rules).context(ReadRulesSnafu { path: rules })?;
     Ok(astlog_core::analyze(&source, paths)?)
+}
+
+/// The deny list a query run enforces: the explicit `--deny` names, extended
+/// by every defined relation when `--deny-all` is set. Names stay
+/// deduplicated and sorted by first appearance so failure output is stable.
+fn effective_deny<'a>(
+    deny: &[String],
+    deny_all: bool,
+    relations: impl Iterator<Item = &'a String>,
+) -> Vec<String> {
+    let mut denied: Vec<String> = deny.to_vec();
+    if deny_all {
+        for name in relations {
+            if !denied.contains(name) {
+                denied.push(name.clone());
+            }
+        }
+    }
+    denied
 }
 
 /// Fail when any `--deny` relation derived rows, naming each with its count.
@@ -254,5 +279,26 @@ fn json_value(analysis: &Analysis, value: &Value) -> serde_json::Value {
             })
         }
         Value::Text(text) => serde_json::Value::String(text.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::effective_deny;
+
+    #[test]
+    fn deny_all_extends_explicit_denies_without_duplicates() {
+        let relations = ["a".to_owned(), "b".to_owned(), "c".to_owned()];
+        let explicit = ["b".to_owned()];
+        let denied = effective_deny(&explicit, true, relations.iter());
+        assert_eq!(denied, ["b", "a", "c"]);
+    }
+
+    #[test]
+    fn without_deny_all_only_explicit_names_are_denied() {
+        let relations = ["a".to_owned(), "b".to_owned()];
+        let explicit = ["a".to_owned()];
+        let denied = effective_deny(&explicit, false, relations.iter());
+        assert_eq!(denied, ["a"]);
     }
 }

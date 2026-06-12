@@ -24,6 +24,10 @@ note: |
   back into `.cargo-checksum.json`) is the one legitimate exception; keep it on
   `sha256` and suppress this rule with a comment naming the reason.
 rule:
+  # NOT ported to astlog with the other nix rules (#1060): the one legitimate
+  # exception (lib/rust/vendor.nix's hex Cargo.lock checksum) is suppressed
+  # with the `ast-grep-ignore` comment below it, and astlog v0 has no
+  # suppression-comment mechanism, so this rule stays on ast-grep.
   # Match the binding by attrpath. The bare `sha256 = $_` / `cargoSha256 = $_`
   # forms never parsed as standalone expressions, so walk the binding node and
   # match its attrpath: `sha256` itself or any `*Sha256` builder slot.
