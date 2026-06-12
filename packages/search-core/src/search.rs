@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 
 use mixedbread::{Filter, SortBy};
 use regex::Regex;
-use source_meta::{Source, keys};
+use source_meta::{KNOWN_SOURCE_TAGS, Source, keys};
 
 use crate::backend::{AskOptions, GrepOptions, SearchHit, SearchOptions, Store};
 use crate::config::WEB_STORE;
@@ -275,6 +275,106 @@ pub async fn ranked(
     ))
 }
 
+/// One source's census row: how many documents the store holds for it and
+/// the newest record's timestamp. Serializes to the `search stats --json`
+/// object.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SourceStat {
+    /// The source tag (e.g. `shell`, `claude_history`).
+    pub source: String,
+    /// Documents (store files) the store holds for this source.
+    pub documents: u64,
+    /// True when `documents` hit the backend's bounded facet-scan cap
+    /// ([`mixedbread::FACETS_MAX_FILES`]) and is therefore a lower bound.
+    /// Skipped from JSON when exact, so the common row stays small.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub truncated: bool,
+    /// Epoch-second timestamp of the source's newest record, when any record
+    /// carries one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub newest_timestamp: Option<i64>,
+}
+
+/// Census the corpus: per-source document counts and freshness (the newest
+/// [`keys::TIMESTAMP`] per source).
+///
+/// Rows come back sorted by count descending, then source name, so the
+/// dominant sources lead; sources with no matching document yield no row.
+///
+/// One discovery facet call finds which source tags exist; that scan is
+/// bounded ([`mixedbread::FACETS_MAX_FILES`] files), so the candidates are
+/// unioned with the canonical tags in case a small source hides entirely
+/// behind a dominant one. Each candidate is then counted by its own
+/// source-scoped facet call — the scan bound applies per source instead of
+/// being shared across the whole store — and probed for freshness with a
+/// single-chunk ranked listing, all concurrently. A source bigger than the
+/// scan bound still reports the cap, marked [`SourceStat::truncated`]
+/// (verified live: `claude_history` alone exceeds it, 2026-06-12).
+///
+/// `filters` narrows the census the same way it narrows a search (host, user,
+/// time window, ...); counts and freshness then describe the scoped slice.
+///
+/// # Errors
+/// Returns an error if any facet call or per-source listing fails.
+pub async fn stats(
+    store: &(impl Store + Sync),
+    store_name: &str,
+    filters: Option<&Filter>,
+) -> Result<Vec<SourceStat>> {
+    let stores = store_identifiers(store_name, false);
+    let mut discovered = store.facets(&stores, &[keys::SOURCE], filters).await?;
+    let candidates: std::collections::BTreeSet<String> = discovered
+        .remove(keys::SOURCE)
+        .unwrap_or_default()
+        .into_keys()
+        .chain(KNOWN_SOURCE_TAGS.iter().map(ToString::to_string))
+        .collect();
+
+    let rows = futures::future::try_join_all(candidates.into_iter().map(|source| {
+        let stores = &stores;
+        async move {
+            let scoped = Filter::eq(keys::SOURCE, source.as_str());
+            let merged = match filters {
+                Some(filter) => Filter::all(vec![filter.clone(), scoped]),
+                None => scoped,
+            };
+
+            let counts = store.facets(stores, &[keys::SOURCE], Some(&merged)).await?;
+            let documents = counts
+                .get(keys::SOURCE)
+                .and_then(|values| values.get(&source))
+                .copied()
+                .unwrap_or(0);
+            if documents == 0 {
+                return Ok::<Option<SourceStat>, crate::error::Error>(None);
+            }
+
+            // The newest record of the source: a metadata-only listing of its
+            // single top chunk by descending timestamp, under the same scope.
+            let newest = store
+                .list_chunks(stores, 1, Some(&merged), Some(&SortBy::desc(keys::TIMESTAMP)))
+                .await?
+                .first()
+                .and_then(|hit| hit.provenance.timestamp);
+            Ok(Some(SourceStat {
+                source,
+                documents,
+                truncated: documents >= u64::from(mixedbread::FACETS_MAX_FILES),
+                newest_timestamp: newest,
+            }))
+        }
+    }))
+    .await?;
+
+    let mut rows: Vec<SourceStat> = rows.into_iter().flatten().collect();
+    rows.sort_by(|a, b| {
+        b.documents
+            .cmp(&a.documents)
+            .then_with(|| a.source.cmp(&b.source))
+    });
+    Ok(rows)
+}
+
 /// Ask a question against `store_name` (and optionally the web store).
 ///
 /// The answer's citation markers are remapped from the backend's raw source
@@ -510,7 +610,9 @@ fn truncate_snippet(mut hit: DisplayHit, max_chars: usize) -> DisplayHit {
 mod tests {
     use source_meta::{Document, Source};
 
-    use super::{CodeScope, DisplayHit, RenderMode, align_citations, ask, grep, recent, semantic};
+    use super::{
+        CodeScope, DisplayHit, RenderMode, align_citations, ask, grep, recent, semantic, stats,
+    };
     use crate::backend::{GrepOptions, GrepTargets, MemoryStore, SearchOptions, Store};
     use crate::content::ContentHash;
     use crate::manifest::{FileEntry, Manifest};
@@ -840,6 +942,39 @@ mod tests {
             .expect("recent windowed");
         let stamps: Vec<i64> = windowed.iter().filter_map(|hit| hit.timestamp).collect();
         assert_eq!(stamps, vec![3_000, 2_000]);
+    }
+
+    #[tokio::test]
+    async fn stats_counts_documents_and_reports_freshness_per_source() {
+        let store = MemoryStore::new();
+        put_history(&store, "id:a", "a", "alpha", 1_000).await;
+        put_history(&store, "id:b", "b", "beta", 3_000).await;
+        put_slack(&store, "slack:C0:1.2", "craft", "gamma").await;
+
+        let rows = stats(&store, "s", None).await.expect("stats");
+
+        // Dominant source first; counts are per document, and freshness is
+        // each source's newest timestamp (the slack fixture writes none).
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].source, "claude_history");
+        assert_eq!(rows[0].documents, 2);
+        assert_eq!(rows[0].newest_timestamp, Some(3_000));
+        assert_eq!(rows[1].source, "slack");
+        assert_eq!(rows[1].documents, 1);
+        assert_eq!(rows[1].newest_timestamp, None);
+
+        // A scope filter narrows both the counts and the freshness probe: a
+        // window that excludes the newer record reports the older one.
+        let spec = crate::FilterSpec {
+            until: Some(2_000),
+            ..crate::FilterSpec::default()
+        };
+        let filter = crate::build_filter(&spec).expect("filter");
+        let windowed = stats(&store, "s", Some(&filter)).await.expect("stats");
+        assert_eq!(windowed.len(), 1, "the timestamp-free slack row drops out");
+        assert_eq!(windowed[0].source, "claude_history");
+        assert_eq!(windowed[0].documents, 1);
+        assert_eq!(windowed[0].newest_timestamp, Some(1_000));
     }
 
     #[tokio::test]

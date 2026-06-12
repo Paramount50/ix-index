@@ -7,7 +7,9 @@
 //! and deletion, search (`/v1/stores/search`), regex grep (`/v1/stores/grep`),
 //! metadata-only chunk listing (`/v1/stores/list-chunks`),
 //! question-answering (`/v1/stores/question-answering`), query
-//! enhancement (`/v1/stores/queries/enhance`).
+//! enhancement (`/v1/stores/queries/enhance`), metadata facets
+//! (`/v1/stores/metadata-facets`), and the per-store event histogram
+//! (`/v1/stores/{store}/events/histogram`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -480,6 +482,68 @@ pub struct RerankHit {
     pub index: usize,
     /// Relevance score for the query.
     pub score: f32,
+}
+
+/// Distinct values and their file counts, per metadata key.
+///
+/// Returned by [`Client::metadata_facets`]: `facets["source"]["shell"]` is the
+/// number of store files whose `source` metadata equals `shell`. Keys are
+/// stringified by the server, so numeric metadata values arrive as digit
+/// strings.
+pub type Facets = std::collections::BTreeMap<String, std::collections::BTreeMap<String, u64>>;
+
+/// Hard ceiling on [`FacetLimits::max_files`] (the API rejects a larger scan
+/// bound with HTTP 422).
+///
+/// A store holding more files than the scan bound reports truncated counts —
+/// verified live on a >100k-file store, whose per-source counts summed to
+/// exactly this cap (2026-06-12).
+pub const FACETS_MAX_FILES: u32 = 100_000;
+
+/// Caps for a metadata-facet computation. Every field is optional and omitted
+/// from the wire when unset, so the API defaults apply.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FacetLimits {
+    /// Maximum number of distinct metadata fields (keys) returned (API
+    /// default 64, max 256). Irrelevant when the request names its facets.
+    pub max_fields: Option<u32>,
+    /// Maximum number of distinct values returned per field, ranked by count
+    /// (API default 32, max 256).
+    pub max_values_per_field: Option<u32>,
+    /// Maximum number of store files scanned to compute the counts (API
+    /// default 10 000, max [`FACETS_MAX_FILES`]).
+    pub max_files: Option<u32>,
+}
+
+/// Event families accepted by the store telemetry endpoints' `event_types`
+/// filter ([`Client::events_histogram`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventType {
+    /// File ingestion (upload through embedding).
+    Ingestion,
+    /// Semantic search requests.
+    Search,
+    /// Agentic (multi-round) search requests.
+    AgenticSearch,
+    /// Regex grep requests.
+    Grep,
+}
+
+/// One event type's count within one time bucket, as returned by
+/// [`Client::events_histogram`].
+#[derive(Debug, Clone, Deserialize)]
+pub struct HistogramBucket {
+    /// Bucket start, RFC 3339.
+    pub bucket_start: String,
+    /// Bucket end, RFC 3339.
+    pub bucket_end: String,
+    /// Dotted event name (e.g. `store.file.completed`, `store.search`). An
+    /// open set server-side, so it stays a string rather than an enum.
+    #[serde(rename = "type")]
+    pub event_type: String,
+    /// Number of events of this type in the bucket.
+    pub event_count: u64,
 }
 
 /// Indexing progress for a store: how many files are still being processed.
@@ -1011,6 +1075,76 @@ impl Client {
         })
     }
 
+    /// Count distinct metadata values across one or more stores on
+    /// `/v1/stores/metadata-facets`. `facets` names the metadata keys to
+    /// count (dot paths reach nested fields; an empty slice asks the server
+    /// for every key, up to `limits.max_fields`); the result maps each key to
+    /// its distinct values and the number of store files carrying each, and
+    /// `filters` scopes which files are counted.
+    ///
+    /// Counts come from a bounded scan of at most `limits.max_files` store
+    /// files, so a store larger than the bound reports truncated counts (see
+    /// [`FACETS_MAX_FILES`]). This is the census primitive: one request
+    /// answers "how many documents per source".
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or cannot be decoded.
+    pub async fn metadata_facets(
+        &self,
+        stores: &[String],
+        facets: &[&str],
+        filters: Option<&filter::Filter>,
+        limits: FacetLimits,
+    ) -> Result<Facets> {
+        let request = FacetsRequest {
+            store_identifiers: stores,
+            facets,
+            filters,
+            max_fields: limits.max_fields,
+            max_values_per_field: limits.max_values_per_field,
+            max_files: limits.max_files,
+        };
+        let facets_url = self.url("/v1/stores/metadata-facets");
+        let resp = self
+            .send_retrying(|| Ok(self.http.post(facets_url.as_str()).json(&request)))
+            .await?;
+        let response: FacetsResponse = decode(resp).await?;
+        Ok(response.facets)
+    }
+
+    /// Fetch a store's event histogram on
+    /// `/v1/stores/{store}/events/histogram`: per-`bucket_seconds` bucket and
+    /// per event type, how many events the store recorded between
+    /// `start_time` and `end_time` (both RFC 3339). `event_types` restricts
+    /// the histogram to those families; `None` includes ingestion, search,
+    /// agentic search, and grep. This is the fleet-telemetry primitive: an
+    /// empty ingestion bucket where uploads were expected is a stalled
+    /// indexer.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or cannot be decoded.
+    pub async fn events_histogram(
+        &self,
+        store: &str,
+        start_time: &str,
+        end_time: &str,
+        bucket_seconds: u32,
+        event_types: Option<&[EventType]>,
+    ) -> Result<Vec<HistogramBucket>> {
+        let request = HistogramRequest {
+            start_time,
+            end_time,
+            bucket_seconds,
+            event_types,
+        };
+        let id = utf8_percent_encode(store, PATH_SEGMENT);
+        let histogram_url = self.url(&format!("/v1/stores/{id}/events/histogram"));
+        let resp = self
+            .send_retrying(|| Ok(self.http.post(histogram_url.as_str()).json(&request)))
+            .await?;
+        let response: HistogramResponse = decode(resp).await?;
+        Ok(response.data)
+    }
 }
 
 async fn decode<R: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Result<R> {
@@ -1245,6 +1379,46 @@ struct SearchResponse {
 }
 
 #[derive(serde::Serialize)]
+struct FacetsRequest<'a> {
+    store_identifiers: &'a [String],
+    // An empty facet list is omitted, which asks the server for every key.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    facets: &'a [&'a str],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filters: Option<&'a filter::Filter>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_fields: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_values_per_field: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_files: Option<u32>,
+}
+
+// The live response is `{"facets": {key: {value: count}}}` (verified
+// 2026-06-12); the OpenAPI example shows a different `{count, value}` object
+// per key, but the deployed server does not.
+#[derive(Deserialize)]
+struct FacetsResponse {
+    #[serde(default)]
+    facets: Facets,
+}
+
+#[derive(serde::Serialize)]
+struct HistogramRequest<'a> {
+    start_time: &'a str,
+    end_time: &'a str,
+    bucket_seconds: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event_types: Option<&'a [EventType]>,
+}
+
+#[derive(Deserialize)]
+struct HistogramResponse {
+    #[serde(default)]
+    data: Vec<HistogramBucket>,
+}
+
+#[derive(serde::Serialize)]
 struct RerankRequest<'a> {
     model: &'a str,
     query: &'a str,
@@ -1341,9 +1515,9 @@ mod tests {
 
     use super::{
         Agentic, AgenticConfig, BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL,
-        EnhancedQuery, Error, FileIds, FileStatus, HttpClient, ListChunksRequest, ListRequest,
-        MAX_RETRIES, QaOptions, QaOptionsWire, QaRequest, RawChunk, Rerank, SearchOptions,
-        SearchRequest, SortBy, backoff,
+        EnhancedQuery, Error, EventType, FACETS_MAX_FILES, FacetLimits, FileIds, FileStatus,
+        HttpClient, ListChunksRequest, ListRequest, MAX_RETRIES, QaOptions, QaOptionsWire,
+        QaRequest, RawChunk, Rerank, SearchOptions, SearchRequest, SortBy, backoff,
     };
     use crate::{Filter, Operator};
 
@@ -1806,6 +1980,124 @@ mod tests {
                 "query": "slack messages about the indexer",
                 "store_identifiers": ["index"],
                 "instructions": "prefer source filters",
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn metadata_facets_posts_the_endpoint_and_decodes_value_counts() {
+        // Round-trip through a real router: the request must hit
+        // `/v1/stores/metadata-facets` with the documented body (facet keys,
+        // scan caps, no nulls for unset caps) and the response decodes the
+        // live `{key: {value: count}}` shape.
+        let captured: Arc<std::sync::Mutex<Option<serde_json::Value>>> = Arc::default();
+        let app = Router::new().route(
+            "/v1/stores/metadata-facets",
+            axum::routing::post({
+                let captured = Arc::clone(&captured);
+                move |axum::extract::Json(body): axum::extract::Json<serde_json::Value>| {
+                    *captured.lock().expect("lock") = Some(body);
+                    async {
+                        (
+                            StatusCode::OK,
+                            r#"{"facets":{"source":{"shell":1154,"code":9644}}}"#,
+                        )
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        let facets = client
+            .metadata_facets(
+                &["index".to_owned()],
+                &["source"],
+                None,
+                FacetLimits {
+                    max_values_per_field: Some(256),
+                    max_files: Some(FACETS_MAX_FILES),
+                    ..FacetLimits::default()
+                },
+            )
+            .await
+            .expect("facets");
+        assert_eq!(facets["source"]["shell"], 1_154);
+        assert_eq!(facets["source"]["code"], 9_644);
+        assert_eq!(
+            captured.lock().expect("lock").take().expect("request body"),
+            serde_json::json!({
+                "store_identifiers": ["index"],
+                "facets": ["source"],
+                "max_values_per_field": 256,
+                "max_files": 100_000,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn events_histogram_posts_the_store_path_and_decodes_buckets() {
+        // Round-trip through a real router: the store name must land as one
+        // path segment of `/v1/stores/{store}/events/histogram`, the body
+        // must carry the window/bucket/types, and the buckets decode with
+        // `type` mapped onto `event_type`.
+        let captured: Arc<std::sync::Mutex<Option<serde_json::Value>>> = Arc::default();
+        let app = Router::new().route(
+            "/v1/stores/{store}/events/histogram",
+            axum::routing::post({
+                let captured = Arc::clone(&captured);
+                move |axum::extract::Path(store): axum::extract::Path<String>,
+                      axum::extract::Json(body): axum::extract::Json<serde_json::Value>| {
+                    *captured.lock().expect("lock") =
+                        Some(serde_json::json!({ "store": store, "body": body }));
+                    async {
+                        (
+                            StatusCode::OK,
+                            r#"{"object":"store.histogram","data":[{"bucket_start":"2026-06-12T00:00:00Z","bucket_end":"2026-06-12T12:00:00Z","type":"store.file.completed","event_count":6407}]}"#,
+                        )
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        let buckets = client
+            .events_histogram(
+                "index",
+                "2026-06-12T00:00:00Z",
+                "2026-06-13T00:00:00Z",
+                43_200,
+                Some(&[EventType::Ingestion, EventType::AgenticSearch]),
+            )
+            .await
+            .expect("histogram");
+        assert_eq!(buckets.len(), 1);
+        assert_eq!(buckets[0].event_type, "store.file.completed");
+        assert_eq!(buckets[0].event_count, 6_407);
+        assert_eq!(buckets[0].bucket_start, "2026-06-12T00:00:00Z");
+        assert_eq!(
+            captured.lock().expect("lock").take().expect("request"),
+            serde_json::json!({
+                "store": "index",
+                "body": {
+                    "start_time": "2026-06-12T00:00:00Z",
+                    "end_time": "2026-06-13T00:00:00Z",
+                    "bucket_seconds": 43_200,
+                    "event_types": ["ingestion", "agentic_search"],
+                },
             })
         );
     }

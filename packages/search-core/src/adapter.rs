@@ -48,6 +48,28 @@ impl MixedbreadStore {
         Ok(Self { client })
     }
 
+    /// Fetch the store's event histogram (ingestion/search/grep counts per
+    /// time bucket) for fleet telemetry. An inherent method rather than part
+    /// of [`Store`]: event telemetry is a Mixedbread capability with no
+    /// offline analogue. Times are RFC 3339; see
+    /// [`mixedbread::Client::events_histogram`].
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or cannot be decoded.
+    pub async fn events_histogram(
+        &self,
+        store: &str,
+        start_time: &str,
+        end_time: &str,
+        bucket_seconds: u32,
+        event_types: Option<&[mixedbread::EventType]>,
+    ) -> Result<Vec<mixedbread::HistogramBucket>> {
+        self.client
+            .events_histogram(store, start_time, end_time, bucket_seconds, event_types)
+            .await
+            .context(BackendSnafu)
+    }
+
     /// Enhance a natural-language query: extract metadata filter conditions
     /// (and, for ranking-shaped queries, a metadata sort) from the query text
     /// against the stores' real metadata. An inherent method rather than part
@@ -247,6 +269,30 @@ impl Store for MixedbreadStore {
             .await
             .context(BackendSnafu)?;
         Ok(chunks.into_iter().map(hit_from_chunk).collect())
+    }
+
+    async fn facets(
+        &self,
+        stores: &[String],
+        keys: &[&str],
+        filters: Option<&Filter>,
+    ) -> Result<mixedbread::Facets> {
+        self.client
+            .metadata_facets(
+                stores,
+                keys,
+                filters,
+                // A census wants the widest scan and every distinct value:
+                // both caps at their API maxima rather than the small
+                // defaults (10k files scanned, 32 values per key).
+                mixedbread::FacetLimits {
+                    max_fields: None,
+                    max_values_per_field: Some(256),
+                    max_files: Some(mixedbread::FACETS_MAX_FILES),
+                },
+            )
+            .await
+            .context(BackendSnafu)
     }
 
     async fn ask(

@@ -678,6 +678,14 @@ mod tests {
         ) -> search_core::Result<Vec<search_core::SearchHit>> {
             self.0.list_chunks(stores, top_k, filters, sort_by).await
         }
+        async fn facets(
+            &self,
+            stores: &[String],
+            keys: &[&str],
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<search_core::Facets> {
+            self.0.facets(stores, keys, filters).await
+        }
         async fn ask(
             &self,
             stores: &[String],
@@ -795,6 +803,14 @@ mod tests {
             sort_by: Option<&search_core::SortBy>,
         ) -> search_core::Result<Vec<search_core::SearchHit>> {
             self.0.list_chunks(stores, top_k, filters, sort_by).await
+        }
+        async fn facets(
+            &self,
+            stores: &[String],
+            keys: &[&str],
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<search_core::Facets> {
+            self.0.facets(stores, keys, filters).await
         }
         async fn ask(
             &self,

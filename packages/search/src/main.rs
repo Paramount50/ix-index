@@ -61,6 +61,10 @@ enum Command {
     /// bare session id; sources without a session (git, github) show the
     /// record's own chunks in order.
     Context(ContextArgs),
+    /// Census the corpus: per-source document counts and freshness (the
+    /// newest record timestamp per source). Scope it with the usual
+    /// selectors, e.g. `search stats --host hil-compute-1 --since 7d`.
+    Stats(StatsArgs),
 }
 
 /// Scope selectors shared by the semantic and grep paths. With no selector the
@@ -385,6 +389,33 @@ struct ContextArgs {
     base_url: Option<String>,
 }
 
+/// Arguments for the `stats` subcommand: a per-source census of the corpus
+/// (document counts from the store's metadata facets, freshness from a
+/// newest-first listing per source). Deterministic and metadata-only — no
+/// semantic scoring happens.
+#[derive(Debug, Args)]
+struct StatsArgs {
+    /// Emit the census as a JSON array on stdout: one
+    /// `{source, documents, newest_timestamp}` object per source
+    /// (`newest_timestamp` is epoch seconds, omitted when no record carries
+    /// one).
+    #[arg(long)]
+    json: bool,
+
+    /// Scope selectors (source/user/host/repo/project/since/until); the
+    /// counts and freshness then describe the scoped slice.
+    #[command(flatten)]
+    scope: ScopeArgs,
+
+    /// Store name (one store holds every worktree's content).
+    #[arg(long, env = "MXBAI_STORE")]
+    store: Option<String>,
+
+    /// Mixedbread API base URL.
+    #[arg(long = "base-url", env = "MXBAI_BASE_URL")]
+    base_url: Option<String>,
+}
+
 /// Arguments for the `grep` subcommand. Grep is local-corpus only (no web
 /// store) and shares the connection flags with the semantic path.
 // Like `SemanticArgs`, this is a flat surface of independent boolean flags; a
@@ -442,6 +473,7 @@ async fn main() -> anyhow::Result<()> {
         Some(Command::Grep(args)) => run_grep(args).await,
         Some(Command::Recent(args)) => run_recent(args).await,
         Some(Command::Context(args)) => run_context(args).await,
+        Some(Command::Stats(args)) => run_stats(args).await,
         None => run(cli.semantic).await,
     }
 }
@@ -675,6 +707,102 @@ async fn run_context(cli: ContextArgs) -> anyhow::Result<()> {
         println!("{}", render_conversation(&view, &palette));
     }
     Ok(())
+}
+
+/// Run the `stats` subcommand: census the corpus per source (document counts
+/// and freshness) and print a table, or one JSON array under `--json`.
+async fn run_stats(cli: StatsArgs) -> anyhow::Result<()> {
+    let palette = Palette::for_stdout();
+    let Connection {
+        store,
+        name: store_name,
+    } = connect(cli.store, cli.base_url).await?;
+    let filter = resolve_scope(&cli.scope)?;
+
+    let bar = spinner_with("counting");
+    let rows = search_core::stats(&store, &store_name, filter.as_ref()).await;
+    finish(bar);
+    let rows = rows?;
+
+    // Each source is counted by its own bounded backend scan; a source at
+    // the bound reports a lower bound, rendered with `≥` below. Said on
+    // stderr too so `--json` consumers reading stdout still get the marked
+    // rows while a human sees why.
+    let any_truncated = rows.iter().any(|row| row.truncated);
+    if any_truncated {
+        eprintln!(
+            "note: counts of {} hit the census scan cap and are lower bounds",
+            search_core::FACETS_MAX_FILES,
+        );
+    }
+
+    if cli.json {
+        println!("{}", serde_json::to_string(&rows)?);
+        return Ok(());
+    }
+
+    let total: u64 = rows.iter().map(|row| row.documents).sum();
+    let render_count =
+        |documents: u64, truncated: bool| format!("{}{documents}", if truncated { "\u{2265}" } else { "" });
+    let name_width = rows
+        .iter()
+        .map(|row| row.source.len())
+        .chain(["source".len(), "total".len()])
+        .max()
+        .unwrap_or_default();
+    let count_width = rows
+        .iter()
+        .map(|row| render_count(row.documents, row.truncated).chars().count())
+        .chain([
+            "documents".len(),
+            render_count(total, any_truncated).chars().count(),
+        ])
+        .max()
+        .unwrap_or_default();
+    println!(
+        "{}",
+        paint(
+            palette.range,
+            &format!("{:<name_width$}  {:>count_width$}  newest", "source", "documents"),
+        )
+    );
+    let now = epoch_now();
+    for row in &rows {
+        let newest = row.newest_timestamp.map_or_else(
+            || "-".to_owned(),
+            |ts| format!("{} ({} ago)", format_epoch(ts), format_age(now, ts)),
+        );
+        println!(
+            "{:<name_width$}  {:>count_width$}  {newest}",
+            row.source,
+            render_count(row.documents, row.truncated),
+        );
+    }
+    println!(
+        "{}",
+        paint(
+            palette.range,
+            &format!(
+                "{:<name_width$}  {:>count_width$}",
+                "total",
+                render_count(total, any_truncated),
+            ),
+        )
+    );
+    Ok(())
+}
+
+/// Compact age of an epoch timestamp relative to `now`: `42s`, `10m`, `3h`,
+/// `12d`. A timestamp at or past `now` (clock skew between recording hosts)
+/// reads `0s`.
+fn format_age(now: i64, timestamp: i64) -> String {
+    let delta = now.saturating_sub(timestamp).max(0);
+    match delta {
+        0..60 => format!("{delta}s"),
+        60..3_600 => format!("{}m", delta / 60),
+        3_600..86_400 => format!("{}h", delta / 3_600),
+        _ => format!("{}d", delta / 86_400),
+    }
 }
 
 /// Render a context view as a conversation: an optional session header, then
@@ -1373,8 +1501,8 @@ mod tests {
     use search_core::{ContextView, DisplayHit, Source};
 
     use super::{
-        Palette, ScopeArgs, format_epoch, parse_sources, provenance_line, render_conversation,
-        render_snippet, scope_is_set, split_documents,
+        Palette, ScopeArgs, format_age, format_epoch, parse_sources, provenance_line,
+        render_conversation, render_snippet, scope_is_set, split_documents,
     };
 
     /// A web hit so the snippet path renders the chunk text without reading a
@@ -1486,6 +1614,17 @@ mod tests {
     #[test]
     fn format_epoch_is_utc_minutes() {
         assert_eq!(format_epoch(1_781_222_222), "2026-06-11 23:57 UTC");
+    }
+
+    #[test]
+    fn format_age_picks_the_unit_and_clamps_skew() {
+        let now = 1_000_000;
+        assert_eq!(format_age(now, now - 59), "59s");
+        assert_eq!(format_age(now, now - 60), "1m");
+        assert_eq!(format_age(now, now - 7_200), "2h");
+        assert_eq!(format_age(now, now - 200_000), "2d");
+        // A recording host ahead of this one must not print a negative age.
+        assert_eq!(format_age(now, now + 30), "0s");
     }
 
     #[test]

@@ -296,6 +296,22 @@ pub trait Store {
         sort_by: Option<&mixedbread::SortBy>,
     ) -> impl Future<Output = Result<Vec<SearchHit>>> + Send;
 
+    /// Count distinct metadata values per key across one or more stores,
+    /// optionally scoped by `filters`: `facets(.., &["source"], ..)` answers
+    /// "how many documents per source" in one call. Counts are per document
+    /// (store file), not per chunk. This is the census primitive behind
+    /// `search stats`.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or the response cannot be
+    /// decoded.
+    fn facets(
+        &self,
+        stores: &[String],
+        keys: &[&str],
+        filters: Option<&Filter>,
+    ) -> impl Future<Output = Result<mixedbread::Facets>> + Send;
+
     /// Ask a natural-language question against one or more stores, optionally
     /// constrained by metadata `filters`. `options` carries both the retrieval
     /// knobs and the answering-stage toggles (citations, multimodal context,
@@ -541,6 +557,40 @@ impl Store for MemoryStore {
         }
         hits.truncate(top_k);
         Ok(hits)
+    }
+
+    async fn facets(
+        &self,
+        _stores: &[String],
+        keys: &[&str],
+        filters: Option<&Filter>,
+    ) -> Result<mixedbread::Facets> {
+        let inner = self.lock();
+        let mut facets = mixedbread::Facets::new();
+        for stored in inner
+            .files
+            .values()
+            .filter(|stored| filters.is_none_or(|f| matches_filter(&stored.document.meta_json, f)))
+        {
+            for key in keys {
+                let Some(value) = stored.document.meta_json.get(*key) else {
+                    continue;
+                };
+                // The server stringifies values (JSON object keys are
+                // strings); mirror that, without quoting real strings.
+                let value = match value {
+                    serde_json::Value::String(text) => text.clone(),
+                    other => other.to_string(),
+                };
+                *facets
+                    .entry((*key).to_owned())
+                    .or_default()
+                    .entry(value)
+                    .or_insert(0) += 1;
+            }
+        }
+        drop(inner);
+        Ok(facets)
     }
 
     async fn ask(

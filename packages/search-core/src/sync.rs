@@ -541,6 +541,14 @@ mod tests {
         ) -> Result<Vec<crate::backend::SearchHit>> {
             self.inner.list_chunks(stores, top_k, filters, sort_by).await
         }
+        async fn facets(
+            &self,
+            stores: &[String],
+            keys: &[&str],
+            filters: Option<&mixedbread::Filter>,
+        ) -> Result<mixedbread::Facets> {
+            self.inner.facets(stores, keys, filters).await
+        }
         async fn ask(
             &self,
             stores: &[String],

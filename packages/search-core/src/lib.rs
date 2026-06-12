@@ -49,15 +49,16 @@ pub use pipeline::{Query, index_and_answer, index_and_grep, index_and_semantic};
 pub use query_filter::{FilterSpec, InvalidTimeSpec, build_filter, parse_time_spec};
 pub use repo::repo_slug;
 pub use search::{
-    AnswerView, CodeScope, COMPACT_SNIPPET_CHARS, DisplayHit, RenderMode, ask, grep, hits_to_json,
-    ranked, recent, semantic,
+    AnswerView, CodeScope, COMPACT_SNIPPET_CHARS, DisplayHit, RenderMode, SourceStat, ask, grep,
+    hits_to_json, ranked, recent, semantic, stats,
 };
 pub use sync::{SyncReport, sync, wait_until_indexed};
 
 // Re-export the shared metadata and filter types so binaries depend only on
 // search-core.
 pub use mixedbread::{
-    Agentic, AgenticConfig, Condition, DEFAULT_RERANK_MODEL, EnhancedQuery, FileIds, FileStatus,
-    Filter, FilterMode, Group, Operator, Rerank, SortBy, SortDirection,
+    Agentic, AgenticConfig, Condition, DEFAULT_RERANK_MODEL, EnhancedQuery, EventType,
+    FACETS_MAX_FILES, FacetLimits, Facets, FileIds, FileStatus, Filter, FilterMode, Group,
+    HistogramBucket, Operator, Rerank, SortBy, SortDirection,
 };
 pub use source_meta::{Document, KNOWN_SOURCE_TAGS, RepoSlug, Source, SourceAdapter};
