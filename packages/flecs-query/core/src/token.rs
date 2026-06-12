@@ -135,8 +135,11 @@ pub fn lex(src: &str) -> Result<Vec<Token>, ParseError> {
             _ if c.is_ascii_digit() => lex_number(src, start, &mut pos),
             _ if is_ident_start(c) => lex_ident(src, start, &mut pos)?,
             _ => {
+                // Decode the full char so a multi-byte offender renders
+                // intact in the message instead of as its lead byte.
+                let offender = src[pos..].chars().next().expect("in-bounds char");
                 return Err(ParseError::new(
-                    format!("unknown token '{}'", char::from(c)),
+                    format!("unknown token '{offender}'"),
                     Span::at(pos),
                 ));
             }
@@ -242,9 +245,11 @@ fn lex_string(src: &str, start: usize, pos: &mut usize) -> Result<Token, ParseEr
                 });
             }
             Some(b'\\') => {
-                if let Some(&escaped) = bytes.get(*pos + 1) {
-                    text.push(char::from(escaped));
-                    *pos += 2;
+                // Decode the escaped character whole so a multi-byte char
+                // is kept intact and `pos` never lands mid-codepoint.
+                if let Some(escaped) = src[*pos + 1..].chars().next() {
+                    text.push(escaped);
+                    *pos += 1 + escaped.len_utf8();
                 } else {
                     return Err(ParseError::new("unterminated string", Span::at(start)));
                 }
@@ -293,11 +298,15 @@ fn lex_ident(src: &str, start: usize, pos: &mut usize) -> Result<Token, ParseErr
                 *pos += 2;
             }
             b'\\' => {
-                let Some(&escaped) = bytes.get(*pos + 1) else {
+                // Same whole-char decoding as in strings: a multi-byte
+                // escaped char must not split, or spans desynchronize.
+                let Some(escaped) = src[*pos + 1..].chars().next() else {
+                    // Upstream swallows a trailing backslash at end of input.
+                    *pos += 1;
                     break;
                 };
-                text.push(char::from(escaped));
-                *pos += 2;
+                text.push(escaped);
+                *pos += 1 + escaped.len_utf8();
             }
             // Keep `.*` so wildcard lookup paths stay one token.
             b'*' if bytes[*pos - 1] == b'.' => {

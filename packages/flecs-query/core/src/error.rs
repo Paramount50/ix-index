@@ -51,7 +51,12 @@ impl ParseError {
     /// ```
     #[must_use]
     pub fn render(&self, src: &str) -> String {
-        let start = self.span.start.min(src.len());
+        let mut start = self.span.start.min(src.len());
+        // Spans are produced on char boundaries, but render takes arbitrary
+        // (span, src) pairs; snap rather than let the slices below panic.
+        while !src.is_char_boundary(start) {
+            start -= 1;
+        }
         let line_start = src[..start].rfind('\n').map_or(0, |i| i + 1);
         let line_end = src[start..]
             .find('\n')

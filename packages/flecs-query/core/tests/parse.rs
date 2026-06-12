@@ -457,3 +457,59 @@ fn ast_serializes() {
     let back: Query = serde_json::from_str(&json).unwrap();
     assert_eq!(back, query);
 }
+
+#[test]
+fn multibyte_escapes_stay_intact() {
+    // `\é` in an identifier keeps the full char and byte positions in sync
+    // (a fixed 2-byte advance used to split the codepoint and corrupt both).
+    let query = roundtrip("Fo\\éo", 1);
+    assert_eq!(id(&query.terms[0]).first.expr, name("Foéo"));
+
+    // Same in string operands.
+    let query = roundtrip("$this == \"\\é\"", 1);
+    let TermBody::Eq(eq) = &query.terms[0].body else {
+        panic!("expected an equality term");
+    };
+    assert_eq!(eq.right, EqOperand::Name("é".to_owned()));
+
+    // A trailing backslash ends the identifier instead of reading past it.
+    roundtrip("Foo\\", 1);
+}
+
+#[test]
+fn errors_on_multibyte_input_never_panic() {
+    // Unknown multi-byte tokens surface whole, and rendering the error must
+    // not slice mid-codepoint.
+    for expr in ["é", "A\\é", "Position, ✨", "$this == \"é"] {
+        if let Err(error) = parse(expr) {
+            let rendered = error.render(expr);
+            assert!(rendered.contains('^'), "no caret for {expr:?}: {rendered}");
+        }
+    }
+    let error = parse("é").unwrap_err();
+    assert!(error.message.contains('é'), "got: {}", error.message);
+}
+
+#[test]
+fn render_snaps_arbitrary_spans_to_char_boundaries() {
+    // `render` accepts any (span, src) pair; a mid-codepoint span must not
+    // panic the caret slicing.
+    let error = flecs_query_core::ParseError {
+        message: "boom".to_owned(),
+        span: flecs_query_core::Span { start: 3, end: 3 },
+    };
+    assert!(error.render("ab\u{e9}cd").contains('^'));
+}
+
+#[test]
+fn deep_scope_nesting_is_an_error_not_a_stack_overflow() {
+    // 100k nested scopes used to abort the process via unbounded recursion.
+    let bomb = "{".repeat(100_000);
+    let error = parse(&bomb).unwrap_err();
+    assert!(error.message.contains("nested"), "got: {}", error.message);
+
+    // Balanced nesting under the limit still works.
+    let depth = 32;
+    let nested = format!("{}TagA{}", "!{".repeat(depth), "}".repeat(depth));
+    roundtrip(&nested, 1);
+}

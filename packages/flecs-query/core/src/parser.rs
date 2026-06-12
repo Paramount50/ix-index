@@ -13,6 +13,11 @@ use crate::token::{Token, TokenKind, lex};
 /// carry beyond `(src, second)`.
 const TERM_ARG_COUNT_MAX: usize = 16;
 
+/// How deep `{ ... }` scopes may nest. The parser recurses once per scope,
+/// so without a bound a long `{{{{...` run from untrusted input overflows
+/// the stack, which aborts the process rather than panicking.
+const SCOPE_DEPTH_MAX: usize = 64;
+
 /// Parse a query expression into its AST.
 ///
 /// The expression `0` parses to the empty query, exactly as in flecs.
@@ -26,7 +31,11 @@ pub fn parse(src: &str) -> Result<Query, ParseError> {
         return Ok(Query { terms: Vec::new() });
     }
     let tokens = lex(src)?;
-    let mut parser = Parser { tokens, index: 0 };
+    let mut parser = Parser {
+        tokens,
+        index: 0,
+        scope_depth: 0,
+    };
     let terms = parser.terms(ScopeContext::TopLevel)?;
     Ok(Query { terms })
 }
@@ -41,6 +50,7 @@ enum ScopeContext {
 struct Parser {
     tokens: Vec<Token>,
     index: usize,
+    scope_depth: usize,
 }
 
 impl Parser {
@@ -138,8 +148,17 @@ impl Parser {
             // A scope is reachable bare or after `!`/`?`, but not after an
             // access modifier, exactly as upstream.
             TokenKind::LBrace if access.is_none() => {
-                self.bump();
-                TermBody::Scope(self.terms(ScopeContext::Scope)?)
+                let brace = self.bump();
+                self.scope_depth += 1;
+                if self.scope_depth > SCOPE_DEPTH_MAX {
+                    return Err(ParseError::new(
+                        format!("scopes nested deeper than {SCOPE_DEPTH_MAX}"),
+                        brace.span,
+                    ));
+                }
+                let inner = self.terms(ScopeContext::Scope)?;
+                self.scope_depth -= 1;
+                TermBody::Scope(inner)
             }
             TokenKind::LParen => {
                 self.bump();
