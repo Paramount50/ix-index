@@ -1152,6 +1152,81 @@ let
     assert state["configured"] is False, state
     print("slack-ok")
   '';
+
+  # The requirements surface: local-only probes of every credential declared in
+  # the registry. In the credential-less sandbox every probe must miss and the
+  # remedies must be complete; planting a credential (env key, or the mgrep
+  # token file) flips its line to naming the source. Also pins the registry's
+  # slack declaration against the slack module's own constants, so the declared
+  # probe can never drift from the resolution order the module actually uses.
+  requirementsTestPy = pkgs.writeText "ix-mcp-requirements-test.py" ''
+    import os
+    from pathlib import Path
+
+    import slack
+    from ix_notebook_mcp import registry, requirements
+
+    creds = dict(registry.credentialed())
+    assert creds["slack"].env == tuple(slack._TOKEN_ENV_VARS), creds["slack"].env
+    assert Path(creds["slack"].token_path).expanduser() == slack._TOKEN_FILE, creds["slack"].token_path
+
+    by_name = {s.name: s for s in requirements.statuses()}
+    assert set(by_name) == set(creds), sorted(by_name)
+    for name, status in by_name.items():
+        assert status.satisfied_via is None, f"{name} unexpectedly satisfied via {status.satisfied_via}"
+    for needle in ("MXBAI_API_KEY", "mixedbread.com", "mgrep login"):
+        assert needle in by_name["search"].line, by_name["search"].line
+
+    os.environ["EXA_API_KEY"] = "dummy-key-for-probe"
+    token = Path.home() / ".mgrep" / "token.json"
+    token.parent.mkdir(parents=True, exist_ok=True)
+    token.write_text("{}")
+    by_name = {s.name: s for s in requirements.statuses()}
+    assert by_name["exa_py"].satisfied_via == "EXA_API_KEY", by_name["exa_py"]
+    assert by_name["search"].satisfied_via == "token at ~/.mgrep/token.json", by_name["search"]
+    assert "dummy-key-for-probe" not in by_name["exa_py"].line, by_name["exa_py"].line
+    print("requirements-ok")
+  '';
+  requirementsSmoke =
+    pkgs.runCommand "ix-mcp-requirements-smoke"
+      {
+        nativeBuildInputs = [
+          package
+          mcpPython
+        ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+
+        # CLI contract in the credential-less sandbox: non-zero exit so setup
+        # scripts can gate on it, with every remedy named on stdout.
+        if ix-mcp requirements >stdout 2>stderr; then
+          echo "ix-mcp requirements exited 0 without any credential:" >&2
+          cat stdout stderr >&2
+          exit 1
+        fi
+        for needle in MXBAI_API_KEY EXA_API_KEY LINEAR_API_KEY 'mgrep login'; do
+          if ! grep -qF "$needle" stdout; then
+            echo "requirements report is missing $needle:" >&2
+            cat stdout stderr >&2
+            exit 1
+          fi
+        done
+
+        ${lib.getExe mcpPython} ${requirementsTestPy} >py-stdout 2>py-stderr || {
+          echo "ix-mcp requirements smoke failed:" >&2
+          cat py-stdout py-stderr >&2
+          exit 1
+        }
+        grep -qx 'requirements-ok' py-stdout || {
+          echo "requirements smoke did not print its ok marker:" >&2
+          cat py-stdout py-stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
   engineBundled = importTest "engine" "import ipykernel, jupyter_client, nbformat, aiohttp, mcp; print('engine-ok')";
 
   # The server package imports and registers its full tool surface. Exercises the
@@ -3745,6 +3820,7 @@ package.overrideAttrs (old: {
         googleAuthBundled
         ixGoogleBundled
         slackBundled
+        requirementsSmoke
         engineBundled
         serverTools
         evalSmoke

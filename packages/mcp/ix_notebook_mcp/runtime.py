@@ -1810,7 +1810,7 @@ def _api_rows() -> list[dict]:
     # the source of truth concludes they are absent (the exact trap that made a
     # bundled `playwright` look like it needed a `pip install`). Always emit a row
     # for each declared library; enrich with its version/summary when importable.
-    for lib_name in registry.LIBRARIES:
+    for lib_name in (lib.name for lib in registry.LIBRARIES):
         sig = lib_name
         summary = "bundled library -- import and use it directly (help() / its own docs)"
         try:

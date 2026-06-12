@@ -26,12 +26,24 @@ def modules_index() -> str:
     the registry lists it here for free."""
     preimported = ", ".join(f"`{name}`" for name in registry.preimport_names())
     mods = "; ".join(f"`{m.name}` \u2014 {m.tagline}" for m in registry.MODULES)
-    libs = ", ".join(f"`{name}`" for name in registry.LIBRARIES)
+    libs = ", ".join(f"`{lib.name}`" for lib in registry.LIBRARIES)
     return (
         f"Bundled tooling, no install step: {preimported} are pre-bound in the namespace (use them "
         "with no import; an explicit `import` returns the same object), the others you `import` "
         "once and reuse. Each module's exact signatures come from `api('<name>')` / "
         f"`help(<name>.<fn>)`, never from here. Modules: {mods}. Also import-ready: {libs}."
+    )
+
+
+def credentials_note() -> str:
+    """The external-credential sentence for the instructions, generated from
+    `registry.credentialed()` so a credentialed service is declared in exactly
+    one place (the registry) and this list can never drift from the probes."""
+    needs = "; ".join(f"`{name}` ({cred.service})" for name, cred in registry.credentialed())
+    return (
+        f"Some bundled tooling calls an external service and needs a credential: {needs}. "
+        "A call with a missing credential fails immediately with the remedy; check them all at "
+        "once with `ix-mcp requirements` (the server also reports each one on stderr at startup)."
     )
 
 

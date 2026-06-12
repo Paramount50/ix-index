@@ -69,6 +69,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     notebook.add_argument("--workdir", help="Directory the kernel runs in (default: cwd)")
     sub.add_parser("dashboard", help="Open the running server's dashboard URL")
+    sub.add_parser(
+        "requirements",
+        help="Report each external credential the bundled tooling needs: present "
+        "(and from where) or missing (and the remedy); exits non-zero when "
+        "anything is missing, so setup scripts can gate on it",
+    )
     ev = sub.add_parser("eval", help="Evaluate one expression on a throwaway kernel")
     ev.add_argument("code")
     ex = sub.add_parser("exec", help="Run statements on a throwaway kernel")
@@ -80,6 +86,10 @@ def main(argv: list[str] | None = None) -> int:
         return _serve(args, engine_only=command == "notebook")
     if command == "dashboard":
         return _dashboard()
+    if command == "requirements":
+        from . import requirements
+
+        return 0 if requirements.report(print) else 1
     if command in ("eval", "exec"):
         return _one_shot(args.code)
     parser.error(f"unknown command {command!r}")
@@ -328,6 +338,13 @@ def _serve(args: argparse.Namespace, *, engine_only: bool = False) -> int:
     if _op_sock is not None:
         os.environ["SSH_AUTH_SOCK"] = _op_sock
         print(f"[ix-mcp] SSH_AUTH_SOCK -> 1Password agent ({_op_sock})", file=sys.stderr, flush=True)
+
+    # Yell about missing credentials once, up front, on the channel MCP clients
+    # surface in their logs. Each module still fails clearly per call; this is
+    # the advance warning so the gap is visible before the first call hits it.
+    from . import requirements
+
+    requirements.report(lambda line: print(f"[ix-mcp] {line}", file=sys.stderr, flush=True))
 
     asyncio.run(_run(cfg))
     return 0

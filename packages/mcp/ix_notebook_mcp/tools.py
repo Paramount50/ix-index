@@ -60,6 +60,7 @@ _KERNEL_GUIDE = guide.compose(
     guide.PAGING,
     guide.BLOCKING,
     guide.modules_index(),
+    guide.credentials_note(),
     guide.HTML,
     guide.VERIFY,
     guide.RESULT_SPLIT,
