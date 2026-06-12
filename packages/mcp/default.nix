@@ -130,6 +130,47 @@ let
       ''
   );
 
+  # The flecs-query package, baked into the pinned interpreter so every
+  # session can `import flecs_query` and parse/validate Flecs Query Language
+  # expressions with no setup. Same shape as `astlogModule`: the PyO3 cdylib
+  # comes from the shared workspace graph, so it works on Linux and macOS dev
+  # alike.
+  flecsQueryPythonSource = builtins.path {
+    name = "flecs-query-py-python-source";
+    path = ../flecs-query/py/python;
+  };
+  flecsQueryModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-flecs-query-python-module"
+      {
+        strictDeps = true;
+        meta.description = "flecs-query PyO3 module bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/flecs_query"
+        mkdir -p "$site"
+        cp -r ${flecsQueryPythonSource}/flecs_query/. "$site/"
+
+        cdylib=""
+        for candidate in \
+          ${ix.rustWorkspace.units.libraries.flecs_query_py}/lib/libflecs_query_py.so \
+          ${ix.rustWorkspace.units.libraries.flecs_query_py}/lib/libflecs_query_py-*.so \
+          ${ix.rustWorkspace.units.libraries.flecs_query_py}/lib/libflecs_query_py.dylib \
+          ${ix.rustWorkspace.units.libraries.flecs_query_py}/lib/libflecs_query_py-*.dylib
+        do
+          if [ -f "$candidate" ]; then
+            cdylib="$candidate"
+            break
+          fi
+        done
+        if [ -z "$cdylib" ]; then
+          echo "ix-flecs-query module: no cdylib under ${ix.rustWorkspace.units.libraries.flecs_query_py}/lib" >&2
+          ls -la ${ix.rustWorkspace.units.libraries.flecs_query_py}/lib >&2 || true
+          exit 1
+        fi
+        install -m555 "$cdylib" "$site/_flecs_query.abi3.so"
+      ''
+  );
+
   # The `fff` fast file-search package, baked into the interpreter so every
   # session can `import fff` and run fuzzy file search / SIMD grep over a repo
   # with no setup. Unlike `tui`/`search`, fff has no PyO3 binding: it ships a
@@ -704,6 +745,7 @@ let
       tuiModule
       searchModule
       astlogModule
+      flecsQueryModule
       fffModule
       googleAuthModule
       ixGoogleModule

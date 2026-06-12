@@ -64,6 +64,11 @@ MODULES: tuple[Module, ...] = (
         "them (position, text, recursion), rewrites turn rows into edits "
         "(`astlog.query` / `fixes` / `fix`)",
     ),
+    Module(
+        "flecs_query",
+        "parse the Flecs Query Language without a flecs world: expression to AST dicts, "
+        "canonical form, syntax verdicts (`flecs_query.parse` / `canonicalize` / `validate`)",
+    ),
     Module("tui", "drive and snapshot a terminal program; renders as HTML"),
     Module(
         "screen",

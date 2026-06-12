@@ -29,6 +29,9 @@ members = [
   "packages/dag-runner",
   "packages/file-language",
   "packages/file-search",
+  "packages/flecs-query/core",
+  "packages/flecs-query/mcp",
+  "packages/flecs-query/py",
   "packages/git-log-pretty",
   "packages/github-avatar",
   "packages/google/auth",
@@ -158,6 +161,7 @@ dashboard-core = { path = "packages/dashboard-core" }
 devicons = "0.6"
 dirs = "6"
 file-language = { path = "packages/file-language" }
+flecs-query-core = { path = "packages/flecs-query/core" }
 fontdue = "0.9"
 futures = "0.3"
 git2 = { version = "0.21", default-features = false }
