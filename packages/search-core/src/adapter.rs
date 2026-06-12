@@ -157,13 +157,18 @@ impl Store for MixedbreadStore {
         Ok(files
             .into_iter()
             .filter_map(|file| {
-                file.external_id.map(|external_id| StoredRecord {
-                    content_hash: metadata_str(
-                        file.metadata.as_ref(),
-                        source_meta::keys::CONTENT_HASH,
-                    ),
-                    source: metadata_str(file.metadata.as_ref(), source_meta::keys::SOURCE),
+                let mixedbread::StoredFile {
+                    id,
                     external_id,
+                    metadata,
+                    created_at,
+                } = file;
+                external_id.map(|external_id| StoredRecord {
+                    content_hash: metadata_str(metadata.as_ref(), source_meta::keys::CONTENT_HASH),
+                    source: metadata_str(metadata.as_ref(), source_meta::keys::SOURCE),
+                    external_id,
+                    file_id: id,
+                    created_at,
                 })
             })
             .collect())

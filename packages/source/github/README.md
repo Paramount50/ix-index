@@ -57,11 +57,13 @@ skipped (`sync_documents` keys on `external_id` + `content_hash`).
 
 ## Known limitations
 
-- The indexer pass uploads and updates; it does not delete. An item that is
-  closed, deleted, or dropped from a later export keeps its last-exported
-  version in the store until a separate garbage-collection pass runs against the
-  `github` source. Re-exporting on a schedule keeps content fresh but does not
-  prune removed items on its own.
+- The indexer pass uploads and updates; it does not delete on its own. An item
+  that is deleted or dropped from a later export keeps its last-exported
+  version in the store unless the indexer runs with `--gc`, which diffs the
+  store's `github` records against the export just indexed and deletes the
+  vanished ones (plus exact-duplicate file objects left by retried uploads).
+  Re-exporting on a schedule keeps content fresh; pair it with `--gc` to prune
+  removed items too.
 - First pass is export-driven (like the Linear adapter). There is no live API
   ingestion, and Discussions and gists are out of scope.
 - Inline review threads come from the REST `pulls/{n}/comments` endpoint, which

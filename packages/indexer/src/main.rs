@@ -21,7 +21,7 @@
 
 mod scan_cursor;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -184,6 +184,19 @@ struct Cli {
     /// the fleet module passes the NixOS `networking.hostName`.
     #[arg(long)]
     host: Option<String>,
+
+    /// After a successful sync, garbage-collect each export-complete source's
+    /// Mixedbread records (slack, linear, github, git): delete records whose
+    /// `external_id` vanished from this run's complete input, and
+    /// exact-duplicate (`external_id`, `content_hash`) file objects left
+    /// behind by retried uploads, keeping the newest. Off by default. Only a
+    /// source that
+    /// ran this invocation is touched, and the append-only history sources
+    /// (claude, codex, shell, debug) are never GC'd: their scans are
+    /// incremental windows, not complete snapshots, so absence there proves
+    /// nothing. Requires --mixedbread-store.
+    #[arg(long, env = "INDEXER_GC")]
+    gc: bool,
 }
 
 /// The Mixedbread view for a run: the connected store, the store name, and the
@@ -249,6 +262,21 @@ async fn main() -> anyhow::Result<()> {
         consume_modes <= 1,
         "--from-parquet-prefix, --from-iceberg, --from-snapshot, and --cursor-file are mutually exclusive consume modes"
     );
+
+    // GC diffs the store against a freshly scanned complete input, so it only
+    // makes sense on the scan path (the consume modes have their own
+    // replace/tombstone delete semantics) and only with the Mixedbread sink
+    // (it prunes the Mixedbread view, nothing else).
+    if cli.gc {
+        anyhow::ensure!(
+            consume_modes == 0,
+            "--gc applies to the source-scan path; the consume modes already delete via replace/tombstones"
+        );
+        anyhow::ensure!(
+            mixedbread.is_some(),
+            "--gc requires --mixedbread-store (it prunes the Mixedbread view)"
+        );
+    }
 
     // Consume modes replay a corpus log into Mixedbread/the lake instead of
     // scanning local sources; dispatched in `run_consume_mode` to keep `main`
@@ -754,7 +782,7 @@ async fn run_gated_source<A, F>(
     if result.is_ok() {
         gate.commit(label);
     }
-    record(label, result, counts);
+    record(label, result.map(|_| ()), counts);
 }
 
 /// Resolve the selected sources and run each one independently (a failure never
@@ -837,7 +865,7 @@ async fn run_sources(
                 if result.is_ok() {
                     gate.commit("shell");
                 }
-                record("shell", result, &mut counts);
+                record("shell", result.map(|_| ()), &mut counts);
             }
             // An uninitialized db is already logged and tallied as a soft skip
             // (no cursor commit: only a fully ingested source buries its gate).
@@ -846,16 +874,7 @@ async fn run_sources(
         }
     }
     run_static_exports(cli, mixedbread, parquet, lake, &mut counts).await;
-    for repo in &cli.git_repos {
-        let label = format!("git:{}", repo.display());
-        let result = async {
-            let adapter = source_git::GitLog::open(repo)
-                .with_context(|| format!("reading git history at {}", repo.display()))?;
-            run_source("git", &adapter, mixedbread, parquet, lake).await
-        }
-        .await;
-        record(&label, result, &mut counts);
-    }
+    run_git_repos(cli, mixedbread, parquet, lake, &mut counts).await;
     run_journald(cli, mixedbread, parquet, lake, &mut counts).await;
     for repo_dir in &cli.code_repos {
         let label = format!("code:{}", repo_dir.display());
@@ -891,12 +910,19 @@ async fn run_journald(
         run_source("journald", &adapter, mixedbread, parquet, lake).await
     }
     .await;
-    record("journald", result, counts);
+    // A journald read is a `--since` window, never a complete snapshot, so it
+    // is not GC-eligible and its produced ids are dropped.
+    record("journald", result.map(|_| ()), counts);
 }
 
 /// Run the directory-based export sources (Slack, Linear, GitHub), each
 /// independent (a failure never aborts the others), accumulating into the
 /// shared counters. Split out of [`run_sources`] to keep each function focused.
+///
+/// These are the export-complete sources: their input directory holds the
+/// whole corpus by construction, so under `--gc` each one that fully succeeds
+/// is followed by a GC pass diffing the store against exactly what it
+/// produced (ENG-2697/ENG-2702).
 async fn run_static_exports(
     cli: &Cli,
     mixedbread: Option<Mixedbread<'_>>,
@@ -908,7 +934,8 @@ async fn run_static_exports(
         let result = async {
             let adapter = source_slack::SlackExport::open(dir)
                 .with_context(|| format!("reading Slack export at {}", dir.display()))?;
-            run_source("slack", &adapter, mixedbread, parquet, lake).await
+            let produced = run_source("slack", &adapter, mixedbread, parquet, lake).await?;
+            gc_source("slack", &adapter.source(), &produced, cli.gc, mixedbread).await
         }
         .await;
         record("slack", result, counts);
@@ -917,7 +944,8 @@ async fn run_static_exports(
         let result = async {
             let adapter = source_linear::LinearExport::open(dir)
                 .with_context(|| format!("reading Linear export at {}", dir.display()))?;
-            run_source("linear", &adapter, mixedbread, parquet, lake).await
+            let produced = run_source("linear", &adapter, mixedbread, parquet, lake).await?;
+            gc_source("linear", &adapter.source(), &produced, cli.gc, mixedbread).await
         }
         .await;
         record("linear", result, counts);
@@ -926,11 +954,100 @@ async fn run_static_exports(
         let result = async {
             let adapter = source_github::GithubExport::open(dir)
                 .with_context(|| format!("reading GitHub export at {}", dir.display()))?;
-            run_source("github", &adapter, mixedbread, parquet, lake).await
+            let produced = run_source("github", &adapter, mixedbread, parquet, lake).await?;
+            gc_source("github", &adapter.source(), &produced, cli.gc, mixedbread).await
         }
         .await;
         record("github", result, counts);
     }
+}
+
+/// Run every `--git-repo` source, accumulating into the shared counters.
+/// Split out of [`run_sources`] to keep each function focused.
+///
+/// Every repo shares the one `git` source tag, so the `--gc` pass must diff
+/// against the UNION of every repo's commits — a per-repo pass would treat
+/// the other repos' records as vanished — and only runs when every repo
+/// synced, or the union is partial and GC would delete the failed repo's
+/// records.
+async fn run_git_repos(
+    cli: &Cli,
+    mixedbread: Option<Mixedbread<'_>>,
+    parquet: Option<&ParquetReconciler>,
+    lake: Option<&IcebergReconciler>,
+    counts: &mut Counts,
+) {
+    let mut produced_union: HashSet<String> = HashSet::new();
+    let mut any_failed = false;
+    for repo in &cli.git_repos {
+        let label = format!("git:{}", repo.display());
+        let result = async {
+            let adapter = source_git::GitLog::open(repo)
+                .with_context(|| format!("reading git history at {}", repo.display()))?;
+            run_source("git", &adapter, mixedbread, parquet, lake).await
+        }
+        .await;
+        match result {
+            Ok(produced) => {
+                produced_union.extend(produced);
+                record(&label, Ok(()), counts);
+            }
+            Err(error) => {
+                any_failed = true;
+                record(&label, Err(error), counts);
+            }
+        }
+    }
+    if cli.gc && !cli.git_repos.is_empty() {
+        if any_failed {
+            eprintln!("[git] gc skipped: a repo failed, so the produced set is incomplete");
+        } else if let Err(error) = gc_source(
+            "git",
+            &Source::new(source_git::SOURCE_TAG),
+            &produced_union,
+            true,
+            mixedbread,
+        )
+        .await
+        {
+            // The syncs above already counted as indexed; the GC pass failing
+            // is its own failure so the unit's exit code surfaces it.
+            record("git:gc", Err(error), counts);
+        }
+    }
+}
+
+/// Garbage-collect one export-complete source's Mixedbread records after a
+/// fully successful sync, when `--gc` is set (a no-op otherwise).
+///
+/// `produced` must be the COMPLETE external-id set the source emitted this
+/// run — an export directory (or the union of every `--git-repo` log) is
+/// complete by construction, which is why only those sources ever reach here.
+/// The append-only history sources must not: their incremental scans make
+/// absence meaningless, and GC against a partial set deletes records the
+/// input simply did not include.
+async fn gc_source(
+    label: &str,
+    source: &Source,
+    produced: &HashSet<String>,
+    gc: bool,
+    mixedbread: Option<Mixedbread<'_>>,
+) -> anyhow::Result<()> {
+    if !gc {
+        return Ok(());
+    }
+    // Startup validation guarantees the store whenever --gc is set; a missing
+    // one here is a wiring bug, surfaced rather than silently skipped.
+    let reconciler = mixedbread.context("--gc requires --mixedbread-store")?;
+    let report = reconciler
+        .gc(source, produced)
+        .await
+        .with_context(|| format!("[{label}] Mixedbread gc"))?;
+    eprintln!(
+        "[{label}] gc: deleted {} vanished record(s) and {} duplicate file object(s); kept {}",
+        report.deleted, report.deduped, report.kept
+    );
+    Ok(())
 }
 
 /// Run the `--user NAME:HOME` multi-user phase, accumulating into the shared
@@ -1221,7 +1338,7 @@ async fn index_user(
                     if result.is_ok() {
                         gate.commit(&label);
                     }
-                    record(&label, result, counts);
+                    record(&label, result.map(|_| ()), counts);
                 }
                 // No cursor commit for the soft skip: only a fully ingested
                 // source buries its gate.
@@ -1441,7 +1558,9 @@ fn open_atuin(
     }
 }
 
-/// Fan one source out to every enabled sink.
+/// Fan one source out to every enabled sink. Returns the `external_id`s the
+/// adapter produced, so an export-complete caller can feed them to the GC pass
+/// without re-reading the source.
 ///
 /// The durable logs run FIRST (parquet, then the Iceberg lake) and every sink
 /// is INDEPENDENT: a slow or failing Mixedbread upload must not gate or skip a
@@ -1456,7 +1575,7 @@ async fn run_source<A: SourceAdapter + Sync>(
     mixedbread: Option<Mixedbread<'_>>,
     parquet: Option<&ParquetReconciler>,
     lake: Option<&IcebergReconciler>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<HashSet<String>> {
     // A selected source with no sink is a misconfiguration, not a no-op: a missing
     // `--mixedbread-store`/`--bucket`/`--catalog-uri` would otherwise drop the
     // source silently while still counting as a success.
@@ -1516,7 +1635,10 @@ async fn run_source<A: SourceAdapter + Sync>(
     // Surface every sink failure; a single combined error keeps the per-source
     // failure accounting in `record` intact while not hiding the second sink.
     match errors.len() {
-        0 => Ok(()),
+        0 => Ok(documents
+            .iter()
+            .map(|document| document.external_id.clone())
+            .collect()),
         1 => Err(errors.into_iter().next().expect("len checked")),
         _ => {
             let combined = errors

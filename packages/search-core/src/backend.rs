@@ -161,6 +161,16 @@ pub struct StoredRecord {
     /// another source (or none) means the backend did not apply the scope, and
     /// anything derived from the listing — deletes above all — must not run.
     pub source: Option<String>,
+    /// The backend's own id for this file object, when it has one. A retried
+    /// upload can leave several file objects under one `external_id`, and only
+    /// this id can address one of them without ambiguity (deletes accept it in
+    /// place of the external id). `None` for backends keyed purely by
+    /// external id (the in-memory test store).
+    pub file_id: Option<String>,
+    /// When the backend created this file object (RFC 3339, UTC), when
+    /// reported. RFC 3339 in one zone orders lexicographically; the GC pass
+    /// compares these as strings to keep the newest among exact duplicates.
+    pub created_at: Option<String>,
 }
 
 /// A vector store that holds documents and answers searches.
@@ -392,6 +402,10 @@ impl Store for MemoryStore {
                 external_id: stored.document.external_id.clone(),
                 content_hash: Some(stored.document.content_hash.clone()),
                 source: Some(stored.source.as_str().to_owned()),
+                // Keyed purely by external id: one record per id, no separate
+                // file-object identity and no creation timestamp.
+                file_id: None,
+                created_at: None,
             })
             .collect();
         drop(inner);

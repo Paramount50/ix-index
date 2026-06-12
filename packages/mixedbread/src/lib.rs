@@ -403,10 +403,18 @@ impl FileIds {
 /// A file as reported by the store's file listing.
 #[derive(Debug, Clone)]
 pub struct StoredFile {
+    /// The store file object's own id. Unlike `external_id` it is unique per
+    /// file object, so it is the only unambiguous delete handle when a retried
+    /// upload has left several file objects under one external id.
+    pub id: Option<String>,
     /// Caller-assigned external id, if any.
     pub external_id: Option<String>,
     /// Arbitrary metadata attached at upload time.
     pub metadata: Option<serde_json::Value>,
+    /// Creation timestamp (RFC 3339, UTC) as reported by the API. RFC 3339 in
+    /// one zone orders lexicographically, so callers compare these as strings
+    /// to find the newest among duplicates.
+    pub created_at: Option<String>,
 }
 
 /// One scored chunk returned by search or question-answering.
@@ -644,8 +652,10 @@ impl Client {
             let page: ListResponse = decode(resp).await?;
             for item in page.data {
                 files.push(StoredFile {
+                    id: item.id,
                     external_id: item.external_id,
                     metadata: item.metadata,
+                    created_at: item.created_at,
                 });
             }
             match page.pagination {
@@ -1068,9 +1078,13 @@ struct ListResponse {
 #[derive(Deserialize)]
 struct ListItem {
     #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
     external_id: Option<String>,
     #[serde(default)]
     metadata: Option<serde_json::Value>,
+    #[serde(default)]
+    created_at: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -1529,6 +1543,56 @@ mod tests {
             serde_json::to_value(FileIds::exclude(vec!["a".to_owned()])).expect("serialize"),
             serde_json::json!(["not_in", ["a"]])
         );
+    }
+
+    #[tokio::test]
+    async fn list_files_decodes_id_external_id_metadata_and_created_at() {
+        // Pins the slice of the store-file listing the GC pass depends on: the
+        // file object's own `id` (the only unambiguous delete handle when two
+        // objects share an external id) and `created_at` (what "keep the
+        // newest" orders by) must survive the projection into StoredFile, and
+        // a sparse item (no id, no timestamp) must decode rather than error.
+        let app = Router::new().route(
+            "/v1/stores/{store}/files/list",
+            axum::routing::post(|| async {
+                (
+                    StatusCode::OK,
+                    r#"{"data":[
+                        {"id":"f-1","external_id":"linear:issue:A",
+                         "metadata":{"source":"linear","content_hash":"sha256:aa"},
+                         "created_at":"2026-06-11T00:00:00Z"},
+                        {"external_id":"legacy"}
+                    ]}"#,
+                )
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        let files = client.list_files("s", None).await.expect("list");
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0].id.as_deref(), Some("f-1"));
+        assert_eq!(files[0].external_id.as_deref(), Some("linear:issue:A"));
+        assert_eq!(
+            files[0].created_at.as_deref(),
+            Some("2026-06-11T00:00:00Z")
+        );
+        assert_eq!(
+            files[0]
+                .metadata
+                .as_ref()
+                .and_then(|m| m.get("content_hash"))
+                .and_then(serde_json::Value::as_str),
+            Some("sha256:aa")
+        );
+        assert_eq!(files[1].id, None);
+        assert_eq!(files[1].created_at, None);
     }
 
     #[tokio::test]

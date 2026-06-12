@@ -11,10 +11,10 @@
 #
 # Requires: gh (authenticated), jq.
 #
-# Note: the indexer pass uploads and updates only; it does not delete items that
-# disappear from a later export. A closed or removed issue/PR (or a repo dropped
-# from the repo list) keeps its last-exported version searchable until a separate
-# garbage-collection pass runs against the `github` source.
+# Note: by default the indexer pass uploads and updates only; an item that
+# disappears from a later export (or a repo dropped from the repo list) keeps
+# its last-exported version searchable. Run the indexer with --gc to also
+# delete `github` records that vanished from the export just indexed.
 set -euo pipefail
 
 if [[ $# -lt 2 ]]; then
