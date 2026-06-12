@@ -683,7 +683,7 @@ mod tests {
             stores: &[String],
             query: &str,
             top_k: usize,
-            options: search_core::SearchOptions,
+            options: search_core::AskOptions,
             filters: Option<&search_core::Filter>,
         ) -> search_core::Result<search_core::Answer> {
             self.0.ask(stores, query, top_k, options, filters).await
@@ -801,7 +801,7 @@ mod tests {
             stores: &[String],
             query: &str,
             top_k: usize,
-            options: search_core::SearchOptions,
+            options: search_core::AskOptions,
             filters: Option<&search_core::Filter>,
         ) -> search_core::Result<search_core::Answer> {
             self.0.ask(stores, query, top_k, options, filters).await

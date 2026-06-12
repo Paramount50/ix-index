@@ -21,10 +21,10 @@ use clap::error::ErrorKind;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use indicatif::ProgressBar;
 use search_core::{
-    Agentic, AgenticConfig, CodeScope, ContextView, DEFAULT_RERANK_MODEL, DEFAULT_STORE,
-    DisplayHit, EnhancedQuery, Filter, FilterSpec, GrepOptions, GrepTargets, KNOWN_SOURCE_TAGS,
-    Manifest, MixedbreadStore, RenderMode, Rerank, SearchOptions, SortBy, Source, build_filter,
-    parse_time_spec,
+    Agentic, AgenticConfig, AskOptions, CodeScope, ContextView, DEFAULT_RERANK_MODEL,
+    DEFAULT_STORE, DisplayHit, EnhancedQuery, Filter, FilterSpec, GrepOptions, GrepTargets,
+    KNOWN_SOURCE_TAGS, Manifest, MixedbreadStore, RenderMode, Rerank, SearchOptions, SortBy,
+    Source, build_filter, parse_time_spec,
 };
 
 /// Command-line arguments.
@@ -221,6 +221,24 @@ struct SemanticArgs {
     /// citations in the answer reference the numbered source list under it.
     #[arg(short = 'a', long)]
     answer: bool,
+
+    /// Extra instructions for the answering model (e.g. "answer in one
+    /// sentence"), followed only when not in conflict with existing rules.
+    /// Requires --answer.
+    #[arg(long, value_name = "TEXT", requires = "answer")]
+    instructions: Option<String>,
+
+    /// Answer without `[n]` citation markers (the numbered source list still
+    /// prints). Requires --answer.
+    #[arg(long = "no-cite", requires = "answer")]
+    no_cite: bool,
+
+    /// Answer from text context only, skipping the backend's multimodal
+    /// (image/audio/video) context handling, which is on by default. The
+    /// shared corpus is text-only, so this only trims answering work.
+    /// Requires --answer.
+    #[arg(long = "no-multimodal", requires = "answer")]
+    no_multimodal: bool,
 
     /// Disable result reranking (on by default).
     #[arg(long = "no-rerank")]
@@ -576,7 +594,7 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
             &manifest,
             &pattern,
             top_k,
-            options,
+            ask_options(&cli, options),
             cli.web,
             filter.as_ref(),
             CodeScope::ServerFiltered,
@@ -740,6 +758,18 @@ fn agentic_selection(cli: &SemanticArgs) -> Agentic {
         })
     } else {
         Agentic::Toggle(cli.agentic)
+    }
+}
+
+/// Resolve the answering flags into the backend ask options. Unset toggles
+/// stay `None`, so the backend defaults (citations on, multimodal on) apply
+/// with no change to the wire body.
+fn ask_options(cli: &SemanticArgs, search: SearchOptions) -> AskOptions {
+    AskOptions {
+        search,
+        cite: cli.no_cite.then_some(false),
+        multimodal: cli.no_multimodal.then_some(false),
+        instructions: cli.instructions.clone(),
     }
 }
 

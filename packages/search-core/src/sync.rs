@@ -546,7 +546,7 @@ mod tests {
             stores: &[String],
             query: &str,
             top_k: usize,
-            options: crate::backend::SearchOptions,
+            options: crate::backend::AskOptions,
             filters: Option<&mixedbread::Filter>,
         ) -> Result<crate::backend::Answer> {
             self.inner.ask(stores, query, top_k, options, filters).await

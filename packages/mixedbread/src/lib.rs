@@ -6,7 +6,7 @@
 //! (`/v1/files` then `/v1/stores/{store}/files`), file listing, per-file status,
 //! and deletion, search (`/v1/stores/search`), regex grep (`/v1/stores/grep`),
 //! metadata-only chunk listing (`/v1/stores/list-chunks`),
-//! question-answering (`/v1/stores/question-answering`), and query
+//! question-answering (`/v1/stores/question-answering`), query
 //! enhancement (`/v1/stores/queries/enhance`).
 
 use std::path::PathBuf;
@@ -368,6 +368,32 @@ pub struct SearchOptions {
     /// default `true`); `Some(false)` bypasses the rules for one query.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub apply_search_rules: Option<bool>,
+}
+
+/// Question-answering tuning forwarded to the API alongside the search
+/// options: the `qa_options` body object plus the request-level
+/// `instructions` field.
+///
+/// Every field is optional and omitted from the wire when unset, so a caller
+/// passing `QaOptions::default()` produces the same wire body as before the
+/// type existed. The endpoint also accepts `stream: true` for a streamed
+/// answer; the live API answers `500 internal_error` to it in every
+/// combination tried (verified 2026-06-12, four attempts, with and without
+/// `qa_options` and an SSE `Accept` header), so this client does not expose
+/// streaming until the server-side feature works.
+#[derive(Debug, Clone, Default)]
+pub struct QaOptions {
+    /// Whether the answer cites its sources with `<cite i="N"/>` markers
+    /// indexing the returned source list. `None` applies the API default
+    /// (`true`).
+    pub cite: Option<bool>,
+    /// Whether the answer may draw on multimodal (image/audio/video) context.
+    /// `None` applies the API default (`true`); the shared corpus is text-only,
+    /// so `Some(false)` only matters as an explicit opt-out.
+    pub multimodal: Option<bool>,
+    /// Extra instructions for the answering model (followed only when not in
+    /// conflict with existing rules; capped at 8000 chars by the API).
+    pub instructions: Option<String>,
 }
 
 /// File-id scoping for search and question-answering.
@@ -854,26 +880,37 @@ impl Client {
     }
 
     /// Ask a natural-language question against one or more stores. `file_ids`
-    /// scopes the answering context like [`search`](Self::search).
+    /// scopes the answering context like [`search`](Self::search); `qa` tunes
+    /// the answering stage itself (citations, multimodal context,
+    /// instructions — see [`QaOptions`]).
     ///
     /// # Errors
     /// Returns an error if the request fails or cannot be decoded.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "thin pass-through of the endpoint's request surface"
+    )]
     pub async fn ask(
         &self,
         stores: &[String],
         query: &str,
         top_k: usize,
         options: SearchOptions,
+        qa: QaOptions,
         filters: Option<&filter::Filter>,
         file_ids: Option<&FileIds>,
     ) -> Result<AnswerResponse> {
-        let request = SearchRequest {
-            query,
-            store_identifiers: stores,
-            top_k,
-            search_options: options,
-            filters,
-            file_ids,
+        let request = QaRequest {
+            search: SearchRequest {
+                query,
+                store_identifiers: stores,
+                top_k,
+                search_options: options,
+                filters,
+                file_ids,
+            },
+            qa_options: QaOptionsWire::from_options(&qa),
+            instructions: qa.instructions.as_deref(),
         };
         let ask_url = self.url("/v1/stores/question-answering");
         let resp = self
@@ -973,6 +1010,7 @@ impl Client {
             in_progress: object.file_counts.in_progress,
         })
     }
+
 }
 
 async fn decode<R: serde::de::DeserializeOwned>(resp: reqwest::Response) -> Result<R> {
@@ -1128,6 +1166,41 @@ struct SearchRequest<'a> {
     file_ids: Option<&'a FileIds>,
 }
 
+/// The `/v1/stores/question-answering` body: the shared search surface plus
+/// the QA-only fields. The endpoint also defines `stream` (an SSE answer);
+/// it is deliberately not modeled — see [`QaOptions`] for the live evidence.
+#[derive(serde::Serialize)]
+struct QaRequest<'a> {
+    #[serde(flatten)]
+    search: SearchRequest<'a>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    qa_options: Option<QaOptionsWire>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instructions: Option<&'a str>,
+}
+
+/// The `qa_options` body object (the API's `QuestionAnsweringOptions`).
+/// Instructions are a sibling request-level field, not part of this object.
+#[derive(serde::Serialize)]
+struct QaOptionsWire {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cite: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    multimodal: Option<bool>,
+}
+
+impl QaOptionsWire {
+    /// The wire object for `qa` — `None` when every toggle is unset, so the
+    /// legacy body carries no `qa_options` key at all (the API treats absent
+    /// and null differently for some fields).
+    fn from_options(qa: &QaOptions) -> Option<Self> {
+        (qa.cite.is_some() || qa.multimodal.is_some()).then_some(Self {
+            cite: qa.cite,
+            multimodal: qa.multimodal,
+        })
+    }
+}
+
 #[derive(serde::Serialize)]
 struct EnhanceRequest<'a> {
     query: &'a str,
@@ -1269,7 +1342,8 @@ mod tests {
     use super::{
         Agentic, AgenticConfig, BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL,
         EnhancedQuery, Error, FileIds, FileStatus, HttpClient, ListChunksRequest, ListRequest,
-        MAX_RETRIES, RawChunk, Rerank, SearchOptions, SearchRequest, SortBy, backoff,
+        MAX_RETRIES, QaOptions, QaOptionsWire, QaRequest, RawChunk, Rerank, SearchOptions,
+        SearchRequest, SortBy, backoff,
     };
     use crate::{Filter, Operator};
 
@@ -1524,6 +1598,91 @@ mod tests {
                 "top_k": 3,
                 "search_options": { "rerank": false, "agentic": false },
             })
+        );
+    }
+
+    #[test]
+    fn qa_request_matches_the_documented_wire_shape() {
+        // Pins the `/v1/stores/question-answering` body: the flattened search
+        // surface plus `qa_options` (the API's QuestionAnsweringOptions) and
+        // the request-level `instructions` (verified against the live API,
+        // 2026-06-12).
+        let request = QaRequest {
+            search: SearchRequest {
+                query: "what bucket does the indexer use",
+                store_identifiers: &["index".to_owned()],
+                top_k: 3,
+                search_options: SearchOptions {
+                    rerank: Rerank::server_default(),
+                    agentic: Agentic::off(),
+                    score_threshold: None,
+                    return_metadata: Some(true),
+                    rewrite_query: None,
+                    apply_search_rules: None,
+                },
+                filters: None,
+                file_ids: None,
+            },
+            qa_options: QaOptionsWire::from_options(&QaOptions {
+                cite: Some(true),
+                multimodal: Some(false),
+                instructions: None,
+            }),
+            instructions: Some("answer in one sentence"),
+        };
+        assert_eq!(
+            serde_json::to_value(&request).expect("serialize"),
+            serde_json::json!({
+                "query": "what bucket does the indexer use",
+                "store_identifiers": ["index"],
+                "top_k": 3,
+                "search_options": { "rerank": true, "agentic": false, "return_metadata": true },
+                "qa_options": { "cite": true, "multimodal": false },
+                "instructions": "answer in one sentence",
+            })
+        );
+
+        // Default QA options leave the legacy wire body untouched: no
+        // `qa_options` or `instructions` keys at all.
+        let legacy = QaRequest {
+            search: SearchRequest {
+                query: "q",
+                store_identifiers: &["index".to_owned()],
+                top_k: 1,
+                search_options: SearchOptions {
+                    rerank: Rerank::off(),
+                    agentic: Agentic::off(),
+                    score_threshold: None,
+                    return_metadata: None,
+                    rewrite_query: None,
+                    apply_search_rules: None,
+                },
+                filters: None,
+                file_ids: None,
+            },
+            qa_options: QaOptionsWire::from_options(&QaOptions::default()),
+            instructions: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&legacy).expect("serialize"),
+            serde_json::json!({
+                "query": "q",
+                "store_identifiers": ["index"],
+                "top_k": 1,
+                "search_options": { "rerank": false, "agentic": false },
+            })
+        );
+
+        // One set toggle is enough to carry the object, without a null for
+        // the unset sibling.
+        assert_eq!(
+            serde_json::to_value(QaOptionsWire::from_options(&QaOptions {
+                cite: Some(false),
+                multimodal: None,
+                instructions: None,
+            }))
+            .expect("serialize"),
+            serde_json::json!({ "cite": false })
         );
     }
 

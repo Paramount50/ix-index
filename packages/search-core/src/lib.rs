@@ -36,8 +36,8 @@ mod sync;
 
 pub use adapter::MixedbreadStore;
 pub use backend::{
-    Answer, GrepOptions, GrepTargets, MemoryStore, Provenance, SearchHit, SearchOptions, Store,
-    StoreStatus, StoredRecord,
+    Answer, AskOptions, GrepOptions, GrepTargets, MemoryStore, Provenance, SearchHit,
+    SearchOptions, Store, StoreStatus, StoredRecord,
 };
 pub use config::{Config, DEFAULT_STORE, WEB_STORE};
 pub use content::ContentHash;

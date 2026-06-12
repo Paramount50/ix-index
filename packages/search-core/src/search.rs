@@ -20,7 +20,7 @@ use mixedbread::{Filter, SortBy};
 use regex::Regex;
 use source_meta::{Source, keys};
 
-use crate::backend::{GrepOptions, SearchHit, SearchOptions, Store};
+use crate::backend::{AskOptions, GrepOptions, SearchHit, SearchOptions, Store};
 use crate::config::WEB_STORE;
 use crate::error::Result;
 use crate::manifest::Manifest;
@@ -293,7 +293,7 @@ pub async fn ask(
     manifest: &Manifest,
     query: &str,
     top_k: usize,
-    options: SearchOptions,
+    options: AskOptions,
     include_web: bool,
     filters: Option<&Filter>,
     code_scope: CodeScope,
@@ -859,7 +859,7 @@ mod tests {
             &Manifest::default(),
             "needle",
             1,
-            opts(),
+            opts().into(),
             false,
             None,
             CodeScope::WorktreeExact,

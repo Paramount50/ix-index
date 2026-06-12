@@ -9,7 +9,7 @@ use snafu::ResultExt as _;
 use source_meta::{Document, Source};
 
 use crate::backend::{
-    Answer, GrepOptions, SearchHit, SearchOptions, Store, StoreStatus, StoredRecord,
+    Answer, AskOptions, GrepOptions, SearchHit, SearchOptions, Store, StoreStatus, StoredRecord,
 };
 use crate::error::{BackendSnafu, Result};
 
@@ -254,12 +254,25 @@ impl Store for MixedbreadStore {
         stores: &[String],
         query: &str,
         top_k: usize,
-        options: SearchOptions,
+        options: AskOptions,
         filters: Option<&Filter>,
     ) -> Result<Answer> {
+        let qa = mixedbread::QaOptions {
+            cite: options.cite,
+            multimodal: options.multimodal,
+            instructions: options.instructions,
+        };
         let response = self
             .client
-            .ask(stores, query, top_k, to_client_options(options), filters, None)
+            .ask(
+                stores,
+                query,
+                top_k,
+                to_client_options(options.search),
+                qa,
+                filters,
+                None,
+            )
             .await
             .context(BackendSnafu)?;
         Ok(Answer {

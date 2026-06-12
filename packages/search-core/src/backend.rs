@@ -50,6 +50,35 @@ impl Default for SearchOptions {
     }
 }
 
+/// Knobs forwarded to the backend's question-answering call: the retrieval
+/// stage reuses [`SearchOptions`]; the answering stage adds its own toggles.
+#[derive(Debug, Clone, Default)]
+pub struct AskOptions {
+    /// Search knobs for the retrieval stage (reranking, agentic, rules).
+    pub search: SearchOptions,
+    /// Whether the answer cites its sources with `<cite i="N"/>` markers.
+    /// `None` applies the backend default (on); citations are what the
+    /// projection rewrites onto the displayed source list.
+    pub cite: Option<bool>,
+    /// Whether the answer may draw on multimodal context. `None` applies the
+    /// backend default (on); the corpus is text-only, so `Some(false)` is an
+    /// explicit opt-out only.
+    pub multimodal: Option<bool>,
+    /// Extra instructions for the answering model.
+    pub instructions: Option<String>,
+}
+
+impl From<SearchOptions> for AskOptions {
+    /// Question-answering with custom retrieval knobs and the backend's
+    /// default answering behavior — the pre-[`AskOptions`] call shape.
+    fn from(search: SearchOptions) -> Self {
+        Self {
+            search,
+            ..Self::default()
+        }
+    }
+}
+
 /// Knobs forwarded to the backend's grep call.
 #[derive(Debug, Clone, Copy)]
 pub struct GrepOptions {
@@ -268,7 +297,9 @@ pub trait Store {
     ) -> impl Future<Output = Result<Vec<SearchHit>>> + Send;
 
     /// Ask a natural-language question against one or more stores, optionally
-    /// constrained by metadata `filters`.
+    /// constrained by metadata `filters`. `options` carries both the retrieval
+    /// knobs and the answering-stage toggles (citations, multimodal context,
+    /// instructions).
     ///
     /// # Errors
     /// Returns an error if the request fails or the response cannot be decoded.
@@ -277,7 +308,7 @@ pub trait Store {
         stores: &[String],
         query: &str,
         top_k: usize,
-        options: SearchOptions,
+        options: AskOptions,
         filters: Option<&Filter>,
     ) -> impl Future<Output = Result<Answer>> + Send;
 
@@ -517,18 +548,23 @@ impl Store for MemoryStore {
         stores: &[String],
         query: &str,
         top_k: usize,
-        options: SearchOptions,
+        options: AskOptions,
         filters: Option<&Filter>,
     ) -> Result<Answer> {
         use std::fmt::Write as _;
 
-        let sources = self.search(stores, query, top_k, options, filters).await?;
+        let sources = self
+            .search(stores, query, top_k, options.search, filters)
+            .await?;
         // Cite every source in raw order, the way the production backend
         // emits `<cite i="N"/>` markers indexing its own source list, so the
-        // citation-remapping projection is exercised offline.
+        // citation-remapping projection is exercised offline. An explicit
+        // cite opt-out yields marker-free prose, like the real backend.
         let mut answer = "mock answer from MemoryStore ".to_owned();
-        for index in 0..sources.len() {
-            write!(answer, "<cite i=\"{index}\"/>").expect("writing to a String cannot fail");
+        if options.cite != Some(false) {
+            for index in 0..sources.len() {
+                write!(answer, "<cite i=\"{index}\"/>").expect("writing to a String cannot fail");
+            }
         }
         Ok(Answer { answer, sources })
     }

@@ -212,7 +212,9 @@ pub async fn index_and_answer(
         &manifest,
         query.text,
         query.top_k,
-        query.options.clone(),
+        // Backend-default answering behavior; the pipeline query carries
+        // retrieval knobs only.
+        query.options.clone().into(),
         query.include_web,
         query.filters,
         query.code_scope,
