@@ -66,6 +66,7 @@ pub const KNOWN_SOURCE_TAGS: &[&str] = &[
     "claude_debug",   // packages/source/debug
     "git",            // packages/source/git
     "github",         // packages/source/github
+    "journald",       // packages/source/journald
     "slack",          // packages/source/slack
     "linear",         // packages/source/linear
     "code",           // checkout sync (search-core)

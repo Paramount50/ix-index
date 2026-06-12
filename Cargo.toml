@@ -19,6 +19,7 @@ members = [
   "packages/source/codex",
   "packages/source/debug",
   "packages/source/git",
+  "packages/source/journald",
   "packages/clone-detect/cli",
   "packages/clone-detect/detect",
   "packages/clone-detect/hash",
@@ -143,6 +144,7 @@ source-claude = { path = "packages/source/claude" }
 source-codex = { path = "packages/source/codex" }
 source-debug = { path = "packages/source/debug" }
 source-git = { path = "packages/source/git" }
+source-journald = { path = "packages/source/journald" }
 clone-detect = { path = "packages/clone-detect/detect" }
 clone-hash = { path = "packages/clone-detect/hash" }
 clone-pragma = { path = "packages/clone-detect/pragma" }

@@ -3423,6 +3423,7 @@ dependencies = [
  "source-debug",
  "source-git",
  "source-github",
+ "source-journald",
  "source-linear",
  "source-meta",
  "source-parquet",
@@ -6809,6 +6810,16 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "serde",
+ "serde_json",
+ "snafu",
+ "source-meta",
+]
+
+[[package]]
+name = "source-journald"
+version = "0.1.0"
+dependencies = [
+ "chrono",
  "serde_json",
  "snafu",
  "source-meta",

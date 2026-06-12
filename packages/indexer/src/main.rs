@@ -161,6 +161,13 @@ struct Cli {
     #[arg(long = "git-repo")]
     git_repos: Vec<PathBuf>,
 
+    /// Index journald unit logs (priority <= 4, one document per unit per day)
+    /// since this systemd timespec (`2026-06-01`, `yesterday`; a bare duration
+    /// like `2d` is normalized to `-2d`). Off by default; reading the full
+    /// system journal needs root (the fleet unit has it).
+    #[arg(long = "journald-since", value_name = "TIMESPEC")]
+    journald_since: Option<String>,
+
     /// Code checkout to index (content-addressed, like a bare `search`).
     /// Mixedbread only (code lives in git, not the parquet archive); repeatable.
     #[arg(long = "code-repo")]
@@ -295,7 +302,7 @@ async fn main() -> anyhow::Result<()> {
     }
     if !any_source_selected(&cli) {
         anyhow::bail!(
-            "no sources selected: pass --local, --user NAME:HOME, --claude-dir/--codex-file/--codex-sessions/--atuin-db/--slack-export/--linear-export/--github-export/--git-repo, or --code-repo"
+            "no sources selected: pass --local, --user NAME:HOME, --claude-dir/--codex-file/--codex-sessions/--atuin-db/--slack-export/--linear-export/--github-export/--git-repo/--journald-since, or --code-repo"
         );
     }
 
@@ -604,6 +611,7 @@ const fn any_source_selected(cli: &Cli) -> bool {
         || cli.linear_export.is_some()
         || cli.github_export.is_some()
         || !cli.git_repos.is_empty()
+        || cli.journald_since.is_some()
         || !cli.code_repos.is_empty()
         || !cli.users.is_empty()
 }
@@ -848,6 +856,7 @@ async fn run_sources(
         .await;
         record(&label, result, &mut counts);
     }
+    run_journald(cli, mixedbread, parquet, lake, &mut counts).await;
     for repo_dir in &cli.code_repos {
         let label = format!("code:{}", repo_dir.display());
         let result = index_code(&label, repo_dir, mixedbread).await;
@@ -857,6 +866,32 @@ async fn run_sources(
         run_users(cli, scan, mixedbread, parquet, lake, &mut counts).await;
     }
     counts
+}
+
+/// Run the journald unit-log source when `--journald-since` is set,
+/// accumulating into the shared counters. Host-level, not per-user: the
+/// journal belongs to the machine, and the documents are tagged (and
+/// externally id'd) by host + unit. No scan-cursor gate: there is no input
+/// file to sign, and `journalctl` bounds each read to the `--since` window;
+/// unchanged (unit, day) documents dedup on their content hash downstream.
+async fn run_journald(
+    cli: &Cli,
+    mixedbread: Option<Mixedbread<'_>>,
+    parquet: Option<&ParquetReconciler>,
+    lake: Option<&IcebergReconciler>,
+    counts: &mut Counts,
+) {
+    let Some(since) = &cli.journald_since else {
+        return;
+    };
+    let result = async {
+        let host = resolve_host(cli).context("resolving host for journald")?;
+        let adapter = source_journald::JournaldLog::read(since, &host)
+            .with_context(|| format!("reading journald entries since {since}"))?;
+        run_source("journald", &adapter, mixedbread, parquet, lake).await
+    }
+    .await;
+    record("journald", result, counts);
 }
 
 /// Run the directory-based export sources (Slack, Linear, GitHub), each

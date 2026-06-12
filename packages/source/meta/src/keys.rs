@@ -82,6 +82,10 @@ pub const OUTPUT_TOKENS: &str = "output_tokens";
 /// Process exit status of a recorded shell command.
 pub const EXIT_STATUS: &str = "exit_status";
 
+// journald unit logs. `host` and `timestamp` above are reused.
+/// systemd unit name (e.g. `nginx.service`) a journald document covers.
+pub const UNIT: &str = "unit";
+
 // Linear.
 /// Linear issue identifier, e.g. `ENG-1885`.
 pub const IDENTIFIER: &str = "identifier";
