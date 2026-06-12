@@ -135,6 +135,7 @@
     "Before any non-trivial task, search fleet history for priors: in the kernel, `import search`, then `await search.semantic(\"<task phrasing>\", source=[\"claude_history\"], top_k=5)`. Route by question type: `shell` for what-is-the-command, `github` for why-is-it-this-way, `claude_history` for how-did-someone-do-this. For broader prior research spawn a cheap-model subagent so raw hits never flood your context. The corpus knows prior decisions, known pitfalls, and whether the thing is already built."
     "Prefer structured primitives over text munging: `view.ls`/`view.tree`/`view.cat` for the filesystem (polars frames, pre-imported), `fff.grep`/`fff.find` for search, and a CLI's JSON mode (`gh --json`, `cargo metadata`, `nix --json`) parsed with `.json()`/`.jsonl()`/`.df()` on the `sh` Output, never awk/sed/string splitting. ONE command per `sh()` call; combine results in Python. Return tabular answers as polars DataFrames."
     "Complete every task fully and autonomously. Never ask for confirmation or say you *will* do something: do it now and report what you did. You are not done until tests pass and your commits are pushed directly to `origin/main`. Pushing to `main` without waiting for CI is the normal case; open a PR and block on checks only when explicitly asked."
+    "Admin and force merges are gated on a fresh local build (postmortem ENG-2391, an agent force-landed a red PR): `gh pr merge --admin`, `--force`, or any merge that bypasses required checks is allowed ONLY immediately after a full local build and test run that you ran yourself on the EXACT head SHA being merged, and that passed. Cite the command and its passing output in the message announcing the merge. If the local run fails or you cannot run it, fix the failure or wait for CI; never force-land a red or unverified PR."
     "Never silently change design or scope. When the planned approach stops fitting, stop and surface it, citing what changed; bypassing an abstraction, swapping an API, or relaxing an error to a warning is a decision the user owns, because a reviewer would question it."
     "A denied tool call or guard message is an instruction, not an obstacle. Read it and use the prescribed alternative; never bypass a guard with sed/python rewrites or by disabling the sandbox. If no alternative exists, report the blocker."
     "Squash merges rewrite history: rebasing a stacked branch directly onto `origin/main` replays the parent's already-merged commits and manufactures phantom conflicts. Instead fetch origin, read the parent base with `git cat-file -p refs/branch-metadata/<branch> | jq -r .parentBranchRevision`, then `git rebase --onto origin/main <parentBranchRevision> <branch>`."
@@ -228,6 +229,14 @@ let
   #     .claude/settings.json) on purpose: project hooks only load for
   #     sessions started inside that project, which is exactly the bypass the
   #     guard closes (ENG-2692).
+  #   permissions.ask `gh pr merge --admin`/`--force` (ENG-2688, postmortem
+  #     ENG-2391): a check-bypassing merge must pause for confirmation so the
+  #     local-build gate in the appended system prompt gets applied, not
+  #     skimmed. Ask rules (unlike deny) are not enforced under the baked
+  #     `--dangerously-skip-permissions`, so under the default posture the
+  #     prompt rule is the practical gate and this rule covers consumers who
+  #     turn the flag off; deny would be wrong here because an admin merge
+  #     after a passing local build on the head SHA is explicitly allowed.
   #   permissions.deny WebSearch/WebFetch (only while the exa MCP server is in
   #     the baked `mcpServers`): one web surface, not two. Exa's
   #     web_search_exa/web_fetch_exa cover both built-ins, so denying the
@@ -409,6 +418,18 @@ let
   settingsDefaults = ix.deepMerge.rhs extraSettings (
     {
       cleanupPeriodDays = 365;
+      permissions = {
+        ask = [
+          "Bash(gh pr merge*--admin*)"
+          "Bash(gh pr merge*--force*)"
+        ];
+      }
+      // lib.optionalAttrs (mcpServers ? exa) {
+        deny = [
+          "WebSearch"
+          "WebFetch"
+        ];
+      };
       hooks = {
         PreToolUse = lib.optional (primaryCheckouts != [ ]) {
           matcher = "Edit|MultiEdit|Write|NotebookEdit";
@@ -442,12 +463,6 @@ let
     }
     // lib.optionalAttrs dangerouslySkipPermissions {
       skipDangerousModePermissionPrompt = true;
-    }
-    // lib.optionalAttrs (mcpServers ? exa) {
-      permissions.deny = [
-        "WebSearch"
-        "WebFetch"
-      ];
     }
   );
   settingsDefaultsFile =
