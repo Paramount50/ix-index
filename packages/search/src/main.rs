@@ -210,7 +210,8 @@ struct SemanticArgs {
     #[arg(short = 'c', long)]
     content: bool,
 
-    /// Synthesize an answer from the results instead of listing them.
+    /// Synthesize an answer from the results instead of listing them. `[n]`
+    /// citations in the answer reference the numbered source list under it.
     #[arg(short = 'a', long)]
     answer: bool,
 

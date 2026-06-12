@@ -13,9 +13,11 @@
 //!   not a reason to drop them).
 //! - **Web** results pass through only when the caller asked for them.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 use mixedbread::{Filter, SortBy};
+use regex::Regex;
 use source_meta::{Source, keys};
 
 use crate::backend::{GrepOptions, SearchHit, SearchOptions, Store};
@@ -131,9 +133,14 @@ pub fn hits_to_json(hits: &[DisplayHit]) -> serde_json::Result<String> {
 /// A question-answering result projected for display.
 #[derive(Debug, Clone)]
 pub struct AnswerView {
-    /// The synthesized answer.
+    /// The synthesized answer. The backend's raw `<cite i="N"/>` markers
+    /// (indices into its own over-fetched source list) are rewritten to `[n]`,
+    /// where `n` is a 0-based index into `sources`; a marker whose source the
+    /// projection excludes (or that cites no real source) is dropped, so every
+    /// surviving citation resolves against `sources`.
     pub answer: String,
-    /// Sources, filtered and mapped like search hits.
+    /// Sources, filtered and mapped like search hits. Cited sources are always
+    /// present, even past the `top_k` display cap.
     pub sources: Vec<DisplayHit>,
 }
 
@@ -242,6 +249,10 @@ pub async fn recent(
 
 /// Ask a question against `store_name` (and optionally the web store).
 ///
+/// The answer's citation markers are remapped from the backend's raw source
+/// list onto the projected `sources` (see [`AnswerView::answer`]), so a
+/// consumer can always resolve `[n]` against the returned list.
+///
 /// # Errors
 /// Returns an error if the backend request fails.
 #[allow(
@@ -263,17 +274,84 @@ pub async fn ask(
     let answer = store
         .ask(&stores, query, overfetch(top_k), options, filters)
         .await?;
-    Ok(AnswerView {
-        answer: answer.answer,
-        sources: project(
-            manifest,
-            answer.sources,
-            include_web,
-            top_k,
-            code_scope,
-            RenderMode::Full,
-        ),
-    })
+    // Project each raw source individually, preserving its raw position: the
+    // answer's citation markers index the backend's over-fetched list, so the
+    // projection must remember where every display came from before the list
+    // is filtered and capped, or the indices dangle.
+    let local = manifest.hashes();
+    let displays: Vec<Option<DisplayHit>> = answer
+        .sources
+        .into_iter()
+        .map(|hit| display_hit(manifest, &local, hit, include_web, code_scope))
+        .collect();
+    Ok(align_citations(&answer.answer, displays, top_k))
+}
+
+/// The backend's citation marker: `<cite i="N"/>`, `N` a 0-based index into
+/// the raw source list the question-answering call returned.
+static CITE_MARKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"<cite\s+i="(\d+)"\s*/>"#).expect("static citation pattern compiles")
+});
+
+/// Rewrite an answer's citation markers against the projected source list.
+///
+/// `displays` is the per-raw-index projection of the backend's sources
+/// (`None` where the projection's source rules exclude a hit). The first
+/// `top_k` surviving hits form the displayed list, mirroring [`project`]'s
+/// cap; a citation of a hit past the cap appends that hit so the citation
+/// still resolves, and a citation of an excluded or nonexistent source is
+/// dropped from the text.
+fn align_citations(
+    answer: &str,
+    mut displays: Vec<Option<DisplayHit>>,
+    top_k: usize,
+) -> AnswerView {
+    use std::fmt::Write as _;
+
+    // The displayed list starts as the first `top_k` projected hits, each
+    // remembering the raw index it came from.
+    let mut sources: Vec<DisplayHit> = Vec::new();
+    let mut position: HashMap<usize, usize> = HashMap::new();
+    for (raw, slot) in displays.iter_mut().enumerate() {
+        if sources.len() >= top_k {
+            break;
+        }
+        if let Some(display) = slot.take() {
+            position.insert(raw, sources.len());
+            sources.push(display);
+        }
+    }
+
+    let mut rewritten = String::with_capacity(answer.len());
+    let mut tail = 0;
+    for captures in CITE_MARKER.captures_iter(answer) {
+        let marker = captures.get(0).expect("regex match has a whole match");
+        rewritten.push_str(&answer[tail..marker.start()]);
+        tail = marker.end();
+        // A non-parsing index (absurdly large digits) cites nothing real, so
+        // it is dropped like an out-of-range one.
+        let Ok(raw) = captures[1].parse::<usize>() else {
+            continue;
+        };
+        let projected = position.get(&raw).copied().or_else(|| {
+            // Cited but not displayed: a hit past the `top_k` cap. Append it so
+            // the citation resolves; an excluded (`None`) or out-of-range index
+            // stays unresolved and the marker is dropped.
+            let display = displays.get_mut(raw).and_then(Option::take)?;
+            position.insert(raw, sources.len());
+            sources.push(display);
+            Some(sources.len() - 1)
+        });
+        if let Some(index) = projected {
+            write!(rewritten, "[{index}]").expect("writing to a String cannot fail");
+        }
+    }
+    rewritten.push_str(&answer[tail..]);
+
+    AnswerView {
+        answer: rewritten,
+        sources,
+    }
 }
 
 fn store_identifiers(store_name: &str, include_web: bool) -> Vec<String> {
@@ -290,6 +368,56 @@ fn overfetch(top_k: usize) -> usize {
     top_k.saturating_mul(4).max(top_k.saturating_add(10))
 }
 
+/// Project one backend hit into its display form, or `None` when the
+/// projection's source rules exclude it: a web hit the caller did not ask
+/// for, or worktree-exact code whose hash is not in this checkout's manifest.
+///
+/// `local` is the manifest's hash set, computed once by the caller so a long
+/// hit list does not rebuild it per hit.
+fn display_hit(
+    manifest: &Manifest,
+    local: &HashSet<&str>,
+    hit: SearchHit,
+    include_web: bool,
+    code_scope: CodeScope,
+) -> Option<DisplayHit> {
+    let source = hit.source.clone();
+    if source.is_web() {
+        if !include_web {
+            return None;
+        }
+        let label = hit.path.clone().unwrap_or_else(|| "(web)".to_owned());
+        let mut display = DisplayHit::from_hit(label, hit);
+        // Web chunks report line metadata that is meaningless for a page;
+        // keep the established shape of web hits line-free.
+        display.start_line = None;
+        display.num_lines = None;
+        Some(display)
+    } else if source.is_code() {
+        let in_manifest = hit.hash.as_deref().is_some_and(|hash| local.contains(hash));
+        // Worktree-exact keeps only this checkout's code; a server-filtered
+        // scope (a repo / all-repos query) trusts the backend filter.
+        if code_scope == CodeScope::WorktreeExact && !in_manifest {
+            return None;
+        }
+        let label = hit
+            .hash
+            .as_deref()
+            .and_then(|hash| manifest.path_for_hash(hash))
+            .map(str::to_owned)
+            .or_else(|| hit.path.clone())
+            .or_else(|| hit.hash.clone())
+            .unwrap_or_default();
+        Some(DisplayHit::from_hit(label, hit))
+    } else {
+        // Any other tag (slack, linear, claude_history, ...) is a record
+        // source: no checkout to scope against, so the server-side metadata
+        // filter is authoritative and the record passes through.
+        let label = hit.path.clone().unwrap_or_default();
+        Some(DisplayHit::from_hit(label, hit))
+    }
+}
+
 fn project(
     manifest: &Manifest,
     hits: Vec<SearchHit>,
@@ -298,52 +426,20 @@ fn project(
     code_scope: CodeScope,
     mode: RenderMode,
 ) -> Vec<DisplayHit> {
-    let local = manifest.hashes();
     // Compact mode collapses repeated chunks of one document: the raw top-k is
     // often dominated by overlapping chunks of a single file. Hits arrive
     // relevance-sorted (the reranker's order), so the first chunk seen for a
     // document is its best-scoring one; later chunks are dropped and the list
     // refills from the overfetch buffer.
+    let local = manifest.hashes();
     let mut seen: HashSet<String> = HashSet::new();
     let mut out = Vec::with_capacity(top_k);
     for hit in hits {
         if out.len() >= top_k {
             break;
         }
-        let source = hit.source.clone();
-        let display = if source.is_web() {
-            if !include_web {
-                continue;
-            }
-            let label = hit.path.clone().unwrap_or_else(|| "(web)".to_owned());
-            let mut display = DisplayHit::from_hit(label, hit);
-            // Web chunks report line metadata that is meaningless for a page;
-            // keep the established shape of web hits line-free.
-            display.start_line = None;
-            display.num_lines = None;
-            display
-        } else if source.is_code() {
-            let in_manifest = hit.hash.as_deref().is_some_and(|hash| local.contains(hash));
-            // Worktree-exact keeps only this checkout's code; a server-filtered
-            // scope (a repo / all-repos query) trusts the backend filter.
-            if code_scope == CodeScope::WorktreeExact && !in_manifest {
-                continue;
-            }
-            let label = hit
-                .hash
-                .as_deref()
-                .and_then(|hash| manifest.path_for_hash(hash))
-                .map(str::to_owned)
-                .or_else(|| hit.path.clone())
-                .or_else(|| hit.hash.clone())
-                .unwrap_or_default();
-            DisplayHit::from_hit(label, hit)
-        } else {
-            // Any other tag (slack, linear, claude_history, ...) is a record
-            // source: no checkout to scope against, so the server-side metadata
-            // filter is authoritative and the record passes through.
-            let label = hit.path.clone().unwrap_or_default();
-            DisplayHit::from_hit(label, hit)
+        let Some(display) = display_hit(manifest, &local, hit, include_web, code_scope) else {
+            continue;
         };
         if mode == RenderMode::Compact {
             if !seen.insert(document_key(&display)) {
@@ -382,7 +478,7 @@ fn truncate_snippet(mut hit: DisplayHit, max_chars: usize) -> DisplayHit {
 mod tests {
     use source_meta::{Document, Source};
 
-    use super::{CodeScope, RenderMode, grep, recent, semantic};
+    use super::{CodeScope, DisplayHit, RenderMode, align_citations, ask, grep, recent, semantic};
     use crate::backend::{GrepOptions, GrepTargets, MemoryStore, SearchOptions, Store};
     use crate::content::ContentHash;
     use crate::manifest::{FileEntry, Manifest};
@@ -715,6 +811,81 @@ mod tests {
             .expect("recent windowed");
         let stamps: Vec<i64> = windowed.iter().filter_map(|hit| hit.timestamp).collect();
         assert_eq!(stamps, vec![3_000, 2_000]);
+    }
+
+    #[tokio::test]
+    async fn answer_citations_reference_the_projected_list() {
+        let store = MemoryStore::new();
+        put_history(&store, "id:a", "a", "needle alpha", 1).await;
+        put_history(&store, "id:b", "b", "needle beta", 2).await;
+        put_history(&store, "id:c", "c", "needle gamma", 3).await;
+
+        // The regression: `top_k = 1` caps the displayed list below the raw
+        // source count, while the backend's answer cites every raw source.
+        // Without remapping, the second and third markers would index past
+        // (or at the wrong entry of) the one projected hit.
+        let view = ask(
+            &store,
+            "s",
+            &Manifest::default(),
+            "needle",
+            1,
+            opts(),
+            false,
+            None,
+            CodeScope::WorktreeExact,
+        )
+        .await
+        .expect("ask");
+
+        // Raw markers are gone, rewritten onto the projected list in citation
+        // order: the kept hit first, then the cited-but-truncated ones appended.
+        assert!(!view.answer.contains("<cite"), "{}", view.answer);
+        assert!(view.answer.ends_with("[0][1][2]"), "{}", view.answer);
+        assert_eq!(view.sources.len(), 3, "cited sources survive the cap");
+        let mut ids: Vec<&str> = view
+            .sources
+            .iter()
+            .filter_map(|hit| hit.external_id.as_deref())
+            .collect();
+        ids.sort_unstable();
+        assert_eq!(ids, vec!["id:a", "id:b", "id:c"]);
+    }
+
+    /// A minimal display hit for exercising [`align_citations`] directly.
+    fn cited(label: &str) -> DisplayHit {
+        DisplayHit {
+            label: label.to_owned(),
+            source: Source::new("claude_history"),
+            start_line: None,
+            num_lines: None,
+            score: 0.5,
+            text: String::new(),
+            timestamp: None,
+            user: None,
+            host: None,
+            session_id: None,
+            external_id: None,
+            url: None,
+            repo: None,
+            project: None,
+        }
+    }
+
+    #[test]
+    fn dangling_citations_are_dropped_and_surviving_ones_renumbered() {
+        // Raw sources: index 1 was excluded by the projection (`None`), index 3
+        // is past the `top_k = 2` display cap, and index 9 does not exist.
+        let displays = vec![Some(cited("a")), None, Some(cited("b")), Some(cited("c"))];
+        let answer = r#"x <cite i="0"/> y <cite i="3"/> z <cite i="1"/> w <cite i="9"/>."#;
+
+        let view = align_citations(answer, displays, 2);
+
+        // 0 keeps its slot, 3 is appended past the cap and renumbered, the
+        // excluded and nonexistent citations are dropped from the text.
+        assert_eq!(view.answer, "x [0] y [2] z  w .");
+        let labels: Vec<&str> = view.sources.iter().map(|hit| hit.label.as_str()).collect();
+        assert_eq!(labels, vec!["a", "b", "c"]);
     }
 
     fn grep_opts(case_sensitive: bool) -> GrepOptions {

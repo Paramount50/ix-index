@@ -473,11 +473,17 @@ impl Store for MemoryStore {
         options: SearchOptions,
         filters: Option<&Filter>,
     ) -> Result<Answer> {
+        use std::fmt::Write as _;
+
         let sources = self.search(stores, query, top_k, options, filters).await?;
-        Ok(Answer {
-            answer: "mock answer from MemoryStore".to_owned(),
-            sources,
-        })
+        // Cite every source in raw order, the way the production backend
+        // emits `<cite i="N"/>` markers indexing its own source list, so the
+        // citation-remapping projection is exercised offline.
+        let mut answer = "mock answer from MemoryStore ".to_owned();
+        for index in 0..sources.len() {
+            write!(answer, "<cite i=\"{index}\"/>").expect("writing to a String cannot fail");
+        }
+        Ok(Answer { answer, sources })
     }
 
     async fn store_status(&self, _store: &str) -> Result<StoreStatus> {
