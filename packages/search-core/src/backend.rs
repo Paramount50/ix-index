@@ -277,6 +277,20 @@ pub trait Store {
     /// # Errors
     /// Returns an error if the request fails or the response cannot be decoded.
     fn store_status(&self, store: &str) -> impl Future<Output = Result<StoreStatus>> + Send;
+
+    /// Fetch one file's indexing status by `external_id`, so a caller can wait
+    /// on exactly the files it uploaded instead of gating on the store-wide
+    /// counts [`Store::store_status`] reports (the store is shared across
+    /// sources and writers, so an unrelated backlog must not block a wait).
+    /// `Ok(None)` when the store holds no such file.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or the response cannot be decoded.
+    fn file_status(
+        &self,
+        store: &str,
+        external_id: &str,
+    ) -> impl Future<Output = Result<Option<mixedbread::FileStatus>>> + Send;
 }
 
 /// In-memory [`Store`] for tests.
@@ -510,6 +524,19 @@ impl Store for MemoryStore {
             pending: 0,
             in_progress: 0,
         })
+    }
+
+    async fn file_status(
+        &self,
+        _store: &str,
+        external_id: &str,
+    ) -> Result<Option<mixedbread::FileStatus>> {
+        // MemoryStore embeds synchronously: a stored file is already searchable.
+        Ok(self
+            .lock()
+            .files
+            .contains_key(external_id)
+            .then_some(mixedbread::FileStatus::Completed))
     }
 }
 

@@ -177,6 +177,14 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
 
         let skipped = documents.len() - to_upload.len();
 
+        // The embedding wait below is gated on exactly these ids, never the
+        // store-wide pending counts: the store is shared by every source, so
+        // another source's backlog must not block this source's pass (ENG-2699).
+        let uploaded_ids: Vec<String> = to_upload
+            .iter()
+            .map(|document| document.external_id.clone())
+            .collect();
+
         let results: Vec<Result<()>> = stream::iter(to_upload)
             .map(|document| async move {
                 self.store
@@ -196,7 +204,7 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
         }
 
         if uploaded > 0 {
-            wait_until_indexed(self.store, self.name, self.index_timeout, |_| {})
+            wait_until_indexed(self.store, self.name, &uploaded_ids, self.index_timeout, |_| {})
                 .await
                 .context(StoreSnafu)?;
         }
@@ -265,6 +273,13 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
             .await
             .context(StoreSnafu)?;
 
+        // As in `sync_source`: wait on this delta's own ids, not the shared
+        // store's aggregate backlog (ENG-2699).
+        let upserted_ids: Vec<String> = upserts
+            .iter()
+            .map(|document| document.external_id.clone())
+            .collect();
+
         let results: Vec<Result<()>> = stream::iter(upserts)
             .map(|document| async move {
                 self.store
@@ -282,7 +297,7 @@ impl<S: Store + Sync> MixedbreadReconciler<'_, S> {
             uploaded += 1;
         }
         if uploaded > 0 {
-            wait_until_indexed(self.store, self.name, self.index_timeout, |_| {})
+            wait_until_indexed(self.store, self.name, &upserted_ids, self.index_timeout, |_| {})
                 .await
                 .context(StoreSnafu)?;
         }
@@ -612,6 +627,13 @@ mod tests {
         async fn store_status(&self, store: &str) -> search_core::Result<search_core::StoreStatus> {
             self.0.store_status(store).await
         }
+        async fn file_status(
+            &self,
+            store: &str,
+            external_id: &str,
+        ) -> search_core::Result<Option<search_core::FileStatus>> {
+            self.0.file_status(store, external_id).await
+        }
     }
 
     #[tokio::test]
@@ -648,6 +670,126 @@ mod tests {
             2,
             "nothing may be uploaded or deleted off a leaked listing"
         );
+    }
+
+    /// A store whose aggregate counts report a permanent backlog (another
+    /// source's documents, forever embedding) while every file actually stored
+    /// is already settled. Old behavior gated each source's post-upload wait on
+    /// the aggregate, so this store would stall every reconcile until its full
+    /// `index_timeout` elapsed.
+    struct BackloggedStore(MemoryStore);
+
+    impl search_core::Store for BackloggedStore {
+        async fn ensure_store(&self, name: &str) -> search_core::Result<()> {
+            self.0.ensure_store(name).await
+        }
+        async fn list_external_ids(
+            &self,
+            store: &str,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<std::collections::HashSet<String>> {
+            self.0.list_external_ids(store, filters).await
+        }
+        async fn list_records(
+            &self,
+            store: &str,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<Vec<search_core::StoredRecord>> {
+            self.0.list_records(store, filters).await
+        }
+        async fn upload(&self, store: &str, document: Document) -> search_core::Result<()> {
+            self.0.upload(store, document).await
+        }
+        async fn delete(&self, store: &str, external_id: &str) -> search_core::Result<()> {
+            self.0.delete(store, external_id).await
+        }
+        async fn search(
+            &self,
+            stores: &[String],
+            query: &str,
+            top_k: usize,
+            options: search_core::SearchOptions,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<Vec<search_core::SearchHit>> {
+            self.0.search(stores, query, top_k, options, filters).await
+        }
+        async fn grep(
+            &self,
+            stores: &[String],
+            pattern: &str,
+            top_k: usize,
+            options: search_core::GrepOptions,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<Vec<search_core::SearchHit>> {
+            self.0.grep(stores, pattern, top_k, options, filters).await
+        }
+        async fn list_chunks(
+            &self,
+            stores: &[String],
+            top_k: usize,
+            filters: Option<&search_core::Filter>,
+            sort_by: Option<&search_core::SortBy>,
+        ) -> search_core::Result<Vec<search_core::SearchHit>> {
+            self.0.list_chunks(stores, top_k, filters, sort_by).await
+        }
+        async fn ask(
+            &self,
+            stores: &[String],
+            query: &str,
+            top_k: usize,
+            options: search_core::SearchOptions,
+            filters: Option<&search_core::Filter>,
+        ) -> search_core::Result<search_core::Answer> {
+            self.0.ask(stores, query, top_k, options, filters).await
+        }
+        async fn store_status(&self, _store: &str) -> search_core::Result<search_core::StoreStatus> {
+            Ok(search_core::StoreStatus {
+                pending: 999,
+                in_progress: 0,
+            })
+        }
+        async fn file_status(
+            &self,
+            store: &str,
+            external_id: &str,
+        ) -> search_core::Result<Option<search_core::FileStatus>> {
+            self.0.file_status(store, external_id).await
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unrelated_backlog_does_not_stall_this_sources_wait() {
+        // ENG-2699: the post-upload embedding wait must be gated on the files
+        // THIS reconcile uploaded, not the store-wide pending counts. With a
+        // permanent 999-file aggregate backlog and a deliberately long
+        // index_timeout, the old store-wide gate would block for the full
+        // timeout; the per-file gate returns as soon as our two uploads settle.
+        let store = BackloggedStore(MemoryStore::new());
+        let sink = MixedbreadReconciler {
+            store: &store,
+            name: "s",
+            index_timeout: Duration::from_mins(1),
+        };
+        let docs = vec![linear_doc("A", "a"), linear_doc("B", "b")];
+
+        let report = tokio::time::timeout(
+            Duration::from_secs(5),
+            sink.reconcile(&Source::new("linear"), &docs),
+        )
+        .await
+        .expect("the wait must not be gated on the unrelated backlog")
+        .expect("reconcile");
+        assert_eq!(report.uploaded, 2);
+
+        // The delta-apply path shares the gate.
+        let apply = tokio::time::timeout(
+            Duration::from_secs(5),
+            sink.apply(vec![linear_doc("A", "a EDITED")], &[]),
+        )
+        .await
+        .expect("apply's wait must not be gated on the unrelated backlog")
+        .expect("apply");
+        assert_eq!(apply.uploaded, 1);
     }
 
     #[tokio::test]

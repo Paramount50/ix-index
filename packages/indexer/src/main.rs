@@ -1153,7 +1153,7 @@ async fn index_code(
     .await
     .with_context(|| format!("[{label}] code sync"))?;
     if report.uploaded > 0 {
-        search_core::wait_until_indexed(store, name, INDEX_TIMEOUT, |_| {})
+        search_core::wait_until_indexed(store, name, &report.uploaded_ids, INDEX_TIMEOUT, |_| {})
             .await
             .with_context(|| format!("[{label}] waiting for indexing"))?;
     }

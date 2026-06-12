@@ -110,7 +110,14 @@ async fn prepare(
         )
         .await?;
         if report.uploaded > 0 {
-            wait_until_indexed(store, query.store_name, query.index_timeout, on_poll).await?;
+            wait_until_indexed(
+                store,
+                query.store_name,
+                &report.uploaded_ids,
+                query.index_timeout,
+                on_poll,
+            )
+            .await?;
         }
         // Record success once the uploads are accepted, not once embedding
         // finishes. Upload acceptance is the durable fact the gate cares about

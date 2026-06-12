@@ -3,8 +3,8 @@
 //! it can back a search tool or any other consumer.
 //!
 //! Endpoints covered: store create/get (`/v1/stores`), the two-step file upload
-//! (`/v1/files` then `/v1/stores/{store}/files`), file listing and deletion,
-//! search (`/v1/stores/search`), regex grep (`/v1/stores/grep`),
+//! (`/v1/files` then `/v1/stores/{store}/files`), file listing, per-file status,
+//! and deletion, search (`/v1/stores/search`), regex grep (`/v1/stores/grep`),
 //! metadata-only chunk listing (`/v1/stores/list-chunks`),
 //! question-answering (`/v1/stores/question-answering`), and query
 //! enhancement (`/v1/stores/queries/enhance`).
@@ -457,6 +457,38 @@ pub struct StoreStatus {
     pub in_progress: u64,
 }
 
+/// One store file's indexing status: the `status` field of the store-file
+/// object (`GET /v1/stores/{store}/files/{id}`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileStatus {
+    /// Queued but not yet processed.
+    Pending,
+    /// Currently being parsed and embedded.
+    InProgress,
+    /// Embedded and searchable.
+    Completed,
+    /// Processing failed; the store retries on its own schedule, not the
+    /// caller's.
+    Failed,
+    /// Processing was cancelled.
+    Cancelled,
+    /// A status string this client does not know. [`FileStatus::is_settled`]
+    /// treats it as settled so a new server-side state can never wedge a
+    /// caller's wait loop; the wait's own timeout still bounds the worst case.
+    #[serde(other)]
+    Unknown,
+}
+
+impl FileStatus {
+    /// Whether the store has stopped working on this file (embedded, failed,
+    /// cancelled, or unrecognized), i.e. polling longer cannot change anything.
+    #[must_use]
+    pub const fn is_settled(self) -> bool {
+        !matches!(self, Self::Pending | Self::InProgress)
+    }
+}
+
 /// Async client bound to a base URL and API key.
 #[derive(Debug, Clone)]
 pub struct Client {
@@ -675,6 +707,24 @@ impl Client {
             .send_retrying(|| Ok(self.http.post(attach_url.as_str()).json(&attach)))
             .await?;
         expect_ok(resp).await
+    }
+
+    /// Fetch one store file's indexing status by external id (or store file
+    /// id). `Ok(None)` when the store holds no such file.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or cannot be decoded.
+    pub async fn file_status(&self, store: &str, external_id: &str) -> Result<Option<FileStatus>> {
+        let id = utf8_percent_encode(external_id, PATH_SEGMENT);
+        let status_url = self.url(&format!("/v1/stores/{store}/files/{id}"));
+        let resp = self
+            .send_retrying(|| Ok(self.http.get(status_url.as_str())))
+            .await?;
+        if resp.status() == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let object: FileObject = decode(resp).await?;
+        Ok(Some(object.status))
     }
 
     /// Delete one file by external id (or store file id).
@@ -1044,6 +1094,12 @@ struct CreatedFile {
     id: String,
 }
 
+/// The slice of the store-file object [`Client::file_status`] reads.
+#[derive(Deserialize)]
+struct FileObject {
+    status: FileStatus,
+}
+
 #[derive(serde::Serialize)]
 struct SearchRequest<'a> {
     query: &'a str,
@@ -1198,8 +1254,8 @@ mod tests {
 
     use super::{
         Agentic, AgenticConfig, BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL,
-        EnhancedQuery, Error, FileIds, HttpClient, ListChunksRequest, ListRequest, MAX_RETRIES,
-        RawChunk, Rerank, SearchOptions, SearchRequest, SortBy, backoff,
+        EnhancedQuery, Error, FileIds, FileStatus, HttpClient, ListChunksRequest, ListRequest,
+        MAX_RETRIES, RawChunk, Rerank, SearchOptions, SearchRequest, SortBy, backoff,
     };
     use crate::{Filter, Operator};
 
@@ -1663,6 +1719,53 @@ mod tests {
             Some("github:indexable-inc/index"),
             "the router must decode the segment back to the original id"
         );
+    }
+
+    #[tokio::test]
+    async fn file_status_reads_the_status_field_and_maps_404_to_none() {
+        // Pins the per-file status wire contract: GET the store-file object,
+        // read its `status` string (including one this client has never heard
+        // of), and fold a 404 into `None` rather than an error — a file deleted
+        // out from under a waiting caller is settled, not a failure.
+        let app = Router::new().route(
+            "/v1/stores/{store}/files/{file}",
+            axum::routing::get(
+                |axum::extract::Path((_store, file)): axum::extract::Path<(String, String)>| async move {
+                    match file.as_str() {
+                        "queued" => (StatusCode::OK, r#"{"status":"pending"}"#),
+                        "embedding" => (StatusCode::OK, r#"{"status":"in_progress"}"#),
+                        "done" => (StatusCode::OK, r#"{"status":"completed"}"#),
+                        "novel" => (StatusCode::OK, r#"{"status":"some_future_state"}"#),
+                        _ => (StatusCode::NOT_FOUND, r#"{"error":"not found"}"#),
+                    }
+                },
+            ),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        let status = |id: &'static str| client.file_status("s", id);
+        assert_eq!(status("queued").await.expect("get"), Some(FileStatus::Pending));
+        assert_eq!(
+            status("embedding").await.expect("get"),
+            Some(FileStatus::InProgress)
+        );
+        assert_eq!(status("done").await.expect("get"), Some(FileStatus::Completed));
+        assert_eq!(status("novel").await.expect("get"), Some(FileStatus::Unknown));
+        assert_eq!(status("gone").await.expect("get"), None);
+
+        // The waiting contract: only the two live states keep a poll loop going.
+        assert!(!FileStatus::Pending.is_settled());
+        assert!(!FileStatus::InProgress.is_settled());
+        assert!(FileStatus::Completed.is_settled());
+        assert!(FileStatus::Failed.is_settled());
+        assert!(FileStatus::Unknown.is_settled());
     }
 
     #[tokio::test]

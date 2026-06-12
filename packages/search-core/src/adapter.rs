@@ -274,4 +274,15 @@ impl Store for MixedbreadStore {
             in_progress: status.in_progress,
         })
     }
+
+    async fn file_status(
+        &self,
+        store: &str,
+        external_id: &str,
+    ) -> Result<Option<mixedbread::FileStatus>> {
+        self.client
+            .file_status(store, external_id)
+            .await
+            .context(BackendSnafu)
+    }
 }
