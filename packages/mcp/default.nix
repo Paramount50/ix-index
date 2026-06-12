@@ -1459,13 +1459,17 @@ let
         assert w.status == "error", w.status
         assert "asyncio.to_thread" in w.error and "Traceback" not in w.error, w.error
 
-        # A cell that prints but returns no Result fails the Result contract, and
-        # the error now shows what it printed (stdout never reaches the model), so
-        # a printing agent gets an actionable nudge instead of a silent dead end.
+        # A print-only cell (last statement is None) no longer hard-fails the
+        # Result contract: it auto-returns Result.ok carrying the captured stdout,
+        # so what it printed reaches the model instead of dying with an error.
         p = await run("print('hello-from-stdout')", budget=1.0, name="printed")
-        assert p.status == "error", p.status
-        assert "printed to stdout" in p.error, p.error
-        assert "hello-from-stdout" in p.error, p.error
+        assert p.status == "done", (p.status, p.error)
+        assert isinstance(p.result, runtime.Result), type(p.result)
+        assert "hello-from-stdout" in p.result.llm_result, p.result.llm_result
+        # A silent side-effecting cell auto-oks too (a quiet confirmation).
+        q = await run("x_side_effect = 1", budget=1.0, name="silent")
+        assert q.status == "done", (q.status, q.error)
+        assert "done" in q.result.llm_result, q.result.llm_result
 
         # A bare final value that already renders richly is auto-wrapped in
         # Result.of, so `df` on the last line just works without an explicit Result.

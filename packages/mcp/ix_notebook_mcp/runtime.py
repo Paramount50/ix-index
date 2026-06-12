@@ -233,6 +233,10 @@ class Job:
         # Set by the SIGUSR2 wedge watchdog so _runner can tell its interrupt from
         # a KeyboardInterrupt the user's own code raised.
         self.interrupted_by_watchdog = False
+        # The globals dict this job's code ran in (the shared user namespace, or
+        # a per-session namespace -- see _session_ns). Set by __ix_run so the
+        # bindings snapshot reads the namespace the cell actually wrote to.
+        self._ns: dict | None = None
 
     def _append(self, s: str) -> None:
         """Append output, trimming to the most recent _MAX_OUTPUT_CHARS so a
@@ -438,9 +442,11 @@ class _TextDescriptor:
 class Result:
     """Split a cell's final value into a human view and a model view.
 
-    Every ``python_exec`` cell must END with one of these (the kernel rejects a
-    cell whose last expression is not a Result, so a run always declares what the
-    human sees and what the model gets back). The dashboard renders
+    Every ``python_exec`` cell should END with one of these (the kernel rejects a
+    cell whose last expression is a bare scalar/dict/list; a last statement of
+    None -- a print-only or side-effecting cell -- auto-returns ``Result.ok``
+    with the captured stdout, so a run always declares what the human sees and
+    what the model gets back). The dashboard renders
     ``user_html`` (a rich HTML view for the human watching); the model's tool
     result receives ``llm_result`` (concise text) plus any ``llm_images``. The
     two never cross: the human is not shown the model's text, and the model does
@@ -1038,6 +1044,36 @@ def _stdout_hint(job: "Job") -> str:
     )
 
 
+# Cap on the stdout an auto-returned Result (see _auto_result) hands the model.
+# A chatty print-only cell keeps its most recent slice inline; the full capture
+# stays pageable as jobs['<id>'].output, exactly like any other large output.
+_AUTO_RESULT_CHARS = 20_000
+
+
+def _auto_result(job: "Job") -> "Result":
+    """The Result for a cell that declared none (its last statement evaluated to
+    None: an assignment, a bare ``print()``, a side-effecting call). Instead of
+    failing the Result contract, the run auto-returns ``Result.ok`` carrying the
+    captured stdout, so a print-only cell reports what it printed. An explicit
+    Result stays preferred -- it controls what the human and the model each see
+    -- but a missing one is no longer a hard failure."""
+    printed = job.output
+    if not printed.strip():
+        return Result.ok("done (cell returned no value)")
+    body = printed
+    if len(body) > _AUTO_RESULT_CHARS:
+        body = body[-_AUTO_RESULT_CHARS:] + (
+            f"\n... [stdout clipped to the last {_AUTO_RESULT_CHARS} of "
+            f"{len(printed)} chars; page jobs['{job.id}'].output]"
+        )
+    note = f"✓ done · auto-returned stdout ({len(printed)} chars; prefer an explicit Result)"
+    user = (
+        f'<div class="ix-ok">{_escape_html(note)}</div>'
+        f'<pre class="ix-result">{_ansi_to_html(body)}</pre>'
+    )
+    return Result(user_html=user, llm_result=_strip_ansi(body))
+
+
 def _display_result(result: "Result") -> None:
     """Show one yielded Result to both audiences. The IPython display goes onto
     the running job's captured outputs (the dashboard) and out on iopub (the
@@ -1213,16 +1249,24 @@ async def _runner(job: Job, ns: dict) -> None:
                 # A bare final value that already knows how to render itself (a
                 # DataFrame, a figure, a view.Code, an htpy element) is wrapped
                 # in Result.of, so `df` on the last line just works. Plain
-                # scalars / dicts / None fall through to the contract error below.
+                # scalars / dicts fall through to the contract error below.
                 value = Result.of(value)
+            if value is None:
+                # A cell whose last statement evaluated to None -- an assignment,
+                # a bare print(), a side-effecting call -- is a legitimate run,
+                # not a contract violation: auto-return a quiet ok carrying the
+                # captured stdout, so a print-only cell still reports what it
+                # printed instead of hard-failing. An explicit Result stays
+                # preferred (it controls both views); this is the floor.
+                value = _auto_result(job)
             job._result = value
             if isinstance(value, Result):
                 job.status = "done"
             else:
                 # Enforce the Result contract: a non-yielding cell must END with a
-                # Result (or a value that renders as one) so a run always declares
-                # what the human sees and what the model gets. A bare scalar (or a
-                # side-effecting cell returning None) is a failed run with an
+                # Result (or a value that renders as one, or None -- auto-returned
+                # above) so a run always declares what the human sees and what the
+                # model gets. A bare scalar/dict/list is a failed run with an
                 # instructive message, not a silent pass.
                 job.status = "error"
                 job.error = _RESULT_REQUIRED + _stdout_hint(job)
@@ -1295,10 +1339,11 @@ def _persist_final(job: Job) -> None:
 
 def _cell_bindings(job: Job) -> dict:
     """The live value each of the cell's identifiers is bound to, snapshotted now
-    that the job has finished. Read off the shared user namespace (the same one
-    the code ran in), so the dashboard can show inlay hints and hover values that
-    reflect the actual objects. Best-effort: a failure here just means no hints."""
-    ns = _user_ns if _user_ns is not None else globals()
+    that the job has finished. Read off the namespace the code actually ran in
+    (the job's own -- per-session or shared), so the dashboard can show inlay
+    hints and hover values that reflect the actual objects. Best-effort: a
+    failure here just means no hints."""
+    ns = job._ns if job._ns is not None else _shared_ns()
     try:
         from .introspect import cell_bindings
 
@@ -2271,11 +2316,56 @@ async def _restore_body() -> None:
     print("session restore: " + "; ".join(parts))
 
 
-async def __ix_run(code: str, budget: float = 15.0, name: str | None = None, kind: str = "cell") -> Job:
+# Per-MCP-session namespaces, keyed by the session id the server passes through
+# ``__ix_exec``. One kernel serves every client of the HTTP transport, and with a
+# single shared namespace parallel agents clobber each other's variables (observed
+# in production). Each session therefore gets its own module-level globals dict,
+# created lazily and seeded from the shared read-only area: the runtime surface
+# plus the bundled helpers, i.e. exactly the names ``install()`` captured in
+# ``_baseline_names``. The helper OBJECTS stay shared (jobs/cells/resources are
+# one registry, so the dashboard and cross-session job paging keep working); only
+# the name bindings are per-session, so one session's assignments never shadow
+# another's. Within one session the dict persists across calls -- the kernel's
+# persistent-namespace contract, unchanged. No session id (the stdio transport,
+# replay, the in-process tests) keeps today's single shared namespace, which is
+# also what session checkpoint/restore covers.
+_session_namespaces: dict[str, dict] = {}
+
+
+def _shared_ns() -> dict:
+    return _user_ns if _user_ns is not None else globals()
+
+
+def _session_ns(session: str | None) -> dict:
+    """The globals dict for ``session``: the shared user namespace when no
+    session id is given, else that session's own dict (created on first use)."""
+    if not session:
+        return _shared_ns()
+    ns = _session_namespaces.get(session)
+    if ns is None:
+        shared = _shared_ns()
+        # install() ran: seed exactly the helper surface. A bare runtime where it
+        # did not (one-shot eval paths) falls back to forking the whole shared
+        # namespace, so the session still sees Result and friends.
+        names = _baseline_names or frozenset(shared)
+        ns = {name: shared[name] for name in names if name in shared}
+        _session_namespaces[session] = ns
+    return ns
+
+
+async def __ix_run(
+    code: str,
+    budget: float = 15.0,
+    name: str | None = None,
+    kind: str = "cell",
+    session: str | None = None,
+) -> Job:
     """Run ``code`` as a task; wait up to ``budget`` for it; return the Job either
-    way (done, or still running in the background)."""
-    ns = _user_ns if _user_ns is not None else globals()
+    way (done, or still running in the background). ``session`` selects the
+    namespace the code runs in (see :func:`_session_ns`)."""
+    ns = _session_ns(session)
     job = Job(code, name, budget=budget, kind=kind)
+    job._ns = ns
     jobs[job.id] = job
     job.task = asyncio.ensure_future(_runner(job, ns))
     await asyncio.wait({job.task}, timeout=budget)
@@ -2362,9 +2452,13 @@ def _emit(job: Job) -> None:
             pass
 
 
-async def __ix_exec(code: str, budget: float = 15.0, name: str | None = None) -> None:
-    """The MCP server's per-call entrypoint: run with a budget, emit the summary."""
-    job = await __ix_run(code, budget=budget, name=name)
+async def __ix_exec(
+    code: str, budget: float = 15.0, name: str | None = None, session: str | None = None
+) -> None:
+    """The MCP server's per-call entrypoint: run with a budget, emit the summary.
+    ``session`` is the caller's MCP session id (per-session namespace; None for
+    the shared one)."""
+    job = await __ix_run(code, budget=budget, name=name, session=session)
     _emit(job)
 
 
@@ -2453,7 +2547,7 @@ def _value_icon_svg(*, px: int = 16) -> str:
     )
 
 
-async def __ix_read(target, start=None, end=None) -> "Result":
+async def __ix_read(target, start=None, end=None, session=None) -> "Result":
     """Read a file (or evaluate a kernel value) FOR THE MODEL, quietly.
 
     Returns a Result whose ``llm_result`` is the full text the model receives and
@@ -2461,9 +2555,11 @@ async def __ix_read(target, start=None, end=None) -> "Result":
     the model without flooding the dashboard. ``target`` is read as a file when it
     names an existing file, otherwise evaluated as a Python expression in the user
     namespace (e.g. ``jobs['ab12'].output``, a variable you bound). ``start`` and
-    ``end`` select a 1-based inclusive line range. Backs the ``read`` MCP tool.
+    ``end`` select a 1-based inclusive line range. ``session`` evaluates the
+    expression in that MCP session's namespace (the same one its ``python_exec``
+    cells run in), so a variable bound there resolves. Backs the ``read`` MCP tool.
     """
-    ns = _user_ns if _user_ns is not None else globals()
+    ns = _session_ns(session)
     value = None
     path = _existing_file(target)
     if path is None:

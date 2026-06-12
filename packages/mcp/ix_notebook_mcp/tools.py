@@ -32,10 +32,12 @@ from __future__ import annotations
 import json
 import os
 import threading
+import uuid
+import weakref
 import webbrowser
 from typing import Annotated
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 from pydantic import Field
 
 from . import guide, outputs
@@ -71,6 +73,41 @@ _KERNEL_GUIDE = guide.compose(
 
 
 mcp = FastMCP("ix-mcp")
+
+# One short id per live MCP session, keyed weakly by the session object so an id
+# is stable for a client's whole session and the map never pins a closed one.
+_session_ids: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _session_id(ctx: Context | None) -> str | None:
+    """The kernel-side namespace key for this call's MCP session, or None.
+
+    Only the HTTP transport multiplexes several client sessions onto the one
+    shared kernel, so only there does each session get its own namespace (the
+    kernel runtime keys per-session globals on this id -- see
+    ``runtime._session_ns``). The stdio transport serves exactly one client per
+    process: its state stays in the shared user namespace, which is also what
+    session checkpoint/restore (``serve --session FILE``) covers, so that
+    contract is untouched.
+    """
+    try:
+        if config().transport != "http":
+            return None
+    except RuntimeError:
+        # No config (an embedder driving the tools directly): single client.
+        return None
+    try:
+        session = ctx.session if ctx is not None else None
+    except ValueError:
+        # No request context on this call.
+        session = None
+    if session is None:
+        return None
+    sid = _session_ids.get(session)
+    if sid is None:
+        sid = uuid.uuid4().hex[:8]
+        _session_ids[session] = sid
+    return sid
 
 
 def _first_sentence(text: str) -> str:
@@ -176,6 +213,7 @@ async def python_exec(
     code: Annotated[str, Field(description="Python source to run on the shared kernel")],
     budget: Annotated[float, Field(description="Seconds to wait before backgrounding the run (server-side cap: 120s; larger values are clamped and a notice is appended to the reply)")] = 15.0,
     name: Annotated[str | None, Field(description="Optional label for the job in the dashboard")] = None,
+    ctx: Context | None = None,
 ) -> Content:
     _open_dashboard_once()
     # A foreground budget is how long the run holds the one shared shell channel
@@ -184,7 +222,9 @@ async def python_exec(
     # below so the caller knows to poll the job rather than silently lose the wait.
     cap = config().max_budget
     effective_budget = min(budget, cap)
-    cell_outputs, summary = await current_kernel().python_exec(code, effective_budget, name)
+    cell_outputs, summary = await current_kernel().python_exec(
+        code, effective_budget, name, session=_session_id(ctx)
+    )
     rendered = outputs.to_mcp(cell_outputs)
     if summary is None:
         return rendered
@@ -250,10 +290,12 @@ async def read(
     ],
     start: Annotated[int | None, Field(description="1-based first line to include")] = None,
     end: Annotated[int | None, Field(description="Last line to include (inclusive)")] = None,
+    ctx: Context | None = None,
 ) -> Content:
     _open_dashboard_once()
-    code = f"await __ix_read({target!r}, {start!r}, {end!r})"
-    cell_outputs, summary = await current_kernel().python_exec(code, budget=30.0)
+    sid = _session_id(ctx)
+    code = f"await __ix_read({target!r}, {start!r}, {end!r}, session={sid!r})"
+    cell_outputs, summary = await current_kernel().python_exec(code, budget=30.0, session=sid)
     if summary is not None and summary.get("status") == "error" and summary.get("error"):
         return [outputs.text(summary["error"])]
     rendered = outputs.to_mcp(cell_outputs)

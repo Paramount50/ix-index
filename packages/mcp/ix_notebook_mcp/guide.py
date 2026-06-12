@@ -103,7 +103,10 @@ RESULT_CONTRACT = (
     "results. The kernel rejects a cell that neither ends with nor yields a Result — except that "
     "a bare final value which already renders richly (a polars DataFrame, a matplotlib figure, a "
     "view/fff render, an htpy element) is auto-wrapped in `Result.of` for you, so `df` on the "
-    "last line just works; a plain scalar, dict, list, or None still needs an explicit Result."
+    "last line just works, and a cell whose last statement is None (an assignment, a bare "
+    "`print(...)`, a side-effecting call) auto-returns `Result.ok` carrying its captured stdout "
+    "instead of failing — still prefer an explicit Result, which controls both views. A plain "
+    "scalar, dict, or list still needs an explicit Result."
 )
 
 # --- kernel guide only ---
