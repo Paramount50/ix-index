@@ -733,6 +733,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "astlog"
+version = "0.1.0"
+dependencies = [
+ "astlog-core",
+ "clap",
+ "serde_json",
+ "snafu",
+]
+
+[[package]]
+name = "astlog-core"
+version = "0.1.0"
+dependencies = [
+ "ast-merge-langs",
+ "ignore",
+ "similar",
+ "snafu",
+ "tempfile",
+ "tree-sitter",
+]
+
+[[package]]
+name = "astlog-py"
+version = "0.1.0"
+dependencies = [
+ "astlog-core",
+ "pyo3",
+]
+
+[[package]]
 name = "async-lock"
 version = "3.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,0 +1,481 @@
+//! The rule DSL: S-expressions lowered into a checked [`Program`].
+//!
+//! Three top-level forms:
+//!
+//! ```text
+//! (rule (name vars...) body-atom...)
+//! (rewrite name body-atom... (replace var "template"))
+//! ```
+//!
+//! Body atoms are either `(match <lang> "<tree-sitter query>")`, which binds
+//! every `@capture` in the query as a variable, or an application
+//! `(name args...)` of a builtin or a rule-defined relation. Atom arguments
+//! are variables (bare atoms) or text literals (strings). Templates splice
+//! bound variables with `{var}`; `{{` and `}}` escape literal braces.
+
+use std::collections::{HashMap, HashSet};
+
+use ast_merge_langs::Lang;
+
+use crate::error::{ArityMismatchSnafu, DslSnafu, Error, UnknownLangNameSnafu, UnknownRelationSnafu};
+use crate::sexpr::{self, Sexpr};
+
+/// Builtin atom names with their arity. Resolved before relation lookup, so a
+/// rule head may not shadow them (rejected at load).
+pub const BUILTINS: &[(&str, usize)] = &[
+    ("ancestor", 2),
+    ("parent", 2),
+    ("text", 2),
+    ("kind", 2),
+    ("same-text", 2),
+    ("same-file", 2),
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Term {
+    Var(String),
+    Text(String),
+}
+
+#[derive(Debug)]
+pub struct AppAtom {
+    pub name: String,
+    pub args: Vec<Term>,
+    pub line: usize,
+}
+
+#[derive(Debug)]
+pub struct MatchAtom {
+    pub lang: Lang,
+    pub query: String,
+    pub line: usize,
+}
+
+#[derive(Debug)]
+pub enum BodyAtom {
+    Match(MatchAtom),
+    App(AppAtom),
+}
+
+#[derive(Debug)]
+pub struct Rule {
+    pub name: String,
+    pub head_vars: Vec<String>,
+    pub body: Vec<BodyAtom>,
+    pub line: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Segment {
+    Lit(String),
+    Var(String),
+}
+
+#[derive(Debug)]
+pub struct Template {
+    pub segments: Vec<Segment>,
+    pub line: usize,
+}
+
+#[derive(Debug)]
+pub struct Rewrite {
+    pub name: String,
+    pub body: Vec<BodyAtom>,
+    pub target: String,
+    pub template: Template,
+    pub line: usize,
+}
+
+#[derive(Debug)]
+pub struct Program {
+    pub rules: Vec<Rule>,
+    pub rewrites: Vec<Rewrite>,
+}
+
+impl Program {
+    /// Parse and check a rules file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Dsl`] for malformed forms, [`Error::UnknownLangName`]
+    /// for an unrecognized `match` language, [`Error::UnknownRelation`] /
+    /// [`Error::ArityMismatch`] for applications that resolve to nothing, and
+    /// [`Error::TemplateVar`] when a rewrite template references a variable
+    /// its body does not mention.
+    pub fn parse(src: &str) -> Result<Self, Error> {
+        let forms = sexpr::parse(src)?;
+        let mut rules = Vec::new();
+        let mut rewrites = Vec::new();
+        for form in forms {
+            let (head, items) = expect_list(&form, "top-level form")?;
+            match head {
+                "rule" => rules.push(parse_rule(items, form.line())?),
+                "rewrite" => rewrites.push(parse_rewrite(items, form.line())?),
+                other => {
+                    return DslSnafu {
+                        line: form.line(),
+                        message: format!("expected (rule ...) or (rewrite ...), got `{other}`"),
+                    }
+                    .fail();
+                }
+            }
+        }
+        let program = Self { rules, rewrites };
+        program.check()?;
+        Ok(program)
+    }
+
+    /// Arity of each defined relation, taken from its first rule head.
+    #[must_use]
+    pub fn arities(&self) -> HashMap<&str, usize> {
+        let mut arities = HashMap::new();
+        for rule in &self.rules {
+            arities
+                .entry(rule.name.as_str())
+                .or_insert(rule.head_vars.len());
+        }
+        arities
+    }
+
+    fn check(&self) -> Result<(), Error> {
+        let arities = self.arities();
+        for rule in &self.rules {
+            if builtin_arity(&rule.name).is_some() {
+                return DslSnafu {
+                    line: rule.line,
+                    message: format!("rule head `{}` shadows a builtin", rule.name),
+                }
+                .fail();
+            }
+            let expected = arities.get(rule.name.as_str()).copied();
+            if expected != Some(rule.head_vars.len()) {
+                return ArityMismatchSnafu {
+                    name: rule.name.clone(),
+                    expected: expected.unwrap_or(rule.head_vars.len()),
+                    got: rule.head_vars.len(),
+                    line: rule.line,
+                }
+                .fail();
+            }
+            check_atoms(&rule.body, &arities)?;
+        }
+        for rewrite in &self.rewrites {
+            check_atoms(&rewrite.body, &arities)?;
+            check_template(rewrite)?;
+        }
+        Ok(())
+    }
+}
+
+#[must_use]
+pub fn builtin_arity(name: &str) -> Option<usize> {
+    BUILTINS
+        .iter()
+        .find(|(builtin, _)| *builtin == name)
+        .map(|(_, arity)| *arity)
+}
+
+fn check_atoms(atoms: &[BodyAtom], arities: &HashMap<&str, usize>) -> Result<(), Error> {
+    for atom in atoms {
+        let BodyAtom::App(app) = atom else {
+            continue;
+        };
+        let expected = match builtin_arity(&app.name) {
+            Some(arity) => arity,
+            None => *arities.get(app.name.as_str()).context_unknown(app)?,
+        };
+        if app.args.len() != expected {
+            return ArityMismatchSnafu {
+                name: app.name.clone(),
+                expected,
+                got: app.args.len(),
+                line: app.line,
+            }
+            .fail();
+        }
+    }
+    Ok(())
+}
+
+/// Tiny local extension so [`check_atoms`] reads linearly.
+trait UnknownRelationExt<'a> {
+    fn context_unknown(self, app: &AppAtom) -> Result<&'a usize, Error>;
+}
+
+impl<'a> UnknownRelationExt<'a> for Option<&'a usize> {
+    fn context_unknown(self, app: &AppAtom) -> Result<&'a usize, Error> {
+        self.ok_or_else(|| {
+            UnknownRelationSnafu {
+                name: app.name.clone(),
+                line: app.line,
+            }
+            .build()
+        })
+    }
+}
+
+fn check_template(rewrite: &Rewrite) -> Result<(), Error> {
+    let mut mentioned: HashSet<&str> = HashSet::new();
+    for atom in &rewrite.body {
+        match atom {
+            BodyAtom::Match(m) => mentioned.extend(capture_names(&m.query)),
+            BodyAtom::App(app) => {
+                for arg in &app.args {
+                    if let Term::Var(var) = arg {
+                        mentioned.insert(var);
+                    }
+                }
+            }
+        }
+    }
+    let template_vars = rewrite
+        .template
+        .segments
+        .iter()
+        .filter_map(|segment| match segment {
+            Segment::Var(var) => Some(var.as_str()),
+            Segment::Lit(_) => None,
+        });
+    for var in template_vars.chain([rewrite.target.as_str()]) {
+        if !mentioned.contains(var) {
+            return Err(crate::error::TemplateVarSnafu {
+                var: var.to_owned(),
+                line: rewrite.template.line,
+            }
+            .build());
+        }
+    }
+    Ok(())
+}
+
+/// Capture names mentioned in a tree-sitter query source (`@name`).
+///
+/// Lexical scan, skipping string literals; the query is validated for real by
+/// `tree_sitter::Query::new` at evaluation setup.
+fn capture_names(query: &str) -> Vec<&str> {
+    let mut names = Vec::new();
+    let mut rest = query;
+    let mut in_string = false;
+    let mut chars = rest.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '"' => in_string = !in_string,
+            '\\' if in_string => {
+                chars.next();
+            }
+            '@' if !in_string => {
+                rest = &query[at + 1..];
+                let end = rest
+                    .find(|c: char| !(c.is_alphanumeric() || matches!(c, '_' | '-' | '.')))
+                    .unwrap_or(rest.len());
+                if end > 0 {
+                    names.push(&rest[..end]);
+                }
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+fn expect_list<'a>(form: &'a Sexpr, what: &str) -> Result<(&'a str, &'a [Sexpr]), Error> {
+    let Sexpr::List { items, line } = form else {
+        return DslSnafu {
+            line: form.line(),
+            message: format!("{what} must be a list"),
+        }
+        .fail();
+    };
+    let Some((Sexpr::Atom { text, .. }, rest)) = items.split_first() else {
+        return DslSnafu {
+            line: *line,
+            message: format!("{what} must start with an atom"),
+        }
+        .fail();
+    };
+    Ok((text, rest))
+}
+
+fn parse_rule(items: &[Sexpr], line: usize) -> Result<Rule, Error> {
+    let Some((head, body)) = items.split_first() else {
+        return DslSnafu {
+            line,
+            message: "(rule ...) needs a head".to_owned(),
+        }
+        .fail();
+    };
+    let (name, head_args) = expect_list(head, "rule head")?;
+    let head_vars = head_args
+        .iter()
+        .map(|arg| match arg {
+            Sexpr::Atom { text, .. } => Ok(text.clone()),
+            other => DslSnafu {
+                line: other.line(),
+                message: "rule head arguments must be variables".to_owned(),
+            }
+            .fail(),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Rule {
+        name: name.to_owned(),
+        head_vars,
+        body: parse_body(body)?,
+        line,
+    })
+}
+
+fn parse_rewrite(items: &[Sexpr], line: usize) -> Result<Rewrite, Error> {
+    let Some((Sexpr::Atom { text: name, .. }, rest)) = items.split_first() else {
+        return DslSnafu {
+            line,
+            message: "(rewrite ...) needs a name".to_owned(),
+        }
+        .fail();
+    };
+    let Some((replace, body)) = rest.split_last() else {
+        return DslSnafu {
+            line,
+            message: "(rewrite ...) needs a final (replace var \"template\")".to_owned(),
+        }
+        .fail();
+    };
+    let (replace_head, replace_args) = expect_list(replace, "replace form")?;
+    let [Sexpr::Atom { text: target, .. }, Sexpr::Str {
+        text: template,
+        line: template_line,
+    }] = replace_args
+    else {
+        return DslSnafu {
+            line: replace.line(),
+            message: "replace form is (replace var \"template\")".to_owned(),
+        }
+        .fail();
+    };
+    if replace_head != "replace" {
+        return DslSnafu {
+            line: replace.line(),
+            message: format!("rewrite must end with (replace ...), got `{replace_head}`"),
+        }
+        .fail();
+    }
+    Ok(Rewrite {
+        name: name.clone(),
+        body: parse_body(body)?,
+        target: target.clone(),
+        template: parse_template(template, *template_line)?,
+        line,
+    })
+}
+
+fn parse_body(atoms: &[Sexpr]) -> Result<Vec<BodyAtom>, Error> {
+    atoms.iter().map(parse_body_atom).collect()
+}
+
+fn parse_body_atom(form: &Sexpr) -> Result<BodyAtom, Error> {
+    let (name, args) = expect_list(form, "body atom")?;
+    if name == "match" {
+        let [Sexpr::Atom {
+            text: lang_name,
+            line: lang_line,
+        }, Sexpr::Str { text: query, line }] = args
+        else {
+            return DslSnafu {
+                line: form.line(),
+                message: "match form is (match <lang> \"<query>\")".to_owned(),
+            }
+            .fail();
+        };
+        return Ok(BodyAtom::Match(MatchAtom {
+            lang: resolve_lang(lang_name, *lang_line)?,
+            query: query.clone(),
+            line: *line,
+        }));
+    }
+    let args = args
+        .iter()
+        .map(|arg| match arg {
+            Sexpr::Atom { text, .. } => Ok(Term::Var(text.clone())),
+            Sexpr::Str { text, .. } => Ok(Term::Text(text.clone())),
+            Sexpr::List { line, .. } => DslSnafu {
+                line: *line,
+                message: "atom arguments are variables or strings".to_owned(),
+            }
+            .fail(),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(BodyAtom::App(AppAtom {
+        name: name.to_owned(),
+        args,
+        line: form.line(),
+    }))
+}
+
+/// Resolve a language name as written in `(match <lang> ...)`.
+///
+/// Accepts the profile name case-insensitively (`rust`, `c++`, `nix`) or any
+/// registered file extension (`rs`, `py`, `ts`).
+fn resolve_lang(name: &str, line: usize) -> Result<Lang, Error> {
+    let lowered = name.to_lowercase();
+    for lang in Lang::all() {
+        if lang.profile().name.to_lowercase() == lowered {
+            return Ok(*lang);
+        }
+    }
+    ast_merge_langs::detect_from_extension(&lowered).ok_or_else(|| {
+        UnknownLangNameSnafu {
+            name: name.to_owned(),
+            line,
+        }
+        .build()
+    })
+}
+
+fn parse_template(template: &str, line: usize) -> Result<Template, Error> {
+    let mut segments = Vec::new();
+    let mut lit = String::new();
+    let mut chars = template.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '{' if chars.peek() == Some(&'{') => {
+                chars.next();
+                lit.push('{');
+            }
+            '}' if chars.peek() == Some(&'}') => {
+                chars.next();
+                lit.push('}');
+            }
+            '{' => {
+                if !lit.is_empty() {
+                    segments.push(Segment::Lit(std::mem::take(&mut lit)));
+                }
+                let mut var = String::new();
+                loop {
+                    match chars.next() {
+                        Some('}') => break,
+                        Some(c) => var.push(c),
+                        None => {
+                            return DslSnafu {
+                                line,
+                                message: "unclosed `{` in template".to_owned(),
+                            }
+                            .fail();
+                        }
+                    }
+                }
+                segments.push(Segment::Var(var));
+            }
+            '}' => {
+                return DslSnafu {
+                    line,
+                    message: "stray `}` in template (escape as `}}`)".to_owned(),
+                }
+                .fail();
+            }
+            other => lit.push(other),
+        }
+    }
+    if !lit.is_empty() {
+        segments.push(Segment::Lit(lit));
+    }
+    Ok(Template { segments, line })
+}

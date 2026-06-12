@@ -90,6 +90,46 @@ let
       ''
   );
 
+  # The astlog package, baked into the pinned interpreter so every session can
+  # `import astlog` and run Datalog queries/rewrites over tree-sitter ASTs with
+  # no setup. Same shape as `searchModule`: the PyO3 cdylib comes from the
+  # shared workspace graph, so it works on Linux and macOS dev alike.
+  astlogPythonSource = builtins.path {
+    name = "astlog-py-python-source";
+    path = ../astlog/py/python;
+  };
+  astlogModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-astlog-python-module"
+      {
+        strictDeps = true;
+        meta.description = "astlog PyO3 module bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/astlog"
+        mkdir -p "$site"
+        cp -r ${astlogPythonSource}/astlog/. "$site/"
+
+        cdylib=""
+        for candidate in \
+          ${ix.rustWorkspace.units.libraries.astlog_py}/lib/libastlog_py.so \
+          ${ix.rustWorkspace.units.libraries.astlog_py}/lib/libastlog_py-*.so \
+          ${ix.rustWorkspace.units.libraries.astlog_py}/lib/libastlog_py.dylib \
+          ${ix.rustWorkspace.units.libraries.astlog_py}/lib/libastlog_py-*.dylib
+        do
+          if [ -f "$candidate" ]; then
+            cdylib="$candidate"
+            break
+          fi
+        done
+        if [ -z "$cdylib" ]; then
+          echo "ix-astlog module: no cdylib under ${ix.rustWorkspace.units.libraries.astlog_py}/lib" >&2
+          ls -la ${ix.rustWorkspace.units.libraries.astlog_py}/lib >&2 || true
+          exit 1
+        fi
+        install -m555 "$cdylib" "$site/_astlog.abi3.so"
+      ''
+  );
+
   # The `fff` fast file-search package, baked into the interpreter so every
   # session can `import fff` and run fuzzy file search / SIMD grep over a repo
   # with no setup. Unlike `tui`/`search`, fff has no PyO3 binding: it ships a
@@ -663,6 +703,7 @@ let
       ps.dill
       tuiModule
       searchModule
+      astlogModule
       fffModule
       googleAuthModule
       ixGoogleModule
@@ -772,6 +813,7 @@ let
   # htpy must import and auto-escape: a `<` in a text node comes out as `&lt;`.
   htpyBundled = importTest "htpy" "import htpy; print('htpy-ok' if '&lt;' in str(htpy.div['<']) else 'htpy-bad')";
   searchBundled = importTest "search" "import search; print('search-ok', search.__version__)";
+  astlogBundled = importTest "astlog" "import astlog; print('astlog-ok', astlog.__version__, all(callable(getattr(astlog, n)) for n in ('query', 'fixes', 'fix')))";
 
   # End-to-end through the bundled `fff` ctypes module: index a temp tree, wait
   # for the scan, then prove fuzzy file search and content grep both return the
@@ -3653,6 +3695,7 @@ package.overrideAttrs (old: {
         tuiBundled
         htpyBundled
         searchBundled
+        astlogBundled
         fffBundled
         dataLibsBundled
         gmailLibsBundled

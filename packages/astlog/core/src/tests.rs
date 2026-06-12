@@ -1,0 +1,176 @@
+use crate::{Value, analyze};
+
+type TestResult = Result<(), Box<dyn std::error::Error>>;
+
+const RUST_SAMPLE: &str = r"
+fn fallible() -> Result<u32, String> {
+    let n = compute().unwrap();
+    Ok(n + 1)
+}
+
+fn infallible() -> u32 {
+    compute().unwrap()
+}
+
+fn compute() -> Result<u32, String> {
+    Ok(41)
+}
+";
+
+const UNWRAP_RULES: &str = r#"
+; `<e>.unwrap()` call sites
+(rule (unwrap-call call e)
+  (match rust "
+    (call_expression
+      function: (field_expression value: (_) @e field: (field_identifier) @m)
+      arguments: (arguments)) @call")
+  (text m "unwrap"))
+
+; functions whose return type is Result<...>
+(rule (result-fn f)
+  (match rust "
+    (function_item return_type: (generic_type type: (type_identifier) @r)) @f")
+  (text r "Result"))
+
+; the join: an unwrap call lexically inside a Result-returning function
+(rule (fixable call e)
+  (unwrap-call call e)
+  (result-fn f)
+  (ancestor f call))
+
+(rewrite unwrap-to-try (fixable call e)
+  (replace call "{e}?"))
+"#;
+
+fn write_sample(dir: &tempfile::TempDir, name: &str, content: &str) -> TestResult {
+    std::fs::write(dir.path().join(name), content)?;
+    Ok(())
+}
+
+#[test]
+fn unwrap_join_finds_only_result_functions() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", RUST_SAMPLE)?;
+    let analysis = analyze(UNWRAP_RULES, &[dir.path().to_path_buf()])?;
+
+    let unwrap_calls = &analysis.database.relations["unwrap-call"];
+    assert_eq!(unwrap_calls.rows().len(), 2, "both unwrap sites match");
+
+    let fixable = &analysis.database.relations["fixable"];
+    assert_eq!(fixable.rows().len(), 1, "only the Result-returning fn joins");
+    let Value::Node(call) = &fixable.rows()[0][0] else {
+        return Err("fixable column 0 should be a node".into());
+    };
+    assert_eq!(analysis.corpus.node_text(*call), "compute().unwrap()");
+    Ok(())
+}
+
+#[test]
+fn rewrite_splices_template() -> TestResult {
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", RUST_SAMPLE)?;
+    let analysis = analyze(UNWRAP_RULES, &[dir.path().to_path_buf()])?;
+
+    assert_eq!(analysis.edits.len(), 1);
+    let rewritten = analysis.rewritten();
+    assert_eq!(rewritten.len(), 1);
+    assert!(rewritten[0].content.contains("let n = compute()?;"));
+    assert!(
+        rewritten[0].content.contains("compute().unwrap()"),
+        "the infallible fn keeps its unwrap"
+    );
+    let diff = analysis.diff();
+    assert!(diff.contains("-    let n = compute().unwrap();"));
+    assert!(diff.contains("+    let n = compute()?;"));
+    Ok(())
+}
+
+#[test]
+fn value_join_on_same_text() -> TestResult {
+    let source = r#"
+fn main() {
+    let secret = std::env::var("KEY");
+    let safe = "literal";
+    run(secret);
+    run(safe);
+    run(other);
+}
+"#;
+    // join let-bound names against call arguments on identifier text
+    let rules = r#"
+(rule (env-bound v)
+  (match rust "
+    (let_declaration
+      pattern: (identifier) @v
+      value: (call_expression function: (scoped_identifier name: (identifier) @f)))")
+  (text f "var"))
+
+(rule (call-arg call v)
+  (match rust "(call_expression arguments: (arguments (identifier) @v)) @call"))
+
+(rule (tainted-call call)
+  (call-arg call v)
+  (env-bound w)
+  (same-text v w))
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+
+    let tainted = &analysis.database.relations["tainted-call"];
+    assert_eq!(tainted.rows().len(), 1, "only run(secret) joins");
+    let Value::Node(call) = &tainted.rows()[0][0] else {
+        return Err("tainted-call column 0 should be a node".into());
+    };
+    assert_eq!(analysis.corpus.node_text(*call), "run(secret)");
+    Ok(())
+}
+
+#[test]
+fn recursive_rules_reach_fixpoint() -> TestResult {
+    let source = "fn main() { if true { loop { break; } } }\n";
+    // `up` is recursive: parent plus transitive step. It must agree with the
+    // ancestor builtin once both are restricted to the same endpoints.
+    let rules = r#"
+(rule (brk b) (match rust "(break_expression) @b"))
+(rule (fun f) (match rust "(function_item) @f"))
+
+(rule (up x y) (brk y) (parent x y))
+(rule (up x z) (up y z) (parent x y))
+
+(rule (reaches f b) (fun f) (brk b) (up f b))
+(rule (reaches-builtin f b) (fun f) (brk b) (ancestor f b))
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+
+    let recursive = &analysis.database.relations["reaches"];
+    let builtin = &analysis.database.relations["reaches-builtin"];
+    assert_eq!(recursive.rows().len(), 1);
+    assert_eq!(recursive.rows(), builtin.rows());
+    Ok(())
+}
+
+#[test]
+fn predicates_are_rejected_with_guidance() {
+    let rules = r#"
+(rule (m x)
+  (match rust "((identifier) @x (#eq? @x \"foo\"))"))
+"#;
+    let result = analyze(rules, &[]);
+    let Err(error) = result else {
+        panic!("predicate query must be rejected");
+    };
+    let message = error.to_string();
+    assert!(message.contains("predicates"), "got: {message}");
+}
+
+#[test]
+fn unknown_relation_is_a_load_error() {
+    let rules = "(rule (a x) (no-such-rel x))";
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("unknown relation must be rejected");
+    };
+    assert!(error.to_string().contains("no-such-rel"));
+}

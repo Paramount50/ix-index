@@ -58,6 +58,12 @@ MODULES: tuple[Module, ...] = (
     ),
     Module("fleet", "async polars SSH fan-out across hosts (`read_ndjson` / `scan`)"),
     Module("search", "meaning-based semantic recall across an indexed corpus"),
+    Module(
+        "astlog",
+        "Datalog over tree-sitter ASTs: tree-sitter query matches become relations, rules join "
+        "them (position, text, recursion), rewrites turn rows into edits "
+        "(`astlog.query` / `fixes` / `fix`)",
+    ),
     Module("tui", "drive and snapshot a terminal program; renders as HTML"),
     Module(
         "screen",

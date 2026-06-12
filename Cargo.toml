@@ -11,6 +11,9 @@ members = [
   "packages/ast-merge/git",
   "packages/ast-merge/langs",
   "packages/ast-merge/matcher",
+  "packages/astlog/core",
+  "packages/astlog/cli",
+  "packages/astlog/py",
   "packages/source/atuin",
   "packages/source/claude",
   "packages/source/codex",
@@ -125,6 +128,7 @@ ast-merge-diff = { path = "packages/ast-merge/diff" }
 ast-merge-git = { path = "packages/ast-merge/git" }
 ast-merge-langs = { path = "packages/ast-merge/langs" }
 ast-merge-matcher = { path = "packages/ast-merge/matcher" }
+astlog-core = { path = "packages/astlog/core" }
 axum = "0.8"
 base64 = "0.22"
 build-version = { path = "packages/build-version" }
