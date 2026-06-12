@@ -4,9 +4,10 @@ One kernel serves every MCP client of the HTTP transport, and a single shared
 namespace lets parallel agents clobber each other's variables. Each session id
 now keys its own module-level globals dict, seeded from the shared read-only
 helper area, while the no-session path keeps today's single shared namespace.
-And a cell whose last statement evaluates to None (an assignment, a bare
-print(), a side-effecting call) auto-returns Result.ok carrying its captured
-stdout instead of hard-failing the Result contract.
+Cell results follow Jupyter semantics: the last expression is the result
+whatever its type, stdout rides along with it, and a None-valued last statement
+(an assignment, a bare print(), a side-effecting call) returns the captured
+stdout or a quiet ok.
 """
 
 from __future__ import annotations
@@ -181,11 +182,20 @@ def test_auto_returned_stdout_is_clipped_with_a_paging_pointer(monkeypatch) -> N
     assert len(job.result.llm_result) < 500
 
 
-def test_a_bare_scalar_still_fails_the_result_contract(monkeypatch) -> None:
+def test_a_bare_scalar_is_the_result_jupyter_style(monkeypatch) -> None:
     _wire(monkeypatch, {})
     job = run_cell("1 + 1")
-    assert job.status == "error"
-    assert "must declare its result" in (job.error or "")
+    assert job.status == "done", (job.status, job.error)
+    assert "2" in job.result.llm_result
+
+
+def test_stdout_rides_with_a_bare_final_value(monkeypatch) -> None:
+    _wire(monkeypatch, {})
+    _capture_stdout(monkeypatch)
+    job = run_cell("print('logged')\n40 + 2")
+    assert job.status == "done", (job.status, job.error)
+    assert "logged" in job.result.llm_result
+    assert "42" in job.result.llm_result
 
 
 def test_an_explicit_result_is_unchanged(monkeypatch) -> None:

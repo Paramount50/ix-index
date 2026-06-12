@@ -199,7 +199,14 @@ mcp._mcp_server.version = os.environ.get("IX_MCP_VERSION") or "dev"
 Content = list[outputs.Content]
 
 
+# Every tool sets structured_output=False: FastMCP otherwise derives an output
+# schema from the return annotation and DUPLICATES the entire reply as
+# `structuredContent` JSON, so each image block went to the client twice (once
+# as a real image, once as a wall of base64-in-text), which is what kept
+# blowing the host's per-result token cap. The content blocks ARE the reply;
+# there is no structured consumer.
 @mcp.tool(
+    structured_output=False,
     description=guide.compose(
         guide.PYEXEC_INTRO,
         guide.PAGING,
@@ -207,7 +214,7 @@ Content = list[outputs.Content]
         guide.BLOCKING,
         guide.RESULT_CONTRACT,
         guide.SEE_INSTRUCTIONS,
-    )
+    ),
 )
 async def python_exec(
     code: Annotated[str, Field(description="Python source to run on the shared kernel")],
@@ -232,10 +239,10 @@ async def python_exec(
         json.dumps({"job": summary.get("id"), "status": summary.get("status"), "running": summary.get("running")})
     )
     parts: Content = [header]
-    # Print is not a channel back to the model: a job's stdout is captured for the
-    # dashboard (collapsed) and for paging via jobs['<id>'].output, but it is not
-    # returned here \u2014 results come from Result/yield. A failing run is the
-    # exception: its traceback IS the result, so surface that.
+    # The kernel folds a cell's stdout into its result (Jupyter semantics; see
+    # runtime._merge_stdout/_auto_result), so the rendered blocks below already
+    # carry what the cell printed. A failing run's traceback IS its result, so
+    # surface that here.
     if summary.get("status") == "error" and summary.get("error"):
         parts.append(outputs.text(summary["error"]))
     # Rich result blocks (images / HTML / the result repr, including every yielded
@@ -277,7 +284,7 @@ async def python_exec(
     return parts
 
 
-@mcp.tool(description=guide.READ)
+@mcp.tool(structured_output=False, description=guide.READ)
 async def read(
     target: Annotated[
         str,
@@ -303,7 +310,7 @@ async def read(
     return content or rendered
 
 
-@mcp.tool(description=guide.TRACE)
+@mcp.tool(structured_output=False, description=guide.TRACE)
 async def kernel_trace() -> str:
     _open_dashboard_once()
     return await current_kernel().dump_trace()

@@ -95,18 +95,16 @@ BLOCKING = (
 )
 
 RESULT_CONTRACT = (
-    "Return results through `Result`, never `print`: a cell's stdout is NOT sent to you and is "
-    "hidden in the dashboard by default (it is kept only for paging via jobs['<id>'].output), so "
-    "surface anything worth seeing as a Result. A cell must either END with a `Result(...)` or "
-    "`yield Result(...)` one or more times — each yielded Result streams to both the human and "
-    "you the moment it is produced, so prefer yielding as you go to report progress and partial "
-    "results. The kernel rejects a cell that neither ends with nor yields a Result — except that "
-    "a bare final value which already renders richly (a polars DataFrame, a matplotlib figure, a "
-    "view/fff render, an htpy element) is auto-wrapped in `Result.of` for you, so `df` on the "
-    "last line just works, and a cell whose last statement is None (an assignment, a bare "
-    "`print(...)`, a side-effecting call) auto-returns `Result.ok` carrying its captured stdout "
-    "instead of failing — still prefer an explicit Result, which controls both views. A plain "
-    "scalar, dict, or list still needs an explicit Result."
+    "Cells behave like a notebook: the last expression is the result, whatever its type (`2+2` "
+    "returns 4, `df` returns the styled table with compact CSV to you, a string returns "
+    "verbatim, a dict/list renders as a table), and anything the cell printed comes back with "
+    "it. A cell whose last statement is None (an assignment, a side-effecting call) returns its "
+    "stdout, or a quiet ok. `yield` streams: each yielded value reaches both the human and you "
+    "the moment it is produced, so yield as you go to report progress and partial results. "
+    "`Result` is the opt-in for splitting the two views, `Result(user_html=..., llm_result=..., "
+    "llm_images=...)`, when the human should see something rich that you should not pay tokens "
+    "for (note: an explicit Result suppresses the automatic stdout echo; page "
+    "jobs['<id>'].output instead)."
 )
 
 # --- kernel guide only ---

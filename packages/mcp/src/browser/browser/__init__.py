@@ -187,7 +187,10 @@ async def get_or_create_browser(
     happened" to the human looking for the window."""
     try:
         return await connect(endpoint)
-    except Exception:
+    except ConnectionError:
+        # Nothing on the port: fall through and launch. Any OTHER failure (a
+        # live endpoint whose handshake failed) propagates -- launching a second
+        # instance over an occupied port cannot succeed and hides the real error.
         pass
     port = _port_of(endpoint)
     udd = user_data_dir or _default_user_data_dir(app)
@@ -219,8 +222,10 @@ async def connect(endpoint: str = DEFAULT_ENDPOINT):
     and return the Playwright ``Browser``. ``endpoint`` is the DevTools HTTP URL
     ``http://host:port`` -- the default is the standard CDP port 9222.
 
-    Raises ``ConnectionError`` if nothing is listening; use
-    :func:`get_or_create_browser` to launch one automatically instead."""
+    Raises ``ConnectionError`` if nothing is listening (use
+    :func:`get_or_create_browser` to launch one automatically), or
+    ``RuntimeError`` if a browser answers on the endpoint but the Playwright
+    handshake with it fails (version skew -- launching another cannot help)."""
     existing = _browsers.get(endpoint)
     if existing is not None and existing.is_connected():
         return existing
@@ -228,8 +233,21 @@ async def connect(endpoint: str = DEFAULT_ENDPOINT):
     try:
         browser = await pw.chromium.connect_over_cdp(endpoint)
     except Exception as exc:
+        # Two very different failures hide behind connect_over_cdp, and blaming
+        # "no browser" for both once sent an agent on a wild goose chase while a
+        # perfectly alive Chrome sat on the port: probe the HTTP side to tell
+        # them apart and report the one that actually happened.
+        if await _cdp_ready(endpoint, timeout=1.0):
+            raise RuntimeError(
+                f"a browser IS listening at {endpoint}, but Playwright's CDP "
+                f"handshake with it failed: {exc}. This is usually a Playwright/"
+                f"browser version skew (the browser is newer than the bundled "
+                f"driver), not a missing browser -- launching another instance "
+                f"will not help. The endpoint itself still works: drive it over "
+                f"raw CDP ({endpoint}/json + a websocket), or align the versions."
+            ) from exc
         raise ConnectionError(
-            f"no browser reachable at {endpoint} over CDP ({exc}). Use "
+            f"nothing is listening at {endpoint} ({exc}). Use "
             f"await browser.get_or_create_browser() to launch a visible one automatically."
         ) from exc
     _browsers[endpoint] = browser

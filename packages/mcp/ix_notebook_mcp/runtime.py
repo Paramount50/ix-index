@@ -102,29 +102,10 @@ _IMAGE_MIMES = frozenset({"image/png", "image/jpeg"})
 _MAX_TEXT_BUNDLE = 400_000
 _MAX_IMAGE_BUNDLE = 4_000_000
 
-_RESULT_REQUIRED = (
-    "python_exec: a cell must declare its result. Either END with a Result(...), "
-    "or `yield Result(...)` one or more times to stream results as you go. This "
-    "cell's last expression was not a Result and it did not yield, so nothing was "
-    "returned. Wrap your final value (or yield each result):\n"
-    "  Result.text('done')                       # same text to human and model\n"
-    "  Result.ok('what happened')                # a quiet confirmation for a side effect\n"
-    "  Result.of(value)                          # render any value richly for the human\n"
-    "  Result(user_html='<b>hi</b>', llm_result='hi', llm_images=[fig])\n"
-    "  yield Result.ok('step 1'); ...; yield Result.of(df)   # stream as you go\n"
-    "Print is not a channel: stdout is not returned to the model and is hidden in "
-    "the dashboard by default, so surface anything worth seeing as a Result."
-)
-
-_YIELD_REQUIRED = (
-    "python_exec: this cell uses `yield` but yielded no Result(...). Yield at "
-    "least one Result(...) so the run declares what the human and model receive."
-)
-
-_YIELD_NOT_RESULT = (
-    "python_exec: a yielded value was not a Result(...). Every top-level `yield` "
-    "in a cell must yield a Result (Result.text/ok/of or Result(user_html=...))."
-)
+# Cell semantics are Jupyter's: the last expression is the result, whatever its
+# type, and stdout travels with it. `Result` survives as the OPT-IN way to split
+# the human view from the model view (rich HTML vs concise text/images); a cell
+# that never mentions it still returns exactly what a notebook would show.
 
 # Opened lazily in install(); None when no store path is configured (the
 # one-shot eval/exec paths, or a bare kernel started outside the server).
@@ -179,6 +160,18 @@ class _Tee:
 
     def __getattr__(self, name):
         return getattr(self._original, name)
+
+
+class _CallableBool(int):
+    """A bool that also answers ``()``: ``job.running`` and ``job.running()``
+    both work. ``bool`` cannot be subclassed, so this is an int restricted to
+    0/1; truthiness, comparison, and repr all behave like the bool it wraps."""
+
+    def __call__(self) -> bool:
+        return bool(self)
+
+    def __repr__(self) -> str:
+        return repr(bool(self))
 
 
 class JobStillRunning(RuntimeError):
@@ -328,13 +321,20 @@ class Job:
             body += f"\n... [stopped at {max_matches} matches; narrow the pattern]"
         return body or f"(no lines match {pattern!r} in {len(src)} lines)"
 
-    def running(self) -> bool:
-        return self.status == "running"
+    @property
+    def running(self) -> "_CallableBool":
+        """True while the job runs. Works as an attribute (``job.running``) and
+        as the historical method call (``job.running()``): both spellings are
+        natural guesses, and the attribute form returning a bound method was a
+        truthiness trap (every finished job looked "running" to ``getattr``)."""
+        return _CallableBool(self.status == "running")
 
-    def done(self) -> bool:
-        """True once the job has finished (done, error, or cancelled). Pair it
-        with `.result`, which only yields a value once the job is done."""
-        return self.status != "running"
+    @property
+    def done(self) -> "_CallableBool":
+        """True once the job has finished (done, error, or cancelled), as an
+        attribute or a call. Pair it with `.result`, which only yields a value
+        once the job is done."""
+        return _CallableBool(self.status != "running")
 
     @property
     def ok(self) -> bool:
@@ -442,15 +442,14 @@ class _TextDescriptor:
 class Result:
     """Split a cell's final value into a human view and a model view.
 
-    Every ``python_exec`` cell should END with one of these (the kernel rejects a
-    cell whose last expression is a bare scalar/dict/list; a last statement of
-    None -- a print-only or side-effecting cell -- auto-returns ``Result.ok``
-    with the captured stdout, so a run always declares what the human sees and
-    what the model gets back). The dashboard renders
-    ``user_html`` (a rich HTML view for the human watching); the model's tool
-    result receives ``llm_result`` (concise text) plus any ``llm_images``. The
-    two never cross: the human is not shown the model's text, and the model does
-    not pay tokens for the HTML render.
+    Entirely optional: a cell's last expression is its result, Jupyter-style,
+    whatever its type, and the kernel renders it (rich types richly, plain
+    values as their natural text) with the cell's stdout alongside. Reach for
+    Result only when the two audiences should see DIFFERENT things. The
+    dashboard renders ``user_html`` (a rich HTML view for the human watching);
+    the model's tool result receives ``llm_result`` (concise text) plus any
+    ``llm_images``. The two never cross: the human is not shown the model's
+    text, and the model does not pay tokens for the HTML render.
 
     Construct it directly for full control, or use the shortcuts for the common
     cases::
@@ -1026,21 +1025,28 @@ def _compile_generator(code: str, filename: str) -> "types.CodeType":
     return compile(shell, filename, "exec")
 
 
-def _stdout_hint(job: "Job") -> str:
-    """A suffix for the Result-contract error when the cell also printed: stdout
-    never reaches the model, so the bare "you must return a Result" message leaves
-    a printing agent unsure what happened to its output. Show a preview of what
-    was printed and the one-line fix, turning a silent dead-end into a nudge."""
-    printed = job.output.strip()
-    if not printed:
-        return ""
-    limit = 1500
-    if len(printed) > limit:
-        printed = f"{printed[:limit]}\n... [+{len(printed) - limit} more chars in jobs['{job.id}'].output]"
-    return (
-        "\n\nThis cell printed to stdout, which the model never receives. To send "
-        f"this text, return it (e.g. `Result.text(...)`) or page jobs['{job.id}'].output. "
-        f"What the cell printed:\n{printed}"
+def _merge_stdout(job: "Job", result: "Result") -> "Result":
+    """Jupyter shows a cell's stdout AND its final value; so do we. When a cell
+    both printed and ended with a bare (non-Result) expression, prepend the
+    captured stdout to the model text and the human view, clipped like any other
+    large output (the full capture stays pageable as ``jobs['<id>'].output``).
+    Explicit Results are exempt: the author already declared both views."""
+    printed = job.output
+    if not printed.strip():
+        return result
+    body = printed
+    if len(body) > _AUTO_RESULT_CHARS:
+        body = body[-_AUTO_RESULT_CHARS:] + (
+            f"\n... [stdout clipped to the last {_AUTO_RESULT_CHARS} of "
+            f"{len(printed)} chars; page jobs['{job.id}'].output]"
+        )
+    text = _strip_ansi(body)
+    if not text.endswith("\n"):
+        text += "\n"
+    return Result(
+        user_html=f'<pre class="ix-result">{_ansi_to_html(body)}</pre>' + result.user_html,
+        llm_result=text + (result.llm_result or ""),
+        llm_images=result.llm_images,
     )
 
 
@@ -1051,12 +1057,9 @@ _AUTO_RESULT_CHARS = 20_000
 
 
 def _auto_result(job: "Job") -> "Result":
-    """The Result for a cell that declared none (its last statement evaluated to
-    None: an assignment, a bare ``print()``, a side-effecting call). Instead of
-    failing the Result contract, the run auto-returns ``Result.ok`` carrying the
-    captured stdout, so a print-only cell reports what it printed. An explicit
-    Result stays preferred -- it controls what the human and the model each see
-    -- but a missing one is no longer a hard failure."""
+    """The Result for a cell whose last statement evaluated to None (an
+    assignment, a bare ``print()``, a side-effecting call): its captured stdout,
+    or a quiet ok when it printed nothing -- the same thing a notebook shows."""
     printed = job.output
     if not printed.strip():
         return Result.ok("done (cell returned no value)")
@@ -1066,12 +1069,10 @@ def _auto_result(job: "Job") -> "Result":
             f"\n... [stdout clipped to the last {_AUTO_RESULT_CHARS} of "
             f"{len(printed)} chars; page jobs['{job.id}'].output]"
         )
-    note = f"✓ done · auto-returned stdout ({len(printed)} chars; prefer an explicit Result)"
-    user = (
-        f'<div class="ix-ok">{_escape_html(note)}</div>'
-        f'<pre class="ix-result">{_ansi_to_html(body)}</pre>'
+    return Result(
+        user_html=f'<pre class="ix-result">{_ansi_to_html(body)}</pre>',
+        llm_result=_strip_ansi(body),
     )
-    return Result(user_html=user, llm_result=_strip_ansi(body))
 
 
 def _display_result(result: "Result") -> None:
@@ -1089,16 +1090,11 @@ def _display_result(result: "Result") -> None:
 
 
 def _is_displayable(value) -> bool:
-    """True if a bare final expression value is rich enough to auto-wrap in
-    ``Result.of`` (so ``df`` on the last line just works), False if returning it
-    is the print-like anti-pattern the Result contract nudges away from.
-
-    Displayable = it already knows how to render itself: an IPython rich repr
+    """True if a value carries its own rich rendering: an IPython rich repr
     (a polars DataFrame, a ``view.Code``, ...), an htpy-style ``__html__``, or a
     figure/image that renders through a registered formatter. Plain scalars,
-    ``str``/``bytes``, and the container types (dict/list/tuple/set) are NOT --
-    those still fail the contract, to keep pushing key/value data toward a
-    DataFrame and confirmations toward ``Result.ok``.
+    ``str``/``bytes``, and the container types (dict/list/tuple/set) are not
+    (they render through ``Result.of``'s text paths instead).
     """
     if _image_bytes_mime(value) is not None:
         # Raw image bytes (a screenshot) know how to render: as an inline image.
@@ -1213,29 +1209,22 @@ async def _runner(job: Job, ns: dict) -> None:
         ns.pop("__ix_result", None)
         if mode == "gen":
             # A yielding cell streams results: drain the async generator and
-            # display each yielded Result so it reaches the human (the job's
-            # captured outputs) and the model (iopub) as it is produced. The
-            # yields ARE the results, so there is no trailing-Result requirement.
+            # display each yielded value as it is produced, so it reaches the
+            # human (the job's captured outputs) and the model (iopub). Any
+            # value can be yielded; a non-Result renders through Result.of,
+            # exactly like a trailing expression.
             exec(code_obj, ns)
             agen = ns.pop("__ix_cell__")()
             job._aobj = agen  # sampled by _current_line while suspended
             emitted = 0
             async for item in agen:
-                if not isinstance(item, Result):
-                    job.status = "error"
-                    job.error = _YIELD_NOT_RESULT
-                    job._append(job.error)
-                    break
-                _display_result(item)
+                _display_result(item if isinstance(item, Result) else Result.of(item))
                 emitted += 1
-            else:
-                # Loop ran to completion (no non-Result break).
-                if emitted == 0:
-                    job.status = "error"
-                    job.error = _YIELD_REQUIRED + _stdout_hint(job)
-                    job._append(job.error)
-                else:
-                    job.status = "done"
+            if emitted == 0:
+                # A generator cell that yielded nothing still ran: report it
+                # like a None-valued cell (its stdout, or a quiet ok).
+                _display_result(_auto_result(job))
+            job.status = "done"
             # The results were displayed as they streamed; there is no single
             # trailing value to return.
             job._result = None
@@ -1245,33 +1234,24 @@ async def _runner(job: Job, ns: dict) -> None:
                 job._aobj = maybe  # sampled by _current_line while suspended
                 await maybe
             value = ns.pop("__ix_result", None)
-            if not isinstance(value, Result) and _is_displayable(value):
-                # A bare final value that already knows how to render itself (a
-                # DataFrame, a figure, a view.Code, an htpy element) is wrapped
-                # in Result.of, so `df` on the last line just works. Plain
-                # scalars / dicts fall through to the contract error below.
-                value = Result.of(value)
             if value is None:
                 # A cell whose last statement evaluated to None -- an assignment,
-                # a bare print(), a side-effecting call -- is a legitimate run,
-                # not a contract violation: auto-return a quiet ok carrying the
-                # captured stdout, so a print-only cell still reports what it
-                # printed instead of hard-failing. An explicit Result stays
-                # preferred (it controls both views); this is the floor.
+                # a bare print(), a side-effecting call -- returns its captured
+                # stdout (or a quiet ok), so a print-only cell reports what it
+                # printed.
                 value = _auto_result(job)
-            job._result = value
-            if isinstance(value, Result):
-                job.status = "done"
+            elif isinstance(value, Result):
+                # An explicit Result is the author's full statement of both
+                # views; stdout stays out of it (page jobs['<id>'].output).
+                pass
             else:
-                # Enforce the Result contract: a non-yielding cell must END with a
-                # Result (or a value that renders as one, or None -- auto-returned
-                # above) so a run always declares what the human sees and what the
-                # model gets. A bare scalar/dict/list is a failed run with an
-                # instructive message, not a silent pass.
-                job.status = "error"
-                job.error = _RESULT_REQUIRED + _stdout_hint(job)
-                job._append(job.error)
-                job._result = None
+                # Jupyter semantics: the last expression IS the result, whatever
+                # its type. Result.of renders any value (rich types richly,
+                # scalars/strings/containers as their natural text), and stdout
+                # the cell printed along the way rides with it.
+                value = _merge_stdout(job, Result.of(value))
+            job._result = value
+            job.status = "done"
     except asyncio.CancelledError:
         job.status = "cancelled"
         raise

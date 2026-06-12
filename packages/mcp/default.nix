@@ -1459,14 +1459,13 @@ let
         assert w.status == "error", w.status
         assert "asyncio.to_thread" in w.error and "Traceback" not in w.error, w.error
 
-        # A print-only cell (last statement is None) no longer hard-fails the
-        # Result contract: it auto-returns Result.ok carrying the captured stdout,
-        # so what it printed reaches the model instead of dying with an error.
+        # A print-only cell (last statement is None) returns its captured stdout,
+        # so what it printed reaches the model -- a notebook's behavior.
         p = await run("print('hello-from-stdout')", budget=1.0, name="printed")
         assert p.status == "done", (p.status, p.error)
         assert isinstance(p.result, runtime.Result), type(p.result)
         assert "hello-from-stdout" in p.result.llm_result, p.result.llm_result
-        # A silent side-effecting cell auto-oks too (a quiet confirmation).
+        # A silent side-effecting cell returns a quiet confirmation.
         q = await run("x_side_effect = 1", budget=1.0, name="silent")
         assert q.status == "done", (q.status, q.error)
         assert "done" in q.result.llm_result, q.result.llm_result
@@ -1476,9 +1475,16 @@ let
         d = await run("import polars as pl\npl.DataFrame({'x': [1, 2]})", budget=2.0, name="auto-df")
         assert d.status == "done", (d.status, d.error)
         assert isinstance(d.result, runtime.Result), type(d.result)
-        # A plain scalar is not displayable, so the contract still rejects it.
+        # Jupyter semantics: the last expression IS the result, whatever its type.
         sc = await run("1 + 1", budget=2.0, name="scalar")
-        assert sc.status == "error", sc.status
+        assert sc.status == "done", (sc.status, sc.error)
+        assert "2" in sc.result.llm_result, sc.result.llm_result
+        # ...and stdout printed along the way rides with a bare final value.
+        both = await run("print('logged')\n40 + 2", budget=2.0, name="print-and-value")
+        assert both.status == "done", (both.status, both.error)
+        assert "logged" in both.result.llm_result and "42" in both.result.llm_result, (
+            both.result.llm_result
+        )
 
         # .result raises while the job runs (a misleading None would read as
         # "finished with no value"); .done()/.ok track the lifecycle.
@@ -2284,11 +2290,12 @@ let
     asyncio.run(main())
     print("rich-ok")
   '';
-  # Proves the yielding-cell contract end to end: a cell that `yield Result(...)`
-  # streams every yielded Result to the store (the dashboard) and to the model
-  # (to_mcp), keeps its top-level names in the namespace like a normal cell, and a
-  # non-Result yield fails the run. A plain (non-yielding) cell is unchanged. In
-  # process (a shell, the store), no kernel boot or network, so the sandbox runs it.
+  # Proves the yielding-cell behavior end to end: a cell that `yield`s streams
+  # every yielded value to the store (the dashboard) and to the model (to_mcp),
+  # keeps its top-level names in the namespace like a normal cell, and a
+  # non-Result yield renders through Result.of. A plain (non-yielding) cell is
+  # unchanged. In process (a shell, the store), no kernel boot or network, so
+  # the sandbox runs it.
   yieldTestPy = pkgs.writeText "ix-mcp-yield-test.py" ''
     import asyncio
     import json
@@ -2340,13 +2347,21 @@ let
         texts = [c.text for c in mcp if getattr(c, "text", None) is not None]
         assert "step 0" in texts and "3" in texts, texts
 
-        # A non-Result yield fails the run with the contract message.
-        bad = await run("yield 123", budget=3.0, name="bad")
-        await bad.task
-        assert bad.status == "error", bad.status
-        assert "was not a Result" in (bad.error or ""), bad.error
+        # A non-Result yield streams too: any value renders through Result.of,
+        # exactly like a trailing expression.
+        bare = await run("yield 123", budget=3.0, name="bare")
+        await bare.task
+        assert bare.status == "done", (bare.status, bare.error)
+        bare_outs = json.loads(
+            conn.execute("SELECT outputs FROM executions WHERE id = ?", (bare.id,)).fetchone()[0]
+        )
+        bare_mcp = outputs.to_mcp(
+            [{"output_type": "display_data", "data": o["data"], "metadata": {}} for o in bare_outs]
+        )
+        bare_texts = [c.text for c in bare_mcp if getattr(c, "text", None) is not None]
+        assert any("123" in t for t in bare_texts), bare_texts
 
-        # A normal (non-yielding) cell is unchanged: it must still end with a Result.
+        # A normal (non-yielding) cell is unchanged.
         plain = await run("Result.ok('plain')", budget=3.0, name="plain")
         await plain.task
         assert plain.status == "done", (plain.status, plain.error)
@@ -3547,21 +3562,21 @@ let
     # Standard CDP port + a persistent, module-owned profile, so repeat launches
     # reuse one instance instead of spawning a new window each time.
     assert browser.DEFAULT_ENDPOINT == "http://127.0.0.1:9222", browser.DEFAULT_ENDPOINT
-    assert browser.DEFAULT_APP == "Dia", browser.DEFAULT_APP
+    assert browser.DEFAULT_APP == "Google Chrome", browser.DEFAULT_APP
     for fn in ("get_or_create_browser", "connect", "context", "page", "goto", "shot", "read", "vdom", "close"):
         assert callable(getattr(browser, fn)), fn
     # `vdom()` returns a Vdom: a clean, filtered, machine-readable map of the page.
     assert isinstance(browser.Vdom, type), browser.Vdom
 
-    udd = browser._default_user_data_dir("Dia")
-    assert udd.endswith(".cdp-dia-profile"), udd
-    argv = browser._launch_argv("Dia", 9222, udd)
+    udd = browser._default_user_data_dir(browser.DEFAULT_APP)
+    assert udd.endswith(".cdp-google-chrome-profile"), udd
+    argv = browser._launch_argv(browser.DEFAULT_APP, 9222, udd)
     # The launched browser is ALWAYS a visible window -- never headless.
     assert not any("headless" in a for a in argv), ("launch must never be headless", argv)
     assert "--remote-debugging-port=9222" in argv, argv
     assert ("--user-data-dir=" + udd) in argv, argv
     if sys.platform == "darwin":
-        assert argv[:3] == ["open", "-na", "Dia"], argv
+        assert argv[:3] == ["open", "-na", "Google Chrome"], argv
     assert browser._port_of("http://127.0.0.1:9222") == 9222
 
     async def _dead():

@@ -325,6 +325,17 @@ class Size:
         yield self.cols
 
 
+class _CallableStr(str):
+    """A str that also answers ``()``. ``Snapshot.text`` is a property, but
+    ``snap.text()`` is the natural method-call guess and used to die with
+    "'str' object is not callable"; both spellings now hand back the text."""
+
+    __slots__ = ()
+
+    def __call__(self) -> str:
+        return self
+
+
 @dataclass(frozen=True, slots=True)
 class Snapshot:
     """An immutable view of a Tui at a single point in time.
@@ -344,13 +355,14 @@ class Snapshot:
 
     @property
     def text(self) -> str:
-        """Viewport joined with newlines."""
-        return "\n".join(self.viewport)
+        """Viewport joined with newlines (``snap.text`` and ``snap.text()``
+        both work)."""
+        return _CallableStr("\n".join(self.viewport))
 
     @property
     def full_text(self) -> str:
-        """Scrollback + viewport joined with newlines."""
-        return "\n".join((*self.scrollback, *self.viewport))
+        """Scrollback + viewport joined with newlines (attribute or call)."""
+        return _CallableStr("\n".join((*self.scrollback, *self.viewport)))
 
     def __contains__(self, needle: object) -> bool:
         return isinstance(needle, str) and needle in self.text
