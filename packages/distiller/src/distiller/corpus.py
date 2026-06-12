@@ -29,6 +29,9 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 SOURCE = "distilled_facts"
+# Per-session outcome verdicts (ENG-2710) ride a sibling slice with the same
+# contract; the leader fold ingests any (host, user, source) slice generically.
+SESSIONS_SOURCE = "session_outcomes"
 MAX_METADATA_BYTES = 128 * 1024
 MAX_METADATA_KEYS = 256
 
@@ -72,23 +75,44 @@ def corpus_hash(pairs: list[tuple[str, str]]) -> str:
     return digest.hexdigest()
 
 
-def item_body(item: dict, project: str) -> str:
+def item_body(item: dict, project: str, session_labels: list[str] | None = None) -> str:
     """The embedded, self-contained fact text (what gets hashed + indexed)."""
+    trailer = (
+        f"(outcome: {item['outcome']}; scope: {item['scope']}; project: {project};"
+        f" sessions: {', '.join(item.get('sessions', [])[:6]) or 'n/a'}"
+    )
+    if session_labels:
+        trailer += f"; session-labels: {', '.join(session_labels)}"
     lines = [
         f"# {item['title']}",
         "",
         item["body"],
         "",
-        f"(outcome: {item['outcome']}; scope: {item['scope']}; project: {project};"
-        f" sessions: {', '.join(item.get('sessions', [])[:6]) or 'n/a'})",
+        trailer + ")",
     ]
     return "\n".join(lines)
 
 
-def item_row(item: dict, project: str, host: str, user: str) -> dict:
+def item_row(
+    item: dict,
+    project: str,
+    host: str,
+    user: str,
+    session_labels: dict[str, str] | None = None,
+) -> dict:
+    # ``session_labels`` maps evidence session ids to their outcome verdicts;
+    # lessons whose evidence includes a failed session are the most valuable
+    # guardrails, so the labels ride the body and meta (``failure_derived``).
+    labels = sorted(
+        {
+            session_labels[sid]
+            for sid in item.get("sessions", [])
+            if session_labels and sid in session_labels
+        }
+    )
     slug_source = project.strip("/").replace("/", "-") or "unknown"
     external_id = f"{SOURCE}:{user}:{slug_source}:{item['id']}"
-    body = item_body(item, project)
+    body = item_body(item, project, session_labels=labels)
     content_hash = hash_body(body.encode())
     timestamp = int(item.get("last_updated") or 0) or None
     scope = item.get("scope", "shared")
@@ -111,11 +135,9 @@ def item_row(item: dict, project: str, host: str, user: str) -> dict:
         meta["evidence_from"] = int(item["evidence_from"])
     if item.get("evidence_to"):
         meta["evidence_to"] = int(item["evidence_to"])
-    meta_json = json.dumps(meta, sort_keys=True)
-    if len(meta_json.encode()) > MAX_METADATA_BYTES:
-        raise ContractError(f"meta_json for {external_id} exceeds {MAX_METADATA_BYTES} bytes")
-    if len(meta) > MAX_METADATA_KEYS:
-        raise ContractError(f"meta_json for {external_id} exceeds {MAX_METADATA_KEYS} keys")
+    if labels:
+        meta["session_labels"] = ",".join(labels)
+        meta["failure_derived"] = "failure" in labels
     return {
         "external_id": external_id,
         "source": SOURCE,
@@ -125,7 +147,83 @@ def item_row(item: dict, project: str, host: str, user: str) -> dict:
         "host": host,
         "timestamp": timestamp,
         "body": body,
-        "meta_json": meta_json,
+        "meta_json": _encode_meta(meta, external_id),
+    }
+
+
+def _encode_meta(meta: dict, external_id: str) -> str:
+    meta_json = json.dumps(meta, sort_keys=True)
+    if len(meta_json.encode()) > MAX_METADATA_BYTES:
+        raise ContractError(f"meta_json for {external_id} exceeds {MAX_METADATA_BYTES} bytes")
+    if len(meta) > MAX_METADATA_KEYS:
+        raise ContractError(f"meta_json for {external_id} exceeds {MAX_METADATA_KEYS} keys")
+    return meta_json
+
+
+def _clip_chars(text: str, limit: int) -> str:
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
+
+
+def session_body(session_id: str, rec: dict, project: str) -> str:
+    """Self-contained outcome record text: reason first, then key stats."""
+    label = rec.get("label") or "partial"
+    goal = rec.get("goal") or "(no goal recorded)"
+    stats = (
+        f"label: {label}; turns: {int(rec.get('turns') or 0)};"
+        f" duration_s: {int(rec.get('duration_s') or 0)};"
+        f" models: {', '.join(rec.get('models') or []) or 'unknown'};"
+        f" tool-errors: {int(rec.get('errors') or 0)};"
+        f" user-corrections: {int(rec.get('corrections') or 0)}"
+    )
+    lines = [
+        f"# [{label}] {_clip_chars(goal, 200)}",
+        "",
+        rec.get("reason") or "(no reason recorded)",
+        "",
+        f"({stats}; project: {project}; session: {session_id})",
+    ]
+    return "\n".join(lines)
+
+
+def session_row(session_id: str, rec: dict, project: str, host: str, user: str) -> dict:
+    """One 9-column row for a judged session (``source=session_outcomes``)."""
+    slug_source = project.strip("/").replace("/", "-") or "unknown"
+    external_id = f"{SESSIONS_SOURCE}:{user}:{slug_source}:{session_id}"
+    body = session_body(session_id, rec, project)
+    content_hash = hash_body(body.encode())
+    timestamp = int(rec.get("last_ts") or 0) or None
+    label = rec.get("label") or "partial"
+    title = f"[{label}] {_clip_chars(rec.get('goal') or session_id, 140)}"
+    meta = {
+        "source": SESSIONS_SOURCE,
+        "external_id": external_id,
+        "content_hash": content_hash,
+        "title": title,
+        "host": host,
+        "user": user,
+        "project": project,
+        "session_id": session_id,
+        "label": label,
+        "reason": rec.get("reason") or "",
+        "turns": int(rec.get("turns") or 0),
+        "duration_s": int(rec.get("duration_s") or 0),
+        "models": ",".join(rec.get("models") or []),
+    }
+    if timestamp is not None:
+        meta["timestamp"] = timestamp
+    return {
+        "external_id": external_id,
+        "source": SESSIONS_SOURCE,
+        "content_hash": content_hash,
+        "title": title,
+        "url": None,
+        "host": host,
+        "timestamp": timestamp,
+        "body": body,
+        "meta_json": _encode_meta(meta, external_id),
     }
 
 
@@ -151,7 +249,7 @@ def write_slice(rows: list[dict], slice_dir: Path) -> dict[str, Path]:
     return {"data": data_path, "manifest": manifest_path}
 
 
-def validate_slice(slice_dir: Path) -> int:
+def validate_slice(slice_dir: Path, source: str = SOURCE) -> int:
     """Re-read the slice with polars and assert the full contract.
 
     Returns the row count. Raises :class:`ContractError` on any violation.
@@ -195,7 +293,7 @@ def validate_slice(slice_dir: Path) -> int:
             raise ContractError(
                 f"{row['external_id']}: content_hash {row['content_hash']} != {body_hash}"
             )
-        if row["source"] != SOURCE:
+        if row["source"] != source:
             raise ContractError(f"{row['external_id']}: source {row['source']!r}")
         meta = json.loads(row["meta_json"])
         if not isinstance(meta, dict):

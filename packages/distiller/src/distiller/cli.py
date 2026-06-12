@@ -1,4 +1,4 @@
-"""ix-distiller CLI: transcripts -> lessons -> facts markdown + corpus slice."""
+"""ix-distiller CLI: transcripts -> lessons + outcome verdicts -> corpus slices."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ix-distiller",
         description=(
             "Distill ReasoningBank-style lessons from local Claude Code "
-            "transcripts into facts markdown and a distilled_facts corpus "
-            "parquet slice."
+            "transcripts into facts markdown plus distilled_facts and "
+            "session_outcomes corpus parquet slices."
         ),
     )
     parser.add_argument("--days", type=float, default=7.0, help="lookback window (default 7)")
@@ -87,6 +87,14 @@ def run(args: argparse.Namespace) -> int:
         return 0
 
     all_items_by_project: dict[str, list[dict]] = {}
+    all_outcomes_by_project: dict[str, dict[str, dict]] = {}
+
+    def keep_state(project: str, st: dict) -> None:
+        if st["items"]:
+            all_items_by_project[project] = st["items"]
+        if st["session_outcomes"]:
+            all_outcomes_by_project[project] = st["session_outcomes"]
+
     for project, sessions in sorted(groups.items()):
         slug = transcripts.project_slug(project)
         st = state.load(args.out, args.user, slug)
@@ -98,8 +106,7 @@ def run(args: argparse.Namespace) -> int:
             if seen.get(s.session_id) != s.fingerprint()
         ][: args.max_sessions_per_project]
         if len(fresh) < args.min_sessions:
-            if st["items"]:
-                all_items_by_project[project] = st["items"]
+            keep_state(project, st)
             print(f"[{slug}] no new sessions; keeping {len(st['items'])} items")
             continue
 
@@ -113,48 +120,90 @@ def run(args: argparse.Namespace) -> int:
             result = distill.run_claude(prompt, model=args.model, claude_bin=args.claude_bin)
         except Exception as error:  # noqa: BLE001 - one project must not sink the run
             print(f"[{slug}] distillation failed: {error}", file=sys.stderr)
-            if st["items"]:
-                all_items_by_project[project] = st["items"]
+            keep_state(project, st)
             continue
 
         sessions_meta = {s.session_id: {"last_ts": s.last_ts} for s in fresh}
         st["items"] = distill.apply_operations(
             st["items"], result.operations, sessions_meta, max_new=args.max_new_items
         )
+        verdicts = distill.session_verdicts(result.session_outcomes, fresh)
         for s in fresh:
+            verdict = verdicts[s.session_id]
+            st["session_outcomes"][s.session_id] = {
+                "label": verdict["label"],
+                "reason": verdict["reason"],
+                "goal": s.goal,
+                "turns": s.message_count,
+                "duration_s": (
+                    int(s.last_ts - s.first_ts) if s.first_ts and s.last_ts else 0
+                ),
+                "models": s.models,
+                "errors": len(s.errors),
+                "corrections": len(s.corrections),
+                "last_ts": s.last_ts,
+            }
             seen[s.session_id] = s.fingerprint()
         state.save(args.out, args.user, slug, st)
+        labels = ", ".join(f"{s.session_id}={verdicts[s.session_id]['label']}" for s in fresh)
+        print(f"[{slug}] session outcomes: {labels}")
         if st["items"]:
             md_path = markdown.write(args.out, args.user, slug, project, st["items"])
             print(f"[{slug}] {len(st['items'])} items -> {md_path}")
-            all_items_by_project[project] = st["items"]
         else:
             print(f"[{slug}] model found nothing worth keeping")
+        keep_state(project, st)
 
-    rows = [
-        corpus.item_row(item, project, args.host, args.user)
+    item_rows = [
+        corpus.item_row(
+            item,
+            project,
+            args.host,
+            args.user,
+            session_labels={
+                sid: rec["label"]
+                for sid, rec in all_outcomes_by_project.get(project, {}).items()
+            },
+        )
         for project, items in sorted(all_items_by_project.items())
         for item in items
     ]
-    if not rows:
-        print("no items at all; not writing a slice")
+    session_rows = [
+        corpus.session_row(sid, rec, project, args.host, args.user)
+        for project, recs in sorted(all_outcomes_by_project.items())
+        for sid, rec in sorted(recs.items())
+    ]
+    if session_rows:
+        counts: dict[str, int] = {}
+        for project, recs in all_outcomes_by_project.items():
+            for rec in recs.values():
+                counts[rec["label"]] = counts.get(rec["label"], 0) + 1
+        print(
+            "outcome label distribution: "
+            + ", ".join(f"{label}={n}" for label, n in sorted(counts.items()))
+        )
+    if not item_rows and not session_rows:
+        print("no items or session outcomes at all; not writing slices")
         return 0
 
-    rel = f"host={args.host}/user={args.user}/source={corpus.SOURCE}"
-    slice_dir = args.out / "corpus" / Path(rel)
-    corpus.write_slice(rows, slice_dir)
-    count = corpus.validate_slice(slice_dir)
-    print(f"slice OK: {count} rows in {slice_dir} (schema + hashes validated)")
+    for source, rows in ((corpus.SOURCE, item_rows), (corpus.SESSIONS_SOURCE, session_rows)):
+        if not rows:
+            continue
+        rel = f"host={args.host}/user={args.user}/source={source}"
+        slice_dir = args.out / "corpus" / Path(rel)
+        corpus.write_slice(rows, slice_dir)
+        count = corpus.validate_slice(slice_dir, source=source)
+        print(f"slice OK: {count} rows in {slice_dir} (schema + hashes validated)")
 
-    if args.upload:
-        from . import upload
+        if args.upload:
+            from . import upload
 
-        key_prefix = f"{args.prefix.rstrip('/')}/{rel}"
-        uploaded = upload.upload_slice(
-            slice_dir, args.endpoint, args.bucket, key_prefix, env_file=args.env_file
-        )
-        for uri in uploaded:
-            print(f"uploaded {uri}")
+            key_prefix = f"{args.prefix.rstrip('/')}/{rel}"
+            uploaded = upload.upload_slice(
+                slice_dir, args.endpoint, args.bucket, key_prefix, env_file=args.env_file
+            )
+            for uri in uploaded:
+                print(f"uploaded {uri}")
     return 0
 
 

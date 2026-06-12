@@ -49,14 +49,34 @@ only genuinely new lessons. Skip sessions that teach nothing (trivial chats, \
 aborted runs with no signal). Prefer FEW high-value items: at most {max_new} \
 new items this run.
 - `sessions` lists the session ids the evidence came from.
+- Separately, judge EVERY session in the new evidence and emit exactly one \
+verdict per session id:
+  {"session_id":"<id>","label":"success"|"partial"|"failure"|"abandoned","reason":"<one line, at most 25 words>"}
+  - "success": the stated goal was accomplished.
+  - "partial": real progress, but the goal was not (or not verifiably) finished.
+  - "failure": the attempt went wrong (errors piled up, wrong approach, the \
+user had to correct or revert).
+  - "abandoned": the session fizzled with no real attempt (trivial chat, \
+immediate abort).
+  Judge from the evidence only; the `outcome-guess` line is a noisy heuristic \
+you may overrule.
 
-Respond with ONLY a JSON object: {"operations": [...]}. No prose.
+Respond with ONLY a JSON object: \
+{"operations": [...], "session_outcomes": [...]}. No prose.
 """
+
+# Closed label set for per-session outcome verdicts (ENG-2710).
+SESSION_LABELS = ("success", "partial", "failure", "abandoned")
+
+# Heuristic Session.outcome -> verdict label, used only when the model
+# returned no verdict for a session it was shown.
+_FALLBACK_LABELS = {"success": "success", "failure": "failure", "mixed": "partial"}
 
 
 @dataclass
 class DistillResult:
     operations: list[dict]
+    session_outcomes: list[dict]
     raw: str
 
 
@@ -93,6 +113,25 @@ def build_prompt(
             *digests,
         ]
     )
+
+
+def _envelope_result(envelope: object) -> str:
+    """Result text of a ``--output-format json`` envelope.
+
+    Older CLIs print one ``{"result": ...}`` object; current ones (>= 2.1)
+    print the full event array whose final entry is ``{"type": "result",
+    "result": ...}``. Handle both.
+    """
+
+    if isinstance(envelope, dict):
+        value = envelope.get("result", "")
+        return value if isinstance(value, str) else ""
+    if isinstance(envelope, list):
+        for event in reversed(envelope):
+            if isinstance(event, dict) and event.get("type") == "result":
+                value = event.get("result", "")
+                return value if isinstance(value, str) else ""
+    return ""
 
 
 def _extract_json(text: str) -> dict:
@@ -150,14 +189,22 @@ def run_claude(
         )
     try:
         envelope = json.loads(proc.stdout)
-        result_text = envelope.get("result", "")
     except json.JSONDecodeError:
         result_text = proc.stdout
+    else:
+        result_text = _envelope_result(envelope)
     parsed = _extract_json(result_text)
     operations = parsed.get("operations")
     if not isinstance(operations, list):
         raise DistillError(f"model reply lacks an operations list: {result_text[:200]!r}")
-    return DistillResult(operations=operations, raw=result_text)
+    # Outcome verdicts are best-effort: a reply without them still yields
+    # lessons, and session_verdicts falls back to the scan heuristics.
+    session_outcomes = parsed.get("session_outcomes")
+    if not isinstance(session_outcomes, list):
+        session_outcomes = []
+    return DistillResult(
+        operations=operations, session_outcomes=session_outcomes, raw=result_text
+    )
 
 
 def _word_clip(text: str, max_words: int = 120) -> str:
@@ -165,6 +212,46 @@ def _word_clip(text: str, max_words: int = 120) -> str:
     if len(words) <= max_words:
         return text.strip()
     return " ".join(words[:max_words])
+
+
+def session_verdicts(outcomes: list[dict], sessions: list) -> dict[str, dict]:
+    """Normalize model verdicts into ``{session_id: {label, reason}}``.
+
+    Exactly one verdict per passed-in session: malformed or off-label model
+    entries are dropped, verdicts for session ids the model invented are
+    ignored, and unjudged sessions fall back to the scan heuristics so the
+    sessions slice never has holes.
+    """
+
+    by_id: dict[str, dict] = {}
+    for verdict in outcomes:
+        if not isinstance(verdict, dict):
+            continue
+        sid = verdict.get("session_id")
+        label = verdict.get("label")
+        if not isinstance(sid, str) or label not in SESSION_LABELS:
+            continue
+        reason = verdict.get("reason")
+        by_id[sid] = {
+            "label": label,
+            "reason": _word_clip(reason, 25) if isinstance(reason, str) else "",
+        }
+
+    verdicts: dict[str, dict] = {}
+    for session in sessions:
+        judged = by_id.get(session.session_id)
+        if judged is not None:
+            verdicts[session.session_id] = judged
+            continue
+        if session.outcome == "unknown" and session.message_count < 6:
+            label = "abandoned"
+        else:
+            label = _FALLBACK_LABELS.get(session.outcome, "partial")
+        verdicts[session.session_id] = {
+            "label": label,
+            "reason": f"heuristic fallback (no model verdict; signals: {session.outcome})",
+        }
+    return verdicts
 
 
 def new_item_id() -> str:

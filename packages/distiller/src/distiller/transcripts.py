@@ -49,6 +49,7 @@ class Session:
     errors: list[str] = field(default_factory=list)
     final_assistant: str | None = None
     success_markers: list[str] = field(default_factory=list)
+    models: list[str] = field(default_factory=list)
     message_count: int = 0
     outcome: str = "unknown"  # success | failure | mixed | unknown
 
@@ -165,6 +166,9 @@ def parse_session(path: Path) -> Session | None:
                 elif _CORRECTION_RE.search(content) and len(session.corrections) < 6:
                     session.corrections.append(_clip(content, 320))
             else:  # assistant
+                model = message.get("model")
+                if isinstance(model, str) and model and model not in session.models:
+                    session.models.append(model)
                 text = _text_blocks(content)
                 if text.strip():
                     session.final_assistant = _clip(text, 700)

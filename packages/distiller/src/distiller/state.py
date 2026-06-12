@@ -1,4 +1,4 @@
-"""Per-(user, project) distillation state: items + which sessions were seen.
+"""Per-(user, project) distillation state: items, session verdicts, seen set.
 
 State lives under ``<out>/state/<user>/<project_slug>.json`` and is what makes
 the run incremental: items carry stable ids across runs, and a session is
@@ -16,16 +16,21 @@ def state_path(out_dir: Path, user: str, slug: str) -> Path:
     return out_dir / "state" / user / f"{slug}.json"
 
 
+def _empty() -> dict:
+    return {"project": None, "items": [], "distilled_sessions": {}, "session_outcomes": {}}
+
+
 def load(out_dir: Path, user: str, slug: str) -> dict:
     path = state_path(out_dir, user, slug)
     if not path.is_file():
-        return {"project": None, "items": [], "distilled_sessions": {}}
+        return _empty()
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
-        return {"project": None, "items": [], "distilled_sessions": {}}
+        return _empty()
     data.setdefault("items", [])
     data.setdefault("distilled_sessions", {})
+    data.setdefault("session_outcomes", {})
     return data
 
 

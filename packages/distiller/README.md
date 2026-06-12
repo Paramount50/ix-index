@@ -1,11 +1,13 @@
 # distiller
 
 Distill **ReasoningBank-style lessons** from local Claude Code transcripts
-into (a) human-readable facts markdown per `(user, project)` and (b) a
-`source=distilled_facts` **corpus parquet slice** that the existing
-archive → Iceberg-lake → Mixedbread funnel publishes automatically — the
-leader fold ingests `(host, user, source)` slices generically, so this needs
-zero Rust (see `packages/sink/parquet` and ix `docs/history-archive.md`).
+into (a) human-readable facts markdown per `(user, project)`, (b) a
+`source=distilled_facts` **corpus parquet slice**, and (c) a
+`source=session_outcomes` slice with one LLM-judged **outcome verdict per
+session**. The existing archive → Iceberg-lake → Mixedbread funnel publishes
+both slices automatically — the leader fold ingests `(host, user, source)`
+slices generically, so this needs zero Rust (see `packages/sink/parquet` and
+ix `docs/history-archive.md`).
 
 ## What it does
 
@@ -19,20 +21,31 @@ zero Rust (see `packages/sink/parquet` and ix `docs/history-archive.md`).
    successes **and** failures (guardrails), each one self-contained with
    title, ≤120-word body, scope (`user:<name>` or `shared`), outcome label,
    and provenance (session ids, repo, date range).
-3. Merges **incrementally** with the previous run's items: stable item ids,
+3. The same `claude -p` call also **judges every session** it was shown:
+   one verdict per session id with a label (`success` / `partial` /
+   `failure` / `abandoned`) and a one-line reason; sessions the model skips
+   fall back to the scan heuristics so the verdict set never has holes.
+   Lessons whose evidence includes a failed session — the most valuable
+   guardrails — carry `session_labels` + `failure_derived` in their meta.
+4. Merges **incrementally** with the previous run's items: stable item ids,
    `add`/`update` operations only, unmentioned items survive verbatim —
    never wholesale regeneration (ACE's brevity-bias / context-collapse
-   warning). State lives under `<out>/state/<user>/<project>.json`.
-4. Writes `<out>/facts/<user>/<project>.md` and the parquet slice at
-   `<out>/corpus/host=<h>/user=<u>/source=distilled_facts/` with the exact
-   9-column contract (`external_id, source, content_hash, title, url, host,
-   timestamp, body, meta_json`) + `_manifest.json` sorted-pairs sha256,
-   then validates the slice by re-reading it with polars (schema, dtypes,
-   per-row `sha256:<hex>` body hashes, manifest hash, metadata limits).
-5. `--upload` puts the slice into the fleet MinIO archive
+   warning). State (items, seen sessions, verdicts) lives under
+   `<out>/state/<user>/<project>.json`.
+5. Writes `<out>/facts/<user>/<project>.md` and two parquet slices at
+   `<out>/corpus/host=<h>/user=<u>/source=distilled_facts/` (lessons) and
+   `.../source=session_outcomes/` (one row per judged session: body = reason
+   + key stats; meta_json = label, turn count, duration, models used) with
+   the exact 9-column contract (`external_id, source, content_hash, title,
+   url, host, timestamp, body, meta_json`) + `_manifest.json` sorted-pairs
+   sha256, then validates each slice by re-reading it with polars (schema,
+   dtypes, per-row `sha256:<hex>` body hashes, manifest hash, metadata
+   limits).
+6. `--upload` puts the slices into the fleet MinIO archive
    (`http://127.0.0.1:9010`, bucket `ix-history`, prefix `corpus`); the
-   leader's hourly fold + view reconcile then make the facts searchable
-   (`search.semantic(..., source=["distilled_facts"])`).
+   leader's hourly fold + view reconcile then make them searchable
+   (`search.semantic(..., source=["distilled_facts"])`, likewise
+   `source=["session_outcomes"]`).
 
 ## Usage
 
@@ -50,4 +63,7 @@ current desired item set tombstones vanished ids on the next fold.
 `nix build .#distiller` runs the import smoke test; passthru checks run
 pytest over the parquet contract (schema, content/manifest hashes, tamper
 rejection), the incremental merge (stable ids, update-not-rewrite, caps),
-and transcript signal extraction.
+transcript signal extraction, and the outcome-labeling path (verdict
+normalization + fallback, the session_outcomes slice, failure-derived
+lesson marking, and an end-to-end run against a mocked `claude -p` that
+keeps the `PROMPT_SENTINEL` anti-recursion filter honest).
