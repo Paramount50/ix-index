@@ -24,6 +24,7 @@ mod adapter;
 mod backend;
 mod config;
 mod content;
+mod context;
 mod db;
 mod error;
 mod manifest;
@@ -40,6 +41,7 @@ pub use backend::{
 };
 pub use config::{Config, DEFAULT_STORE, WEB_STORE};
 pub use content::ContentHash;
+pub use context::{ContextView, context};
 pub use db::{Db, db_path};
 pub use error::{Error, Result};
 pub use manifest::{FileEntry, Manifest};

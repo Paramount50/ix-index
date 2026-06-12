@@ -96,7 +96,11 @@ impl DisplayHit {
     /// Build a hit from a backend [`SearchHit`] under `label`, carrying the
     /// provenance through. Construction lives here so every projection branch
     /// keeps the same metadata.
-    fn from_hit(label: String, hit: SearchHit) -> Self {
+    // `pub(crate)`: the context view (`context.rs`) projects its turns through
+    // the same constructor; the lint fires because the module is private, but
+    // the method is shared via the crate, not the public API.
+    #[allow(clippy::redundant_pub_crate)]
+    pub(crate) fn from_hit(label: String, hit: SearchHit) -> Self {
         let provenance = hit.provenance;
         Self {
             label,
@@ -364,7 +368,11 @@ fn store_identifiers(store_name: &str, include_web: bool) -> Vec<String> {
 
 /// Over-fetch so that client-side filtering still leaves enough results. Other
 /// checkouts' code can crowd the raw top-k, so we ask for more than we show.
-fn overfetch(top_k: usize) -> usize {
+// `pub(crate)`: the context view (`context.rs`) over-fetches its chunk
+// listings under the same policy; the lint fires because the module is
+// private, but the function is shared via the crate, not the public API.
+#[allow(clippy::redundant_pub_crate)]
+pub(crate) fn overfetch(top_k: usize) -> usize {
     top_k.saturating_mul(4).max(top_k.saturating_add(10))
 }
 

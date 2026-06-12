@@ -21,9 +21,9 @@ use clap::error::ErrorKind;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use indicatif::ProgressBar;
 use search_core::{
-    CodeScope, DEFAULT_RERANK_MODEL, DEFAULT_STORE, DisplayHit, Filter, FilterSpec, GrepOptions,
-    GrepTargets, KNOWN_SOURCE_TAGS, Manifest, MixedbreadStore, RenderMode, Rerank, SearchOptions,
-    Source, build_filter, parse_time_spec,
+    CodeScope, ContextView, DEFAULT_RERANK_MODEL, DEFAULT_STORE, DisplayHit, Filter, FilterSpec,
+    GrepOptions, GrepTargets, KNOWN_SOURCE_TAGS, Manifest, MixedbreadStore, RenderMode, Rerank,
+    SearchOptions, Source, build_filter, parse_time_spec,
 };
 
 /// Command-line arguments.
@@ -54,6 +54,12 @@ enum Command {
     /// scoring: a deterministic "what happened lately" feed. Scope it with the
     /// usual selectors, e.g. `search recent --source shell --since 6h`.
     Recent(RecentArgs),
+    /// Expand a hit into its surrounding conversation: the turns of the same
+    /// session around the record, ordered by timestamp. Takes the hit's
+    /// `external_id` (printed in the provenance line and `--json` output) or a
+    /// bare session id; sources without a session (git, github) show the
+    /// record's own chunks in order.
+    Context(ContextArgs),
 }
 
 /// Scope selectors shared by the semantic and grep paths. With no selector the
@@ -297,6 +303,37 @@ struct RecentArgs {
     base_url: Option<String>,
 }
 
+/// Arguments for the `context` subcommand: expand one record into the
+/// conversation around it.
+#[derive(Debug, Args)]
+struct ContextArgs {
+    /// The record to expand: a hit's `external_id`
+    /// (e.g. `claude:{session}:{uuid}`), or a bare session id to list that
+    /// session from its start.
+    id: String,
+
+    /// Turns of the same session to show before the record.
+    #[arg(long, default_value_t = 5, value_name = "N")]
+    before: usize,
+
+    /// Turns of the same session to show after the record.
+    #[arg(long, default_value_t = 5, value_name = "N")]
+    after: usize,
+
+    /// Emit the conversation as one JSON object on stdout: `{"turns": [...],
+    /// "anchor": <index|null>}`, each turn shaped like a `search --json` hit.
+    #[arg(long)]
+    json: bool,
+
+    /// Store name (one store holds every worktree's content).
+    #[arg(long, env = "MXBAI_STORE")]
+    store: Option<String>,
+
+    /// Mixedbread API base URL.
+    #[arg(long = "base-url", env = "MXBAI_BASE_URL")]
+    base_url: Option<String>,
+}
+
 /// Arguments for the `grep` subcommand. Grep is local-corpus only (no web
 /// store) and shares the connection flags with the semantic path.
 // Like `SemanticArgs`, this is a flat surface of independent boolean flags; a
@@ -353,6 +390,7 @@ async fn main() -> anyhow::Result<()> {
     match cli.command {
         Some(Command::Grep(args)) => run_grep(args).await,
         Some(Command::Recent(args)) => run_recent(args).await,
+        Some(Command::Context(args)) => run_context(args).await,
         None => run(cli.semantic).await,
     }
 }
@@ -504,6 +542,84 @@ async fn run_recent(cli: RecentArgs) -> anyhow::Result<()> {
     .await;
     finish(bar);
     print_hits(&hits?, cli.json, cli.content, &palette, &root, theme)
+}
+
+/// Run the `context` subcommand: fetch the conversation around a record and
+/// render it oldest-first, the requested record marked in the margin.
+async fn run_context(cli: ContextArgs) -> anyhow::Result<()> {
+    let palette = Palette::for_stdout();
+    let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
+    let base_url = cli
+        .base_url
+        .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
+    let store = MixedbreadStore::from_login(base_url).await?;
+
+    let bar = spinner();
+    let view = search_core::context(&store, &store_name, &cli.id, cli.before, cli.after).await;
+    finish(bar);
+    let view = view?;
+
+    if cli.json {
+        // Machine-readable mode: the whole view as one JSON object, so the
+        // anchor position travels with the turns.
+        println!("{}", serde_json::to_string(&view)?);
+    } else {
+        println!("{}", render_conversation(&view, &palette));
+    }
+    Ok(())
+}
+
+/// Render a context view as a conversation: an optional session header, then
+/// one block per turn — a dim `timestamp · title` heading over the turn's
+/// text, indented so the headings carry the eye. The requested record is
+/// marked with `>` in the margin and a highlighted heading.
+fn render_conversation(view: &ContextView, palette: &Palette) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+
+    // One session header instead of repeating the identity on every turn:
+    // every turn of a window shares the session, source, and author.
+    if let Some(first) = view.turns.first() {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(session) = &first.session_id {
+            parts.push(format!("session {session}"));
+        }
+        parts.push(first.source.as_str().to_owned());
+        match (first.user.as_deref(), first.host.as_deref()) {
+            (Some(user), Some(host)) => parts.push(format!("{user}@{host}")),
+            (Some(user), None) => parts.push(user.to_owned()),
+            (None, Some(host)) => parts.push(format!("@{host}")),
+            (None, None) => {}
+        }
+        if let Some(project) = &first.project {
+            parts.push(format!("project={project}"));
+        }
+        blocks.push(paint(palette.range, &parts.join(" \u{b7} ")));
+    }
+
+    for (index, turn) in view.turns.iter().enumerate() {
+        let is_anchor = view.anchor == Some(index);
+        let marker = if is_anchor { ">" } else { " " };
+
+        let mut head: Vec<String> = Vec::new();
+        if let Some(ts) = turn.timestamp {
+            head.push(format_epoch(ts));
+        }
+        if !turn.label.is_empty() {
+            head.push(turn.label.clone());
+        }
+        // The anchor heading uses the path style so the requested record
+        // stands out; the rest stay dim, letting the bodies carry the read.
+        let style = if is_anchor { palette.path } else { palette.range };
+        let mut block = format!("{marker} {}", paint(style, &head.join(" \u{b7} ")));
+
+        for line in turn.text.trim_end().lines() {
+            block.push_str("\n    ");
+            block.push_str(line.trim_end());
+        }
+        blocks.push(block);
+    }
+
+    blocks.join("\n\n")
 }
 
 /// A terminal-only "searching" spinner for the query round-trip; piped output
@@ -1003,11 +1119,11 @@ fn numbered_plain(body: &str, start: u32) -> String {
 mod tests {
     use std::path::Path;
 
-    use search_core::{DisplayHit, Source};
+    use search_core::{ContextView, DisplayHit, Source};
 
     use super::{
-        Palette, ScopeArgs, format_epoch, parse_sources, provenance_line, render_snippet,
-        scope_is_set, split_documents,
+        Palette, ScopeArgs, format_epoch, parse_sources, provenance_line, render_conversation,
+        render_snippet, scope_is_set, split_documents,
     };
 
     /// A web hit so the snippet path renders the chunk text without reading a
@@ -1119,6 +1235,49 @@ mod tests {
     #[test]
     fn format_epoch_is_utc_minutes() {
         assert_eq!(format_epoch(1_781_222_222), "2026-06-11 23:57 UTC");
+    }
+
+    #[test]
+    fn conversation_marks_the_anchor_and_indents_bodies() {
+        let mut earlier = hit("the question\nwith two lines");
+        earlier.source = Source::new("claude_history");
+        earlier.label = "user @ proj: the question".to_owned();
+        earlier.timestamp = Some(1_781_222_222);
+        earlier.session_id = Some("sess-1".to_owned());
+        earlier.user = Some("andrew".to_owned());
+        let mut anchor = hit("the answer");
+        anchor.source = Source::new("claude_history");
+        anchor.label = "assistant @ proj: the answer".to_owned();
+        anchor.session_id = Some("sess-1".to_owned());
+
+        let view = ContextView {
+            turns: vec![earlier, anchor],
+            anchor: Some(1),
+        };
+        let out = render_conversation(&view, &Palette::plain());
+
+        // Session identity prints once, up top, not per turn.
+        assert!(out.starts_with("session sess-1"), "{out}");
+        assert!(out.contains("claude_history"), "{out}");
+        // Turns render oldest-first with indented bodies; only the anchor
+        // carries the margin marker.
+        let lines: Vec<&str> = out.lines().collect();
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.starts_with("  2026-06-11 23:57 UTC")),
+            "{out}"
+        );
+        assert!(lines.contains(&"    the question"), "{out}");
+        assert!(lines.contains(&"    with two lines"), "{out}");
+        assert_eq!(
+            lines
+                .iter()
+                .filter(|line| line.starts_with("> "))
+                .copied()
+                .collect::<Vec<_>>(),
+            vec!["> assistant @ proj: the answer"],
+        );
     }
 
     #[test]
