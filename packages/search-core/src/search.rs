@@ -492,10 +492,7 @@ mod tests {
     use crate::manifest::{FileEntry, Manifest};
 
     fn opts() -> SearchOptions {
-        SearchOptions {
-            rerank: mixedbread::Rerank::server_default(),
-            agentic: false,
-        }
+        SearchOptions::default()
     }
 
     async fn put_code(store: &MemoryStore, path: &str, content: &str) -> ContentHash {

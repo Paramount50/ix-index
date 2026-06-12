@@ -27,8 +27,27 @@ pub struct SearchOptions {
     /// Second-stage reranker selection: a toggle or a pinned model
     /// (defaults to [`mixedbread::DEFAULT_RERANK_MODEL`] at the CLI/binding edge).
     pub rerank: mixedbread::Rerank,
-    /// Let the backend plan and run several searches itself.
-    pub agentic: bool,
+    /// Let the backend plan and run several searches itself (a toggle or a
+    /// tuned config). When enabled the backend ignores `rerank` and
+    /// `rewrite_query` (the agent owns decomposition and ranking).
+    pub agentic: mixedbread::Agentic,
+    /// Rewrite the query backend-side before embedding it.
+    pub rewrite_query: bool,
+    /// Apply the store's backend-side search rules (the backend default).
+    pub apply_search_rules: bool,
+}
+
+impl Default for SearchOptions {
+    /// The interactive defaults: backend-default reranking on, everything
+    /// else as the backend would behave with no options at all.
+    fn default() -> Self {
+        Self {
+            rerank: mixedbread::Rerank::server_default(),
+            agentic: mixedbread::Agentic::off(),
+            rewrite_query: false,
+            apply_search_rules: true,
+        }
+    }
 }
 
 /// Knobs forwarded to the backend's grep call.

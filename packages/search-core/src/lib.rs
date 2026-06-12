@@ -57,6 +57,7 @@ pub use sync::{SyncReport, sync, wait_until_indexed};
 // Re-export the shared metadata and filter types so binaries depend only on
 // search-core.
 pub use mixedbread::{
-    Condition, DEFAULT_RERANK_MODEL, Filter, Group, Operator, Rerank, SortBy,
+    Agentic, AgenticConfig, Condition, DEFAULT_RERANK_MODEL, FileIds, Filter, Group, Operator,
+    Rerank, SortBy,
 };
 pub use source_meta::{Document, KNOWN_SOURCE_TAGS, RepoSlug, Source, SourceAdapter};

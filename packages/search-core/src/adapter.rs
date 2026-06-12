@@ -57,6 +57,10 @@ fn to_client_options(options: SearchOptions) -> mixedbread::SearchOptions {
         // Always request metadata so each hit's `source` and `content_hash` come
         // back; the projection needs `source` to scope correctly.
         return_metadata: Some(true),
+        // The booleans match the API defaults when at rest; send a key only on
+        // the non-default setting so the default wire body stays unchanged.
+        rewrite_query: options.rewrite_query.then_some(true),
+        apply_search_rules: (!options.apply_search_rules).then_some(false),
     }
 }
 
@@ -176,7 +180,7 @@ impl Store for MixedbreadStore {
     ) -> Result<Vec<SearchHit>> {
         let chunks = self
             .client
-            .search(stores, query, top_k, to_client_options(options), filters)
+            .search(stores, query, top_k, to_client_options(options), filters, None)
             .await
             .context(BackendSnafu)?;
         Ok(chunks.into_iter().map(hit_from_chunk).collect())
@@ -230,7 +234,7 @@ impl Store for MixedbreadStore {
     ) -> Result<Answer> {
         let response = self
             .client
-            .ask(stores, query, top_k, to_client_options(options), filters)
+            .ask(stores, query, top_k, to_client_options(options), filters, None)
             .await
             .context(BackendSnafu)?;
         Ok(Answer {

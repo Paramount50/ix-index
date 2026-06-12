@@ -21,9 +21,9 @@ use clap::error::ErrorKind;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use indicatif::ProgressBar;
 use search_core::{
-    CodeScope, ContextView, DEFAULT_RERANK_MODEL, DEFAULT_STORE, DisplayHit, Filter, FilterSpec,
-    GrepOptions, GrepTargets, KNOWN_SOURCE_TAGS, Manifest, MixedbreadStore, RenderMode, Rerank,
-    SearchOptions, Source, build_filter, parse_time_spec,
+    Agentic, AgenticConfig, CodeScope, ContextView, DEFAULT_RERANK_MODEL, DEFAULT_STORE,
+    DisplayHit, Filter, FilterSpec, GrepOptions, GrepTargets, KNOWN_SOURCE_TAGS, Manifest,
+    MixedbreadStore, RenderMode, Rerank, SearchOptions, Source, build_filter, parse_time_spec,
 };
 
 /// Command-line arguments.
@@ -230,6 +230,11 @@ struct SemanticArgs {
     #[arg(long = "reranker", default_value_t = DEFAULT_RERANK_MODEL.to_owned())]
     reranker: String,
 
+    /// Cap the result list after reranking (the reranker reads the full
+    /// candidate set either way). Conflicts with `--no-rerank`.
+    #[arg(long = "rerank-top-k", value_name = "N", conflicts_with = "no_rerank")]
+    rerank_top_k: Option<usize>,
+
     /// Include web results from the hosted web store.
     #[arg(short = 'w', long)]
     web: bool,
@@ -241,6 +246,25 @@ struct SemanticArgs {
     /// relevance, on a different score scale than the reranker).
     #[arg(long)]
     agentic: bool,
+
+    /// Cap the agentic search rounds (server default 3, max 10). Implies
+    /// --agentic.
+    #[arg(long = "agentic-max-rounds", value_name = "N")]
+    agentic_max_rounds: Option<u32>,
+
+    /// Extra instructions for the agentic search agent. Implies --agentic.
+    #[arg(long = "agentic-instructions", value_name = "TEXT")]
+    agentic_instructions: Option<String>,
+
+    /// Rewrite the query server-side before embedding it (off by default;
+    /// ignored under --agentic, where the agent owns query decomposition).
+    #[arg(long = "rewrite-query")]
+    rewrite_query: bool,
+
+    /// Skip the store's server-side search rules for this query (applied by
+    /// default).
+    #[arg(long = "no-search-rules")]
+    no_search_rules: bool,
 
     /// Emit results as a JSON array on stdout instead of the human listing.
     /// Each element is `{path, source, start_line, num_lines, score, text}`
@@ -395,6 +419,54 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+/// The bare-search query. A missing one exits with a clap usage error
+/// (stderr, exit 2, no backtrace) rather than an `anyhow` error, whose Debug
+/// print carries a stack trace under `RUST_BACKTRACE`; `pattern` is optional
+/// at the clap layer only so the subcommands can be invoked without it.
+fn require_pattern(cli: &SemanticArgs) -> String {
+    cli.pattern.clone().unwrap_or_else(|| {
+        Cli::command()
+            .error(
+                ErrorKind::MissingRequiredArgument,
+                "a query is required: `search <pattern> [path]`",
+            )
+            .exit()
+    })
+}
+
+/// An authenticated store handle and the resolved store name.
+struct Connection {
+    store: MixedbreadStore,
+    name: String,
+}
+
+/// Resolve the shared connection flags (defaulting the store name and base
+/// URL) and authenticate.
+async fn connect(store: Option<String>, base_url: Option<String>) -> anyhow::Result<Connection> {
+    let name = store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
+    let base_url = base_url.unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
+    let store = MixedbreadStore::from_login(base_url).await?;
+    Ok(Connection { store, name })
+}
+
+/// Print a question-answering view: the synthesized answer, then its sources
+/// in the same rendering the result listing uses.
+fn print_answer(
+    view: &search_core::AnswerView,
+    content: bool,
+    palette: &Palette,
+    root: &Path,
+    theme: code_highlight::Theme,
+) {
+    println!("{}", view.answer);
+    if !view.sources.is_empty() {
+        println!();
+        for (index, hit) in view.sources.iter().enumerate() {
+            println!("{index}: {}", render(hit, content, palette, root, theme));
+        }
+    }
+}
+
 /// The projection mode for a `--compact` flag.
 const fn render_mode(compact: bool) -> RenderMode {
     if compact {
@@ -405,19 +477,7 @@ const fn render_mode(compact: bool) -> RenderMode {
 }
 
 async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
-    // `pattern` is optional at the clap layer so the `grep` subcommand can be
-    // invoked without it. A bare search still requires one: reject a missing
-    // query with a clap usage error (stderr, exit 2, no backtrace) rather than
-    // an `anyhow` error, whose Debug print carries a stack trace under
-    // `RUST_BACKTRACE`.
-    let Some(pattern) = cli.pattern.clone() else {
-        Cli::command()
-            .error(
-                ErrorKind::MissingRequiredArgument,
-                "a query is required: `search <pattern> [path]`",
-            )
-            .exit();
-    };
+    let pattern = require_pattern(&cli);
 
     // Pipe-in mode: `ls | search "query"` (or `gh issue list | search "..."`)
     // ranks the piped lines against the query semantically instead of searching
@@ -443,25 +503,18 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
         code_highlight::Theme::default()
     };
 
-    let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
-    let base_url = cli
-        .base_url
-        .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
-    let store = MixedbreadStore::from_login(base_url).await?;
+    let Connection {
+        store,
+        name: store_name,
+    } = connect(cli.store.clone(), cli.base_url.clone()).await?;
 
-    let filter = resolve_scope(&cli.scope)?;
     // Pure query: no local checkout is read, so code is scoped server-side and
     // the manifest is empty (it only ever held this checkout's hashes).
     let manifest = Manifest::default();
-    let options = SearchOptions {
-        rerank: if cli.no_rerank {
-            Rerank::off()
-        } else {
-            Rerank::model(cli.reranker)
-        },
-        agentic: cli.agentic,
-    };
+    let options = search_options(&cli);
     let top_k = cli.max_count.max(1);
+
+    let filter = resolve_scope(&cli.scope)?;
 
     let bar = spinner();
     if cli.answer {
@@ -482,17 +535,7 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
         )
         .await;
         finish(bar);
-        let view = view?;
-        println!("{}", view.answer);
-        if !view.sources.is_empty() {
-            println!();
-            for (index, hit) in view.sources.iter().enumerate() {
-                println!(
-                    "{index}: {}",
-                    render(hit, cli.content, &palette, &root, theme)
-                );
-            }
-        }
+        print_answer(&view?, cli.content, &palette, &root, theme);
         Ok(())
     } else {
         let hits = search_core::semantic(
@@ -524,11 +567,10 @@ async fn run_recent(cli: RecentArgs) -> anyhow::Result<()> {
         code_highlight::Theme::default()
     };
 
-    let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
-    let base_url = cli
-        .base_url
-        .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
-    let store = MixedbreadStore::from_login(base_url).await?;
+    let Connection {
+        store,
+        name: store_name,
+    } = connect(cli.store, cli.base_url).await?;
     let filter = resolve_scope(&cli.scope)?;
 
     let bar = spinner();
@@ -634,6 +676,37 @@ fn spinner() -> Option<ProgressBar> {
     Some(bar)
 }
 
+/// Resolve the agentic flags into the typed selection: any tuning flag
+/// implies agentic search on (with that tuning); otherwise the plain toggle.
+fn agentic_selection(cli: &SemanticArgs) -> Agentic {
+    if cli.agentic_max_rounds.is_some() || cli.agentic_instructions.is_some() {
+        Agentic::Config(AgenticConfig {
+            max_rounds: cli.agentic_max_rounds,
+            instructions: cli.agentic_instructions.clone(),
+            ..AgenticConfig::default()
+        })
+    } else {
+        Agentic::Toggle(cli.agentic)
+    }
+}
+
+/// Resolve the option flags into the backend search options.
+fn search_options(cli: &SemanticArgs) -> SearchOptions {
+    SearchOptions {
+        rerank: if cli.no_rerank {
+            Rerank::off()
+        } else {
+            Rerank::Model {
+                model: cli.reranker.clone(),
+                top_k: cli.rerank_top_k,
+            }
+        },
+        agentic: agentic_selection(cli),
+        rewrite_query: cli.rewrite_query,
+        apply_search_rules: !cli.no_search_rules,
+    }
+}
+
 /// Clear the spinner, if any, before printing results.
 fn finish(bar: Option<ProgressBar>) {
     if let Some(bar) = bar {
@@ -651,11 +724,10 @@ async fn run_grep(cli: GrepArgs) -> anyhow::Result<()> {
         code_highlight::Theme::default()
     };
 
-    let store_name = cli.store.unwrap_or_else(|| DEFAULT_STORE.to_owned());
-    let base_url = cli
-        .base_url
-        .unwrap_or_else(|| mixedbread::DEFAULT_BASE_URL.to_owned());
-    let store = MixedbreadStore::from_login(base_url).await?;
+    let Connection {
+        store,
+        name: store_name,
+    } = connect(cli.store, cli.base_url).await?;
 
     let filter = resolve_scope(&cli.scope)?;
     let manifest = Manifest::default();
@@ -754,6 +826,14 @@ async fn run_piped(cli: &SemanticArgs, pattern: &str, docs: Vec<String>) -> anyh
     anyhow::ensure!(
         !cli.agentic,
         "--agentic is not supported with piped input; pipe mode runs a single rerank of the piped lines",
+    );
+    anyhow::ensure!(
+        !cli.rewrite_query
+            && !cli.no_search_rules
+            && cli.rerank_top_k.is_none()
+            && cli.agentic_max_rounds.is_none()
+            && cli.agentic_instructions.is_none(),
+        "search-option flags (--rewrite-query/--no-search-rules/--rerank-top-k/--agentic-*) are not supported with piped input; pipe mode runs a single rerank of the piped lines",
     );
     anyhow::ensure!(
         !scope_is_set(&cli.scope),

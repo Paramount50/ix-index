@@ -178,7 +178,8 @@ pub const DEFAULT_RERANK_MODEL: &str = "mixedbread-ai/mxbai-rerank-v3-listwise";
 /// Serialized as the API's `rerank` field, which is `boolean | object`:
 /// [`Rerank::Toggle`] serializes to a bare bool (so the legacy "just turn it
 /// on/off" wire body is byte-for-byte unchanged), while [`Rerank::Model`]
-/// serializes to `{ "model": "..." }` to pin a specific reranking model.
+/// serializes to the `RerankConfig` object form (`{ "model": "...", "top_k":
+/// N }`, optional fields omitted) to pin a model and cap the reranked list.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(untagged)]
 pub enum Rerank {
@@ -189,6 +190,11 @@ pub enum Rerank {
     Model {
         /// Reranking model name forwarded to the API.
         model: String,
+        /// Cap the result list after reranking. `None` keeps every reranked
+        /// hit (the API default), so the legacy `{ "model": ... }` wire body
+        /// is unchanged when unset.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        top_k: Option<usize>,
     },
 }
 
@@ -208,7 +214,10 @@ impl Rerank {
     /// Pin a specific reranking model.
     #[must_use]
     pub fn model(name: impl Into<String>) -> Self {
-        Self::Model { model: name.into() }
+        Self::Model {
+            model: name.into(),
+            top_k: None,
+        }
     }
 
     /// The listwise reranker ([`DEFAULT_RERANK_MODEL`]).
@@ -216,6 +225,68 @@ impl Rerank {
     pub fn listwise() -> Self {
         Self::model(DEFAULT_RERANK_MODEL)
     }
+}
+
+/// Agentic search selection.
+///
+/// Serialized as the API's `agentic` field, which is `boolean | object`:
+/// [`Agentic::Toggle`] serializes to a bare bool (the legacy wire body),
+/// while [`Agentic::Config`] serializes to the `AgenticSearchConfig` object
+/// form to tune the agent. When agentic search is enabled the server ignores
+/// `rewrite_query` and `rerank` (the agent owns decomposition and ranking).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(untagged)]
+pub enum Agentic {
+    /// Toggle agentic search with the server's default configuration.
+    Toggle(bool),
+    /// Agentic search with explicit tuning.
+    Config(AgenticConfig),
+}
+
+impl Agentic {
+    /// Agentic search disabled (wire `false`).
+    #[must_use]
+    pub const fn off() -> Self {
+        Self::Toggle(false)
+    }
+
+    /// Agentic search with the server's defaults (wire `true`).
+    #[must_use]
+    pub const fn on() -> Self {
+        Self::Toggle(true)
+    }
+
+    /// Whether agentic search is enabled in any form. A config object always
+    /// enables it; only the bare `false` toggle disables it.
+    #[must_use]
+    pub const fn is_enabled(&self) -> bool {
+        !matches!(self, Self::Toggle(false))
+    }
+}
+
+/// Tuning for agentic multi-query search (the API's `AgenticSearchConfig`).
+///
+/// Every field is optional and omitted from the wire when unset, so the
+/// server default applies. `media_content` and `verbose` are deliberately not
+/// modeled: the corpus holds no image chunks, and `verbose` is documented by
+/// the API schema as internal to the Mixedbread playground.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct AgenticConfig {
+    /// Maximum number of search rounds (API default 3, max 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_rounds: Option<u32>,
+    /// Maximum queries per round (API default 4, max 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queries_per_round: Option<u32>,
+    /// Require exactly `top_k` ranked chunks in the final list. Off by
+    /// default: the agent gates results on its own judged relevance and may
+    /// return fewer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict_top_k: Option<bool>,
+    /// Extra instructions for the search agent (followed only when not in
+    /// conflict with the server's own rules; capped at 5000 chars by the API).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
 }
 
 /// Sort order for [`Client::list_chunks`]: a metadata field path and direction.
@@ -259,16 +330,17 @@ impl serde::Serialize for SortBy {
     }
 }
 
-/// Search tuning forwarded to the API.
+/// Search tuning forwarded to the API (the `search_options` body field).
 ///
-/// `score_threshold` and `return_metadata` are skipped when unset, so a caller
-/// that only sets `rerank`/`agentic` produces the same wire body as before.
+/// Every optional field is skipped when unset, so a caller that only sets
+/// `rerank`/`agentic` produces the same wire body as before.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SearchOptions {
-    /// Apply the second-stage reranker (toggle or a pinned model).
+    /// Apply the second-stage reranker (toggle or a pinned model). Ignored by
+    /// the server when agentic search is enabled.
     pub rerank: Rerank,
-    /// Let the API plan and run multiple searches.
-    pub agentic: bool,
+    /// Let the API plan and run multiple searches (toggle or tuned config).
+    pub agentic: Agentic,
     /// Drop hits scoring below this threshold (`0.0..=1.0`). Used to keep a
     /// low-relevance source from crowding a multi-source result list.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -277,6 +349,45 @@ pub struct SearchOptions {
     /// mapped back to its source. Skipped when `None` (API default applies).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub return_metadata: Option<bool>,
+    /// Rewrite the query server-side before embedding it. Skipped when `None`
+    /// (API default `false`); ignored by the server when agentic search is
+    /// enabled (the agent owns query decomposition).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rewrite_query: Option<bool>,
+    /// Apply the store's server-side search rules. Skipped when `None` (API
+    /// default `true`); `Some(false)` bypasses the rules for one query.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub apply_search_rules: Option<bool>,
+}
+
+/// File-id scoping for search and question-answering.
+///
+/// Restricts matching chunks to (or excludes) a set of store file UUIDs,
+/// `AND`ed with any metadata `filters`. Serialized as the API's request-level
+/// `file_ids` field, which is `[id, ...] | [operator, [id, ...]]`.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(untagged)]
+pub enum FileIds {
+    /// Bare inclusion list (wire `["id", ...]`).
+    Include(Vec<String>),
+    /// Operator form (wire `["in" | "not_in", ["id", ...]]`). Only
+    /// [`Operator::In`] and [`Operator::NotIn`] are meaningful here; the API
+    /// rejects other operators.
+    Scoped(Operator, Vec<String>),
+}
+
+impl FileIds {
+    /// Keep only chunks from these store files.
+    #[must_use]
+    pub const fn include(ids: Vec<String>) -> Self {
+        Self::Include(ids)
+    }
+
+    /// Exclude chunks from these store files.
+    #[must_use]
+    pub const fn exclude(ids: Vec<String>) -> Self {
+        Self::Scoped(Operator::NotIn, ids)
+    }
 }
 
 /// A file as reported by the store's file listing.
@@ -569,7 +680,8 @@ impl Client {
         expect_ok(resp).await
     }
 
-    /// Search one or more stores.
+    /// Search one or more stores. `file_ids` further scopes matching chunks to
+    /// (or away from) specific store files, `AND`ed with `filters`.
     ///
     /// # Errors
     /// Returns an error if the request fails or cannot be decoded.
@@ -580,6 +692,7 @@ impl Client {
         top_k: usize,
         options: SearchOptions,
         filters: Option<&filter::Filter>,
+        file_ids: Option<&FileIds>,
     ) -> Result<Vec<Chunk>> {
         let request = SearchRequest {
             query,
@@ -587,6 +700,7 @@ impl Client {
             top_k,
             search_options: options,
             filters,
+            file_ids,
         };
         let search_url = self.url("/v1/stores/search");
         let resp = self
@@ -669,7 +783,8 @@ impl Client {
         Ok(response.data.into_iter().map(Chunk::from).collect())
     }
 
-    /// Ask a natural-language question against one or more stores.
+    /// Ask a natural-language question against one or more stores. `file_ids`
+    /// scopes the answering context like [`search`](Self::search).
     ///
     /// # Errors
     /// Returns an error if the request fails or cannot be decoded.
@@ -680,6 +795,7 @@ impl Client {
         top_k: usize,
         options: SearchOptions,
         filters: Option<&filter::Filter>,
+        file_ids: Option<&FileIds>,
     ) -> Result<AnswerResponse> {
         let request = SearchRequest {
             query,
@@ -687,6 +803,7 @@ impl Client {
             top_k,
             search_options: options,
             filters,
+            file_ids,
         };
         let ask_url = self.url("/v1/stores/question-answering");
         let resp = self
@@ -895,6 +1012,10 @@ struct SearchRequest<'a> {
     search_options: SearchOptions,
     #[serde(skip_serializing_if = "Option::is_none")]
     filters: Option<&'a filter::Filter>,
+    // Request-level, not part of `search_options`: the API scopes by file ids
+    // alongside (ANDed with) the metadata filter.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file_ids: Option<&'a FileIds>,
 }
 
 #[derive(serde::Serialize)]
@@ -1020,8 +1141,9 @@ mod tests {
     use std::time::Duration;
 
     use super::{
-        BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL, Error, HttpClient,
-        ListChunksRequest, ListRequest, MAX_RETRIES, RawChunk, Rerank, SortBy, backoff,
+        Agentic, AgenticConfig, BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL,
+        Error, FileIds, HttpClient, ListChunksRequest, ListRequest, MAX_RETRIES, RawChunk, Rerank,
+        SearchOptions, SearchRequest, SortBy, backoff,
     };
     use crate::{Filter, Operator};
 
@@ -1162,10 +1284,138 @@ mod tests {
             serde_json::to_value(Rerank::server_default()).expect("serialize"),
             serde_json::json!(true)
         );
-        // A pinned model serializes to the `{ "model": ... }` object form.
+        // A pinned model serializes to the `{ "model": ... }` object form,
+        // with no `top_k` key when unset.
         assert_eq!(
             serde_json::to_value(Rerank::listwise()).expect("serialize"),
             serde_json::json!({ "model": DEFAULT_RERANK_MODEL })
+        );
+        // A capped rerank adds `top_k` (the API's RerankConfig).
+        assert_eq!(
+            serde_json::to_value(Rerank::Model {
+                model: DEFAULT_RERANK_MODEL.to_owned(),
+                top_k: Some(5),
+            })
+            .expect("serialize"),
+            serde_json::json!({ "model": DEFAULT_RERANK_MODEL, "top_k": 5 })
+        );
+    }
+
+    #[test]
+    fn agentic_serializes_as_bool_or_config_object() {
+        // The toggle keeps the legacy bare-bool body; a config serializes to
+        // the AgenticSearchConfig object with unset fields omitted (the API
+        // treats absent and null differently for some fields).
+        assert_eq!(
+            serde_json::to_value(Agentic::off()).expect("serialize"),
+            serde_json::json!(false)
+        );
+        assert_eq!(
+            serde_json::to_value(Agentic::on()).expect("serialize"),
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            serde_json::to_value(Agentic::Config(AgenticConfig {
+                max_rounds: Some(2),
+                instructions: Some("prefer recent records".to_owned()),
+                ..AgenticConfig::default()
+            }))
+            .expect("serialize"),
+            serde_json::json!({ "max_rounds": 2, "instructions": "prefer recent records" })
+        );
+
+        assert!(!Agentic::off().is_enabled());
+        assert!(Agentic::on().is_enabled());
+        assert!(Agentic::Config(AgenticConfig::default()).is_enabled());
+    }
+
+    #[test]
+    fn search_request_matches_the_documented_wire_shape() {
+        // Pins the `/v1/stores/search` body across every option this client
+        // models: the StoreChunkSearchOptions fields live under
+        // `search_options`, while `file_ids` is a sibling of `filters` at the
+        // request level (verified against the live API, 2026-06-12).
+        let filter = Filter::eq("source", "code");
+        let file_ids = FileIds::exclude(vec!["2b5d7a52".to_owned()]);
+        let request = SearchRequest {
+            query: "upload",
+            store_identifiers: &["index".to_owned()],
+            top_k: 3,
+            search_options: SearchOptions {
+                rerank: Rerank::Model {
+                    model: DEFAULT_RERANK_MODEL.to_owned(),
+                    top_k: Some(2),
+                },
+                agentic: Agentic::off(),
+                score_threshold: None,
+                return_metadata: Some(true),
+                rewrite_query: Some(true),
+                apply_search_rules: Some(false),
+            },
+            filters: Some(&filter),
+            file_ids: Some(&file_ids),
+        };
+        assert_eq!(
+            serde_json::to_value(&request).expect("serialize"),
+            serde_json::json!({
+                "query": "upload",
+                "store_identifiers": ["index"],
+                "top_k": 3,
+                "search_options": {
+                    "rerank": { "model": DEFAULT_RERANK_MODEL, "top_k": 2 },
+                    "agentic": false,
+                    "return_metadata": true,
+                    "rewrite_query": true,
+                    "apply_search_rules": false,
+                },
+                "filters": { "key": "source", "operator": "eq", "value": "code" },
+                "file_ids": ["not_in", ["2b5d7a52"]],
+            })
+        );
+
+        // With every new knob unset the legacy wire body is unchanged: no
+        // rewrite_query/apply_search_rules/file_ids keys at all.
+        let legacy = SearchRequest {
+            query: "upload",
+            store_identifiers: &["index".to_owned()],
+            top_k: 3,
+            search_options: SearchOptions {
+                rerank: Rerank::off(),
+                agentic: Agentic::off(),
+                score_threshold: None,
+                return_metadata: None,
+                rewrite_query: None,
+                apply_search_rules: None,
+            },
+            filters: None,
+            file_ids: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&legacy).expect("serialize"),
+            serde_json::json!({
+                "query": "upload",
+                "store_identifiers": ["index"],
+                "top_k": 3,
+                "search_options": { "rerank": false, "agentic": false },
+            })
+        );
+    }
+
+    #[test]
+    fn file_ids_serialize_as_bare_list_or_operator_tuple() {
+        assert_eq!(
+            serde_json::to_value(FileIds::include(vec!["a".to_owned(), "b".to_owned()]))
+                .expect("serialize"),
+            serde_json::json!(["a", "b"])
+        );
+        assert_eq!(
+            serde_json::to_value(FileIds::Scoped(Operator::In, vec!["a".to_owned()]))
+                .expect("serialize"),
+            serde_json::json!(["in", ["a"]])
+        );
+        assert_eq!(
+            serde_json::to_value(FileIds::exclude(vec!["a".to_owned()])).expect("serialize"),
+            serde_json::json!(["not_in", ["a"]])
         );
     }
 

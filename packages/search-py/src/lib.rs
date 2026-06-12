@@ -153,7 +153,11 @@ fn semantic(
         (true, Some(model)) => Rerank::model(model),
         (true, None) => Rerank::listwise(),
     };
-    let options = SearchOptions { rerank, agentic };
+    let options = SearchOptions {
+        rerank,
+        agentic: search_core::Agentic::Toggle(agentic),
+        ..SearchOptions::default()
+    };
     // Keep every value the borrowed `search_core::semantic` call reads owned in
     // one frame, so the future handed to `future_into_py` stays `'static`.
     let args = SearchArgs {
