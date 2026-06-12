@@ -189,8 +189,11 @@ struct Cli {
     /// Mixedbread records (slack, linear, github, git): delete records whose
     /// `external_id` vanished from this run's complete input, and
     /// exact-duplicate (`external_id`, `content_hash`) file objects left
-    /// behind by retried uploads, keeping the newest. Off by default. Only a
-    /// source that
+    /// behind by retried uploads, keeping the newest. With the Iceberg lake
+    /// sink active, the same vanished set is appended to the lake as explicit
+    /// tombstone records — the ONLY way lake rows are ever deleted; the lake
+    /// fold itself never infers deletion from absence (ENG-2696). Off by
+    /// default. Only a source that
     /// ran this invocation is touched, and the append-only history sources
     /// (claude, codex, shell, debug) are never GC'd: their scans are
     /// incremental windows, not complete snapshots, so absence there proves
@@ -265,8 +268,10 @@ async fn main() -> anyhow::Result<()> {
 
     // GC diffs the store against a freshly scanned complete input, so it only
     // makes sense on the scan path (the consume modes have their own
-    // replace/tombstone delete semantics) and only with the Mixedbread sink
-    // (it prunes the Mixedbread view, nothing else).
+    // replace/tombstone delete semantics) and requires the Mixedbread sink
+    // (the view it prunes). When the lake sink is also active, the vanished
+    // set is additionally appended to the lake as explicit tombstone records
+    // (ENG-2696): the lake's one deletion path.
     if cli.gc {
         anyhow::ensure!(
             consume_modes == 0,
@@ -935,7 +940,7 @@ async fn run_static_exports(
             let adapter = source_slack::SlackExport::open(dir)
                 .with_context(|| format!("reading Slack export at {}", dir.display()))?;
             let produced = run_source("slack", &adapter, mixedbread, parquet, lake).await?;
-            gc_source("slack", &adapter.source(), &produced, cli.gc, mixedbread).await
+            gc_source("slack", &adapter.source(), &produced, cli.gc, mixedbread, lake).await
         }
         .await;
         record("slack", result, counts);
@@ -945,7 +950,7 @@ async fn run_static_exports(
             let adapter = source_linear::LinearExport::open(dir)
                 .with_context(|| format!("reading Linear export at {}", dir.display()))?;
             let produced = run_source("linear", &adapter, mixedbread, parquet, lake).await?;
-            gc_source("linear", &adapter.source(), &produced, cli.gc, mixedbread).await
+            gc_source("linear", &adapter.source(), &produced, cli.gc, mixedbread, lake).await
         }
         .await;
         record("linear", result, counts);
@@ -955,7 +960,7 @@ async fn run_static_exports(
             let adapter = source_github::GithubExport::open(dir)
                 .with_context(|| format!("reading GitHub export at {}", dir.display()))?;
             let produced = run_source("github", &adapter, mixedbread, parquet, lake).await?;
-            gc_source("github", &adapter.source(), &produced, cli.gc, mixedbread).await
+            gc_source("github", &adapter.source(), &produced, cli.gc, mixedbread, lake).await
         }
         .await;
         record("github", result, counts);
@@ -1007,6 +1012,7 @@ async fn run_git_repos(
             &produced_union,
             true,
             mixedbread,
+            lake,
         )
         .await
         {
@@ -1017,8 +1023,11 @@ async fn run_git_repos(
     }
 }
 
-/// Garbage-collect one export-complete source's Mixedbread records after a
-/// fully successful sync, when `--gc` is set (a no-op otherwise).
+/// Garbage-collect one export-complete source after a fully successful sync,
+/// when `--gc` is set (a no-op otherwise): prune the Mixedbread view, and —
+/// when the lake sink is active — append the vanished set to the lake as
+/// explicit tombstone records, the lake's ONLY deletion path (its fold never
+/// infers deletion from absence; ENG-2696).
 ///
 /// `produced` must be the COMPLETE external-id set the source emitted this
 /// run — an export directory (or the union of every `--git-repo` log) is
@@ -1032,9 +1041,23 @@ async fn gc_source(
     produced: &HashSet<String>,
     gc: bool,
     mixedbread: Option<Mixedbread<'_>>,
+    lake: Option<&IcebergReconciler>,
 ) -> anyhow::Result<()> {
     if !gc {
         return Ok(());
+    }
+    // The durable log first, matching run_source's sink order.
+    if let Some(reconciler) = lake {
+        let report = reconciler
+            .gc(source, produced)
+            .await
+            .with_context(|| format!("[{label}] lake gc"))?;
+        if !report.skipped {
+            eprintln!(
+                "[{label}] lake gc: appended {} tombstone(s)",
+                report.deletes
+            );
+        }
     }
     // Startup validation guarantees the store whenever --gc is set; a missing
     // one here is a wiring bug, surfaced rather than silently skipped.
@@ -1104,8 +1127,11 @@ async fn consume_parquet(config: &source_parquet::Config, mixedbread: Mixedbread
 ///
 /// Each slice reconciles scoped to its origin host and user, so a shared
 /// `external_id` on two hosts stays two rows instead of one host silently
-/// clobbering the other (issue #752). A slice failure is logged and tallied but
-/// never aborts the rest, matching [`run_source`].
+/// clobbering the other (issue #752). The fold is append/merge only: a
+/// document absent from a newer slice (pruned local transcripts, a reimaged
+/// host) stays live in the lake, deduped by `external_id` to its newest
+/// `content_hash` — absence never tombstones (ENG-2696). A slice failure is
+/// logged and tallied but never aborts the rest, matching [`run_source`].
 async fn fold_parquet_into_lake(
     config: &source_parquet::Config,
     catalog: std::sync::Arc<dyn lake_iceberg::Catalog>,
@@ -1151,12 +1177,7 @@ async fn fold_parquet_into_lake(
                 counts.skipped += 1;
             }
             Ok(report) => {
-                eprintln!(
-                    "[fold:{}] appended {} upserts, {} tombstones",
-                    source.as_str(),
-                    report.upserts,
-                    report.deletes
-                );
+                eprintln!("[fold:{}] appended {} upserts", source.as_str(), report.upserts);
                 counts.indexed += 1;
             }
             Err(error) => {
@@ -1267,8 +1288,8 @@ async fn index_user(
     // User-scope the parquet log so several accounts on one host do not clobber
     // each other's `source=<source>/data.parquet` (the sink overwrites that file
     // in full per run, and every account produces the same `source=claude` etc.).
-    // The lake scopes the same way: its slice (and so its tombstones) must be
-    // per-account, or one user's reconcile would delete another's documents.
+    // The lake scopes the same way: its slice must be per-account so each
+    // user's observations (and version counters) stay distinct in the fold.
     // The Mixedbread sink needs no such scoping: its `external_id`s already carry
     // the per-message uuid, so records never collide across users there.
     let user_parquet =
@@ -1609,10 +1630,7 @@ async fn run_source<A: SourceAdapter + Sync>(
     if let Some(reconciler) = lake {
         match reconciler.reconcile(&source, &documents).await {
             Ok(report) if report.skipped => eprintln!("[{label}] lake: skipped (unchanged)"),
-            Ok(report) => eprintln!(
-                "[{label}] lake: appended {} upserts, {} tombstones",
-                report.upserts, report.deletes
-            ),
+            Ok(report) => eprintln!("[{label}] lake: appended {} upserts", report.upserts),
             Err(error) => {
                 errors.push(anyhow::Error::new(error).context(format!("[{label}] lake sync")));
             }
@@ -1660,7 +1678,7 @@ mod tests {
         reason = "tests assert observable filesystem outcomes"
     )]
 
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
     use std::sync::Arc;
     use std::time::Duration;
@@ -1958,9 +1976,10 @@ mod tests {
             .expect("cursor readable")
             .expect("cursor written");
 
-        // While no consumer watches, `a` is tombstoned — then the cursor
-        // expires (an unknown snapshot id is exactly what expiry surfaces as).
-        sink.reconcile(&source, &[lake_doc("b")])
+        // While no consumer watches, `a` is explicitly gc'd (absence alone
+        // never tombstones the lake, ENG-2696) — then the cursor expires (an
+        // unknown snapshot id is exactly what expiry surfaces as).
+        sink.gc(&source, &HashSet::from(["b".to_owned()]))
             .await
             .expect("tombstone a");
         write_cursor(&cursor, 0).expect("plant an expired cursor");
@@ -1976,10 +1995,14 @@ mod tests {
             .expect("cursor rewritten");
         assert_ne!(rebuilt, 0, "the rebuild must store the snapshot it read");
 
-        // Steady state after the rebuild: the next change arrives as a delta.
+        // Steady state after the rebuild: the next change — c appears, b is
+        // explicitly gc'd — arrives as a delta.
         sink.reconcile(&source, &[lake_doc("c")])
             .await
-            .expect("replace b with c");
+            .expect("add c");
+        sink.gc(&source, &HashSet::from(["c".to_owned()]))
+            .await
+            .expect("tombstone b");
         let counts = run_cursor_consume(catalog.as_ref(), &ident, &cursor, mixedbread).await;
         assert_eq!(counts.failures, 0);
         assert_eq!(

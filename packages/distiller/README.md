@@ -55,8 +55,11 @@ ix-distiller --days 7 --user andrew --out /var/lib/ix-distiller \
   [--upload [--env-file /run/ix-secret-store/env/ix-indexer]]
 ```
 
-Updates/deletes come free with the contract: rewriting the slice with the
-current desired item set tombstones vanished ids on the next fold.
+Updates come free with the contract: rewriting the slice with the current
+desired item set folds each `external_id` to its newest `content_hash` on the
+next fold. Vanished ids are NOT deleted — the lake fold is append/merge only,
+so a row absent from a newer slice stays live (ENG-2696); deletion takes an
+explicit tombstone (the indexer's `--gc` path for export-complete sources).
 
 ## Tests
 
