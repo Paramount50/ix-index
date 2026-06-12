@@ -5,8 +5,9 @@
 //! Endpoints covered: store create/get (`/v1/stores`), the two-step file upload
 //! (`/v1/files` then `/v1/stores/{store}/files`), file listing and deletion,
 //! search (`/v1/stores/search`), regex grep (`/v1/stores/grep`),
-//! metadata-only chunk listing (`/v1/stores/list-chunks`), and
-//! question-answering (`/v1/stores/question-answering`).
+//! metadata-only chunk listing (`/v1/stores/list-chunks`),
+//! question-answering (`/v1/stores/question-answering`), and query
+//! enhancement (`/v1/stores/queries/enhance`).
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -17,8 +18,10 @@ use serde::Deserialize;
 use snafu::{OptionExt as _, ResultExt as _, Snafu};
 
 pub mod auth;
+pub mod enhance;
 pub mod filter;
 
+pub use enhance::{EnhancedQuery, FilterMode, SortDirection};
 pub use filter::{Condition, Filter, Group, Operator};
 
 /// Default API base URL.
@@ -161,6 +164,13 @@ pub enum Error {
     /// The platform returned an empty token during exchange.
     #[snafu(display("platform returned no API token; run `mgrep login` again"))]
     EmptyJwt,
+
+    /// The query-enhance endpoint answered success but carried no items. The
+    /// schema promises exactly one, so an empty list is a server contract
+    /// violation, not a "no filters extracted" result (that arrives as a query
+    /// item with empty filters).
+    #[snafu(display("queries/enhance returned no items"))]
+    EnhanceEmpty,
 }
 
 /// Result alias defaulting to this crate's [`Error`].
@@ -816,6 +826,36 @@ impl Client {
         })
     }
 
+    /// Enhance a natural-language query against one or more stores on
+    /// `/v1/stores/queries/enhance`: extract metadata filter conditions (and,
+    /// for ranking-shaped queries like "newest shell commands", a metadata
+    /// sort) from the query text. `instructions` optionally steers the
+    /// extraction. The response's single item comes back as an
+    /// [`EnhancedQuery`]; run the returned query/filter/sort yourself —
+    /// enhancement performs no search.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails, cannot be decoded, or carries no
+    /// item.
+    pub async fn enhance_query(
+        &self,
+        stores: &[String],
+        query: &str,
+        instructions: Option<&str>,
+    ) -> Result<EnhancedQuery> {
+        let request = EnhanceRequest {
+            query,
+            store_identifiers: stores,
+            instructions,
+        };
+        let enhance_url = self.url("/v1/stores/queries/enhance");
+        let resp = self
+            .send_retrying(|| Ok(self.http.post(enhance_url.as_str()).json(&request)))
+            .await?;
+        let response: EnhanceResponse = decode(resp).await?;
+        response.items.into_iter().next().context(EnhanceEmptySnafu)
+    }
+
     /// Rerank caller-supplied documents against a query on `/v1/reranking`.
     ///
     /// Unlike [`search`](Self::search), nothing is read from a store: the
@@ -1019,6 +1059,22 @@ struct SearchRequest<'a> {
 }
 
 #[derive(serde::Serialize)]
+struct EnhanceRequest<'a> {
+    query: &'a str,
+    store_identifiers: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instructions: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct EnhanceResponse {
+    // The schema promises exactly one item; default-empty so a malformed empty
+    // body surfaces as `Error::EnhanceEmpty` rather than a decode error.
+    #[serde(default)]
+    items: Vec<EnhancedQuery>,
+}
+
+#[derive(serde::Serialize)]
 struct ListChunksRequest<'a> {
     store_identifiers: &'a [String],
     top_k: usize,
@@ -1142,8 +1198,8 @@ mod tests {
 
     use super::{
         Agentic, AgenticConfig, BACKOFF_BASE, BACKOFF_CAP, Chunk, Client, DEFAULT_RERANK_MODEL,
-        Error, FileIds, HttpClient, ListChunksRequest, ListRequest, MAX_RETRIES, RawChunk, Rerank,
-        SearchOptions, SearchRequest, SortBy, backoff,
+        EnhancedQuery, Error, FileIds, HttpClient, ListChunksRequest, ListRequest, MAX_RETRIES,
+        RawChunk, Rerank, SearchOptions, SearchRequest, SortBy, backoff,
     };
     use crate::{Filter, Operator};
 
@@ -1416,6 +1472,62 @@ mod tests {
         assert_eq!(
             serde_json::to_value(FileIds::exclude(vec!["a".to_owned()])).expect("serialize"),
             serde_json::json!(["not_in", ["a"]])
+        );
+    }
+
+    #[tokio::test]
+    async fn enhance_posts_the_endpoint_and_decodes_the_single_item() {
+        // Round-trip through a real router: the request must hit
+        // `/v1/stores/queries/enhance` with the documented body, and the
+        // response's one item decodes through the tagged EnhancedQuery enum.
+        let captured: Arc<std::sync::Mutex<Option<serde_json::Value>>> = Arc::default();
+        let app = Router::new().route(
+            "/v1/stores/queries/enhance",
+            axum::routing::post({
+                let captured = Arc::clone(&captured);
+                move |axum::extract::Json(body): axum::extract::Json<serde_json::Value>| {
+                    *captured.lock().expect("lock") = Some(body);
+                    async {
+                        (
+                            StatusCode::OK,
+                            r#"{"items":[{"type":"query","query":"indexer slack messages","metadata_filters":[{"key":"source","operator":"eq","value":"slack"}],"filter_mode":"all","rank_by":null,"direction":null}]}"#,
+                        )
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+
+        let client = Client::new(format!("http://{addr}"), "test-key").expect("client");
+        let enhanced = client
+            .enhance_query(
+                &["index".to_owned()],
+                "slack messages about the indexer",
+                Some("prefer source filters"),
+            )
+            .await
+            .expect("enhance");
+        let EnhancedQuery::Query { query, .. } = &enhanced else {
+            panic!("expected query item, got {enhanced:?}");
+        };
+        assert_eq!(query, "indexer slack messages");
+        assert_eq!(
+            serde_json::to_value(enhanced.filter().expect("filter")).expect("serialize"),
+            serde_json::json!({ "key": "source", "operator": "eq", "value": "slack" })
+        );
+        assert_eq!(
+            captured.lock().expect("lock").take().expect("request body"),
+            serde_json::json!({
+                "query": "slack messages about the indexer",
+                "store_identifiers": ["index"],
+                "instructions": "prefer source filters",
+            })
         );
     }
 

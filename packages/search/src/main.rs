@@ -22,8 +22,9 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 use indicatif::ProgressBar;
 use search_core::{
     Agentic, AgenticConfig, CodeScope, ContextView, DEFAULT_RERANK_MODEL, DEFAULT_STORE,
-    DisplayHit, Filter, FilterSpec, GrepOptions, GrepTargets, KNOWN_SOURCE_TAGS, Manifest,
-    MixedbreadStore, RenderMode, Rerank, SearchOptions, Source, build_filter, parse_time_spec,
+    DisplayHit, EnhancedQuery, Filter, FilterSpec, GrepOptions, GrepTargets, KNOWN_SOURCE_TAGS,
+    Manifest, MixedbreadStore, RenderMode, Rerank, SearchOptions, SortBy, Source, build_filter,
+    parse_time_spec,
 };
 
 /// Command-line arguments.
@@ -265,6 +266,14 @@ struct SemanticArgs {
     /// default).
     #[arg(long = "no-search-rules")]
     no_search_rules: bool,
+
+    /// Enhance the query first: extract metadata filters (and, for
+    /// ranking-shaped queries like "newest shell commands", a metadata sort)
+    /// from the natural-language query server-side, print what was derived on
+    /// stderr, then run the enhanced query. Derived filters are `AND`ed with
+    /// any explicit scope selectors.
+    #[arg(long)]
+    enhance: bool,
 
     /// Emit results as a JSON array on stdout instead of the human listing.
     /// Each element is `{path, source, start_line, num_lines, score, text}`
@@ -514,7 +523,46 @@ async fn run(cli: SemanticArgs) -> anyhow::Result<()> {
     let options = search_options(&cli);
     let top_k = cli.max_count.max(1);
 
-    let filter = resolve_scope(&cli.scope)?;
+    let scope_filter = resolve_scope(&cli.scope)?;
+    let EnhancedScope {
+        pattern,
+        filter,
+        sort,
+    } = if cli.enhance {
+        anyhow::ensure!(
+            !cli.web,
+            "--enhance is not supported with --web; filters are derived from the corpus store's metadata",
+        );
+        enhance_scope(&store, &store_name, pattern, scope_filter).await?
+    } else {
+        EnhancedScope {
+            pattern,
+            filter: scope_filter,
+            sort: None,
+        }
+    };
+
+    // A sort item means the query asked for a metadata ranking, not a semantic
+    // match ("newest shell commands"): run the deterministic ranked listing
+    // under the merged filter instead of embedding the query.
+    if let Some(sort) = sort {
+        anyhow::ensure!(
+            !cli.answer,
+            "the enhanced query asks for a metadata ranking, which --answer cannot synthesize from; drop --answer or rephrase the query",
+        );
+        let bar = spinner();
+        let hits = search_core::ranked(
+            &store,
+            &store_name,
+            top_k,
+            filter.as_ref(),
+            &sort,
+            render_mode(cli.compact),
+        )
+        .await;
+        finish(bar);
+        return print_hits(&hits?, cli.json, cli.content, &palette, &root, theme);
+    }
 
     let bar = spinner();
     if cli.answer {
@@ -667,11 +715,16 @@ fn render_conversation(view: &ContextView, palette: &Palette) -> String {
 /// A terminal-only "searching" spinner for the query round-trip; piped output
 /// gets none. There is no upload or embedding phase to report any more.
 fn spinner() -> Option<ProgressBar> {
+    spinner_with("searching")
+}
+
+/// [`spinner`] with an explicit phase prefix (e.g. "enhancing").
+fn spinner_with(prefix: &'static str) -> Option<ProgressBar> {
     let bar = std::io::stderr()
         .is_terminal()
         .then(ProgressBar::new_spinner)?;
     bar.set_style(progress_style::spinner());
-    bar.set_prefix("searching");
+    bar.set_prefix(prefix);
     bar.enable_steady_tick(Duration::from_millis(120));
     Some(bar)
 }
@@ -705,6 +758,90 @@ fn search_options(cli: &SemanticArgs) -> SearchOptions {
         rewrite_query: cli.rewrite_query,
         apply_search_rules: !cli.no_search_rules,
     }
+}
+
+/// What `--enhance` resolved the query to: the (possibly rewritten) pattern,
+/// the scope filter with the derived conditions folded in, and a metadata
+/// sort when the query was ranking-shaped rather than semantic.
+struct EnhancedScope {
+    pattern: String,
+    filter: Option<Filter>,
+    sort: Option<SortBy>,
+}
+
+/// Run query enhancement and fold the result into the search scope: report
+/// what was derived on stderr, `AND` the derived filter with the explicit
+/// selectors, and surface a sort item as a [`SortBy`].
+async fn enhance_scope(
+    store: &MixedbreadStore,
+    store_name: &str,
+    pattern: String,
+    scope_filter: Option<Filter>,
+) -> anyhow::Result<EnhancedScope> {
+    let bar = spinner_with("enhancing");
+    let enhanced = store
+        .enhance_query(&[store_name.to_owned()], &pattern, None)
+        .await;
+    finish(bar);
+    let enhanced = enhanced?;
+
+    let derived = enhanced.filter();
+    report_enhancement(&enhanced, derived.as_ref())?;
+    let filter = merge_filters(scope_filter, derived);
+    Ok(match enhanced {
+        EnhancedQuery::Query { query, .. } => EnhancedScope {
+            pattern: query,
+            filter,
+            sort: None,
+        },
+        EnhancedQuery::Sort {
+            rank_by, direction, ..
+        } => EnhancedScope {
+            pattern,
+            filter,
+            sort: Some(SortBy {
+                field: rank_by,
+                ascending: direction.is_ascending(),
+            }),
+        },
+    })
+}
+
+/// `AND` the explicit scope selectors with what enhancement derived; either
+/// side may be absent.
+fn merge_filters(scope: Option<Filter>, derived: Option<Filter>) -> Option<Filter> {
+    match (scope, derived) {
+        (Some(scope), Some(derived)) => Some(Filter::all(vec![scope, derived])),
+        (scope, None) => scope,
+        (None, derived) => derived,
+    }
+}
+
+/// Print what `--enhance` derived, on stderr so `--json` keeps stdout a clean
+/// array. The filter prints as the exact JSON sent to the API, copy-pastable
+/// into other tools that take the recursive filter shape.
+///
+/// # Errors
+/// Returns an error if the derived filter fails to serialize.
+fn report_enhancement(enhanced: &EnhancedQuery, derived: Option<&Filter>) -> anyhow::Result<()> {
+    match enhanced {
+        EnhancedQuery::Query { query, .. } => eprintln!("enhanced query: {query}"),
+        EnhancedQuery::Sort {
+            rank_by, direction, ..
+        } => {
+            let direction = if direction.is_ascending() {
+                "ascending"
+            } else {
+                "descending"
+            };
+            eprintln!("enhanced sort: {rank_by} ({direction})");
+        }
+    }
+    match derived {
+        Some(filter) => eprintln!("derived filter: {}", serde_json::to_string(filter)?),
+        None => eprintln!("derived filter: (none)"),
+    }
+    Ok(())
 }
 
 /// Clear the spinner, if any, before printing results.
@@ -826,6 +963,10 @@ async fn run_piped(cli: &SemanticArgs, pattern: &str, docs: Vec<String>) -> anyh
     anyhow::ensure!(
         !cli.agentic,
         "--agentic is not supported with piped input; pipe mode runs a single rerank of the piped lines",
+    );
+    anyhow::ensure!(
+        !cli.enhance,
+        "--enhance is not supported with piped input; pipe mode ranks the piped lines, not the corpus",
     );
     anyhow::ensure!(
         !cli.rewrite_query

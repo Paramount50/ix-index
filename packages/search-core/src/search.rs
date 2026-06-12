@@ -228,17 +228,41 @@ pub async fn recent(
     filters: Option<&Filter>,
     mode: RenderMode,
 ) -> Result<Vec<DisplayHit>> {
+    ranked(
+        store,
+        store_name,
+        top_k,
+        filters,
+        &SortBy::desc(keys::TIMESTAMP),
+        mode,
+    )
+    .await
+}
+
+/// List records matching `filters` ranked by an arbitrary metadata `sort`.
+///
+/// The general form of [`recent`], for when the ranking axis comes from the
+/// caller (e.g. a query-enhance `sort` item). No semantic scoring happens, so
+/// scores are the API's placeholder.
+///
+/// # Errors
+/// Returns an error if the backend listing fails.
+pub async fn ranked(
+    store: &(impl Store + Sync),
+    store_name: &str,
+    top_k: usize,
+    filters: Option<&Filter>,
+    sort: &SortBy,
+    mode: RenderMode,
+) -> Result<Vec<DisplayHit>> {
     let stores = store_identifiers(store_name, false);
-    let sort = SortBy::desc(keys::TIMESTAMP);
     // Overfetch only matters in compact mode, where duplicate documents are
     // collapsed and the feed refills from the buffer.
     let fetch = match mode {
         RenderMode::Full => top_k,
         RenderMode::Compact => overfetch(top_k),
     };
-    let hits = store
-        .list_chunks(&stores, fetch, filters, Some(&sort))
-        .await?;
+    let hits = store.list_chunks(&stores, fetch, filters, Some(sort)).await?;
     // No manifest: this is a pure server-side listing, so code hits pass
     // through labeled by their stored path.
     Ok(project(

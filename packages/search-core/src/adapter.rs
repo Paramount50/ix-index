@@ -47,6 +47,26 @@ impl MixedbreadStore {
             .context(BackendSnafu)?;
         Ok(Self { client })
     }
+
+    /// Enhance a natural-language query: extract metadata filter conditions
+    /// (and, for ranking-shaped queries, a metadata sort) from the query text
+    /// against the stores' real metadata. An inherent method rather than part
+    /// of [`Store`]: enhancement is a Mixedbread capability with no offline
+    /// analogue, and the caller still runs the returned query itself.
+    ///
+    /// # Errors
+    /// Returns an error if the request fails or cannot be decoded.
+    pub async fn enhance_query(
+        &self,
+        stores: &[String],
+        query: &str,
+        instructions: Option<&str>,
+    ) -> Result<mixedbread::EnhancedQuery> {
+        self.client
+            .enhance_query(stores, query, instructions)
+            .await
+            .context(BackendSnafu)
+    }
 }
 
 fn to_client_options(options: SearchOptions) -> mixedbread::SearchOptions {
