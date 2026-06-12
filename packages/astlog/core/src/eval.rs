@@ -413,7 +413,8 @@ fn binding_of(
     Ok(binding)
 }
 
-/// Detect `#` predicate syntax outside string literals.
+/// Detect `#` predicate syntax outside string literals and `;` comments
+/// (tree-sitter query comments run to end of line).
 fn has_predicate(query: &str) -> bool {
     let mut in_string = false;
     let mut chars = query.chars();
@@ -422,6 +423,13 @@ fn has_predicate(query: &str) -> bool {
             '"' => in_string = !in_string,
             '\\' if in_string => {
                 chars.next();
+            }
+            ';' if !in_string => {
+                for c in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
             }
             '#' if !in_string => return true,
             _ => {}

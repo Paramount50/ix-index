@@ -193,17 +193,12 @@ fn render_value(analysis: &Analysis, value: &Value) -> String {
 
 /// Collapse a node's source text to one bounded line for terminal output.
 fn one_line(text: &str) -> String {
-    let mut flat: String = text
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(60)
-        .collect();
-    if flat.len() < text.trim().len() {
-        flat.push('…');
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = flat.chars().take(60).collect();
+    if out.chars().count() < flat.chars().count() {
+        out.push('…');
     }
-    flat
+    out
 }
 
 fn print_text(analysis: &Analysis, selected: &[String]) {

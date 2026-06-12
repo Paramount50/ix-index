@@ -174,3 +174,34 @@ fn unknown_relation_is_a_load_error() {
     };
     assert!(error.to_string().contains("no-such-rel"));
 }
+
+#[test]
+fn query_comments_are_not_predicates() -> TestResult {
+    // A `;` comment may contain `#` (and `@`): tree-sitter accepts it, so the
+    // predicate scan and the capture scan must skip comments rather than
+    // reject the rule or invent a capture name.
+    let rules = "
+(rule (brk b)
+  (match rust \"
+    ; matches #break statements, reported as @b
+    (break_expression) @b\"))
+";
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", "fn main() { loop { break; } }\n")?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+    assert_eq!(analysis.database.relations["brk"].rows().len(), 1);
+    Ok(())
+}
+
+#[test]
+fn builtin_arity_gets_the_builtin_message() {
+    let rules = "(rule (a x) (text x))";
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("wrong-arity builtin must be rejected");
+    };
+    let message = error.to_string();
+    assert!(
+        message.contains("builtin `text` takes 2 arguments, got 1"),
+        "got: {message}"
+    );
+}

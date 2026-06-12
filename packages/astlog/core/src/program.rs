@@ -17,7 +17,10 @@ use std::collections::{HashMap, HashSet};
 
 use ast_merge_langs::Lang;
 
-use crate::error::{ArityMismatchSnafu, DslSnafu, Error, UnknownLangNameSnafu, UnknownRelationSnafu};
+use crate::error::{
+    ArityMismatchSnafu, BuiltinAritySnafu, DslSnafu, Error, UnknownLangNameSnafu,
+    UnknownRelationSnafu,
+};
 use crate::sexpr::{self, Sexpr};
 
 /// Builtin atom names with their arity. Resolved before relation lookup, so a
@@ -180,10 +183,25 @@ fn check_atoms(atoms: &[BodyAtom], arities: &HashMap<&str, usize>) -> Result<(),
         let BodyAtom::App(app) = atom else {
             continue;
         };
-        let expected = match builtin_arity(&app.name) {
-            Some(arity) => arity,
-            None => *arities.get(app.name.as_str()).context_unknown(app)?,
-        };
+        if let Some(expected) = builtin_arity(&app.name) {
+            if app.args.len() != expected {
+                return BuiltinAritySnafu {
+                    name: app.name.clone(),
+                    expected,
+                    got: app.args.len(),
+                    line: app.line,
+                }
+                .fail();
+            }
+            continue;
+        }
+        let expected = *arities.get(app.name.as_str()).ok_or_else(|| {
+            UnknownRelationSnafu {
+                name: app.name.clone(),
+                line: app.line,
+            }
+            .build()
+        })?;
         if app.args.len() != expected {
             return ArityMismatchSnafu {
                 name: app.name.clone(),
@@ -195,23 +213,6 @@ fn check_atoms(atoms: &[BodyAtom], arities: &HashMap<&str, usize>) -> Result<(),
         }
     }
     Ok(())
-}
-
-/// Tiny local extension so [`check_atoms`] reads linearly.
-trait UnknownRelationExt<'a> {
-    fn context_unknown(self, app: &AppAtom) -> Result<&'a usize, Error>;
-}
-
-impl<'a> UnknownRelationExt<'a> for Option<&'a usize> {
-    fn context_unknown(self, app: &AppAtom) -> Result<&'a usize, Error> {
-        self.ok_or_else(|| {
-            UnknownRelationSnafu {
-                name: app.name.clone(),
-                line: app.line,
-            }
-            .build()
-        })
-    }
 }
 
 fn check_template(rewrite: &Rewrite) -> Result<(), Error> {
@@ -250,8 +251,9 @@ fn check_template(rewrite: &Rewrite) -> Result<(), Error> {
 
 /// Capture names mentioned in a tree-sitter query source (`@name`).
 ///
-/// Lexical scan, skipping string literals; the query is validated for real by
-/// `tree_sitter::Query::new` at evaluation setup.
+/// Lexical scan, skipping string literals and `;` comments (which run to end
+/// of line); the query is validated for real by `tree_sitter::Query::new` at
+/// evaluation setup.
 fn capture_names(query: &str) -> Vec<&str> {
     let mut names = Vec::new();
     let mut rest = query;
@@ -262,6 +264,13 @@ fn capture_names(query: &str) -> Vec<&str> {
             '"' => in_string = !in_string,
             '\\' if in_string => {
                 chars.next();
+            }
+            ';' if !in_string => {
+                for (_, c) in chars.by_ref() {
+                    if c == '\n' {
+                        break;
+                    }
+                }
             }
             '@' if !in_string => {
                 rest = &query[at + 1..];

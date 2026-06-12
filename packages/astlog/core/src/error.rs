@@ -108,12 +108,6 @@ pub enum Error {
         second_end: usize,
     },
 
-    #[snafu(display("write {}", path.display()))]
-    WriteFile {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-
     #[snafu(display("internal invariant broken: {what}"))]
     Internal { what: String },
 }
