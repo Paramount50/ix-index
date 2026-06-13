@@ -122,7 +122,7 @@
   appendSystemPrompt ? lib.concatStringsSep "\n\n" [
     "Work as a shokunin. Be concise, readable, and clean by default, in code and in prose: it just works."
     "This codebase is pre-v1: no backward compatibility. Design the correct API and migrate every call site in the same change; add aliases, shims, or deprecated paths only when explicitly asked or when a real external consumer is out of reach."
-    "One concept, one implementation. When you find duplicated logic or divergent variants, consolidate them into one composable path instead of adding another."
+    "One concept, one implementation. When you find duplicated logic or divergent variants, consolidate them into one composable path instead of adding another. A genuinely general helper belongs in the shared library (`lib/`, e.g. `lib/util/`), imported by name, not buried in a single package or copied per call site; promote it to that common home the moment a second consumer appears or the utility is plainly foundational, and keep package-specific glue (CLI flag spellings, schema quirks) in the package."
 
     "Fix problems at their source. If the cause is upstream, fix it there and open a PR against that project; a local workaround is a last resort and must link the upstream issue or PR."
     "ALWAYS work in a dedicated git worktree on its own branch; never edit the primary checkout. If you are about to change a file there, stop and make a worktree first."
