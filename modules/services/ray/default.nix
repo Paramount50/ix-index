@@ -1,21 +1,24 @@
 # One Ray cluster spanning the tailnet, plus the ix-mcp engine that drives it.
 #
-# This is the deployment side of the `fleet` Python module bundled in ix-mcp.
+# Deployment side of the `fleet` Python module bundled in ix-mcp:
 # `fleet.run`/`fleet.submit` ship cloudpickled callables to Ray and the Ray
-# object store (Plasma: zero-copy on-node, peer-to-peer transfer between nodes,
-# spill-to-disk under memory pressure) carries the data; `fleet.in_kernel` runs
-# code in a node's live ix-mcp session over the token-gated `/api/exec`. For
-# either to work cluster-wide, every node needs (a) a Ray daemon attached to one
-# cluster and (b) an ix-mcp engine whose kernel can `ray.init(address="auto")`.
-# This module wires both.
+# object store (Plasma) carries the data; `fleet.in_kernel` runs code in a
+# node's live ix-mcp session over the token-gated `/api/exec`.
 #
 # Topology: ONE Ray cluster. Exactly one node sets `role = "head"` (it holds the
-# GCS); the rest set `role = "worker"` and point `headAddress` at the head's
-# tailscale IP. The control plane is centralized on the head, but object
-# transfer between workers is peer-to-peer. All daemons bind their *tailscale*
-# IPv4 (resolved at runtime, since it is host state, not a Nix value), so the
-# cluster lives entirely on the tailnet -- which is also the trust boundary, as
-# Ray has no per-call auth of its own.
+# GCS); the rest are `role = "worker"` pointing `headAddress` at the head's
+# tailscale IP. Daemons bind their *tailscale* IPv4 (runtime host state), so the
+# cluster lives on the tailnet, which is also the trust boundary (Ray has no
+# per-call auth of its own).
+#
+# The node-level correctness here (pinned inter-node ports, a SHORT `/run/ray`
+# temp-dir so Ray's AF_UNIX plasma socket stays under the 108-byte sun_path
+# limit, and PrivateDevices/PrivateUsers off so an attaching kernel can map the
+# shared-memory object store) mirrors the proven `examples/ray-cluster`
+# cluster-node module. We use nixpkgs `python3Packages.ray` -- the same Ray the
+# ix-mcp interpreter imports, so the cluster and the kernels driving it run an
+# identical version (Ray requires matching versions cluster-wide) and the
+# daemons are FHS-correct with no nix-ld shim.
 {
   config,
   ix,
@@ -35,76 +38,88 @@ let
     types
     ;
 
-  cfg = config.services.ix-fleet;
-  dataDir = "/var/lib/ray";
+  cfg = config.services.ix-ray;
 
-  # Ray binds its tailscale IPv4, which is runtime host state (not known at Nix
-  # eval), so every daemon is launched through this wrapper: resolve the IP, fail
-  # loudly if tailscale is not up (a daemon on the wrong interface would silently
-  # never join), then exec the real command with the __IP__ placeholder in its
-  # args replaced by the resolved address.
+  # Spill target lives on real disk (the StateDirectory), NOT under the tmpfs
+  # `/run/ray` temp-dir -- otherwise "spill to disk under memory pressure" would
+  # just consume RAM. directory_path is created by Ray under the StateDirectory.
+  spillDir = "/var/lib/ray/spill";
+  spillConfig = builtins.toJSON {
+    type = "filesystem";
+    params.directory_path = spillDir;
+  };
+
+  ray = lib.getExe' cfg.package "ray";
+
+  # Mode-specific `ray start` flags. Common flags (pinned ports, temp-dir, spill,
+  # --node-ip-address, --block) are appended in the launcher once the tailscale
+  # IP is resolved. Ray's web dashboard needs the `ray[default]` extras nixpkgs
+  # core ray omits, so it is disabled; cluster state comes from `fleet.nodes()`.
+  modeArgs =
+    if cfg.role == "head" then
+      [
+        "--head"
+        "--port"
+        (toString cfg.gcsPort)
+        "--include-dashboard"
+        "false"
+      ]
+    else
+      [
+        "--address"
+        "${cfg.headAddress}:${toString cfg.gcsPort}"
+      ];
+
+  commonArgs = [
+    "--node-manager-port"
+    (toString cfg.nodeManagerPort)
+    "--object-manager-port"
+    (toString cfg.objectManagerPort)
+    "--min-worker-port"
+    (toString cfg.workerPortLow)
+    "--max-worker-port"
+    (toString cfg.workerPortHigh)
+    "--temp-dir"
+    "/run/ray"
+    "--object-spilling-config"
+    spillConfig
+  ]
+  ++ optionals (cfg.objectStoreMemory != null) [
+    "--object-store-memory"
+    (toString cfg.objectStoreMemory)
+  ];
+
+  startArgsNu = "[ ${lib.concatMapStringsSep " " builtins.toJSON (modeArgs ++ commonArgs)} ]";
+
+  # Resolve this node's tailscale IPv4 at runtime (it is host state, not a Nix
+  # value), fail loudly if tailscale is not up, then exec `ray start` bound to
+  # it. `--block` keeps the daemon in the foreground for systemd Type=simple.
   rayLauncher = ix.writeNushellApplication pkgs {
-    name = "ix-fleet-launch";
-    meta.description = "Resolve this node's tailscale IPv4 and exec a ray daemon bound to it";
+    name = "ix-ray-launch";
+    meta.description = "Resolve this node's tailscale IPv4 and exec the ray daemon bound to it";
     runtimeInputs = [
       pkgs.tailscale
       cfg.package
     ];
     text = ''
-      def main [...args: string] {
+      def main [] {
         let ip = (do --ignore-errors {
           ^tailscale ip -4 | lines | where ($it | str trim | is-not-empty) | first
         } | default "")
         if ($ip | str trim | is-empty) {
-          print --stderr "ix-fleet: no tailscale IPv4 yet; is tailscaled up?"
+          print --stderr "ix-ray: no tailscale IPv4 yet; is tailscaled up?"
           exit 1
         }
-        # `--block` keeps the daemon in the foreground for systemd Type=simple.
-        let resolved = ($args | each {|a| $a | str replace --all "__IP__" $ip })
-        exec ($resolved | first) ...($resolved | skip 1)
+        let args = [ ...${startArgsNu} "--node-ip-address" $ip "--block" ]
+        exec ${ray} ...$args
       }
     '';
   };
-
-  ray = lib.getExe' cfg.package "ray";
-
-  headArgs = [
-    ray
-    "start"
-    "--head"
-    "--node-ip-address=__IP__"
-    "--port=${toString cfg.gcsPort}"
-    "--dashboard-host=0.0.0.0"
-    "--dashboard-port=${toString cfg.dashboardPort}"
-    "--temp-dir=${dataDir}/session"
-    "--block"
-  ]
-  ++ optional (
-    cfg.objectStoreMemory != null
-  ) "--object-store-memory=${toString cfg.objectStoreMemory}";
-
-  workerArgs = [
-    ray
-    "start"
-    "--address=${cfg.headAddress}:${toString cfg.gcsPort}"
-    "--node-ip-address=__IP__"
-    "--temp-dir=${dataDir}/session"
-    "--block"
-  ]
-  ++ optional (
-    cfg.objectStoreMemory != null
-  ) "--object-store-memory=${toString cfg.objectStoreMemory}";
-
-  rayExecStart = lib.escapeShellArgs (
-    [ (lib.getExe rayLauncher) ] ++ (if cfg.role == "head" then headArgs else workerArgs)
-  );
 
   # The ix-mcp engine (no MCP transport: `notebook` is the daemon shape). Its
   # kernel auto-connects to the local Ray, and its dashboard data API exposes the
   # token-gated `/api/exec` that `fleet.in_kernel` reaches on `execPort`.
   notebookEnv = {
-    # Bind the data API to the tailscale IP (cli falls back to it when unset, but
-    # be explicit) on the fleet-wide exec port the `fleet` module expects.
     IX_MCP_DASHBOARD_PORT = toString cfg.execPort;
     IX_FLEET_EXEC_PORT = toString cfg.execPort;
   }
@@ -113,7 +128,7 @@ let
   };
 in
 {
-  options.services.ix-fleet = {
+  options.services.ix-ray = {
     enable = mkEnableOption "Ray cluster node + ix-mcp engine for the `fleet` distributed API";
 
     role = mkOption {
@@ -123,9 +138,9 @@ in
       ];
       default = "worker";
       description = ''
-        This node's role in the single cluster. Exactly one node in the fleet
-        must be `head` (it runs the GCS); every other node is a `worker` and
-        must set {option}`services.ix-fleet.headAddress`.
+        This node's role in the single cluster. Exactly one node must be `head`
+        (it runs the GCS); every other node is a `worker` and must set
+        {option}`services.ix-ray.headAddress`.
       '';
     };
 
@@ -135,15 +150,15 @@ in
       example = "100.64.0.1";
       description = ''
         The head node's tailscale IPv4. Required on workers (they join
-        `<headAddress>:<gcsPort>`); ignored on the head.
+        `<headAddress>:<gcsPort>`); must be null on the head.
       '';
     };
 
     package = mkPackageOption pkgs.python3Packages "ray" {
       extraDescription = ''
-        The `ray` daemon. Comes from the same nixpkgs pin as the ray bundled in
-        the ix-mcp interpreter, so the cluster and the kernels driving it run the
-        identical Ray version (Ray requires matching versions cluster-wide).
+        The `ray` daemon, from the same nixpkgs pin as the ray bundled in the
+        ix-mcp interpreter, so the cluster and the kernels driving it run an
+        identical Ray version (required cluster-wide).
       '';
     };
 
@@ -153,10 +168,28 @@ in
       description = "Head GCS port; workers connect here.";
     };
 
-    dashboardPort = mkOption {
+    nodeManagerPort = mkOption {
       type = types.port;
-      default = 8265;
-      description = "Ray's own web dashboard port (head only).";
+      default = 6380;
+      description = "Ray node-manager port (inter-node scheduling). Pinned so the firewall can name it.";
+    };
+
+    objectManagerPort = mkOption {
+      type = types.port;
+      default = 6381;
+      description = "Ray object-manager port (object-store transfers). Pinned so the firewall can name it.";
+    };
+
+    workerPortLow = mkOption {
+      type = types.port;
+      default = 10002;
+      description = "Low end of the pinned per-worker port range (inter-node worker RPC).";
+    };
+
+    workerPortHigh = mkOption {
+      type = types.port;
+      default = 10031;
+      description = "High end of the pinned per-worker port range.";
     };
 
     execPort = mkOption {
@@ -175,9 +208,8 @@ in
       example = 8000000000;
       description = ''
         Bytes of RAM for this node's object store (Plasma). Null lets Ray
-        autodetect (~30% of RAM); either way Ray spills to disk under
-        `${dataDir}/session` when the store fills, so referenced objects are not
-        lost.
+        autodetect (~30% of RAM). Either way Ray spills to disk under
+        `${spillDir}` when the store fills, so referenced objects are not lost.
       '';
     };
 
@@ -206,8 +238,10 @@ in
       type = types.bool;
       default = false;
       description = ''
-        Open the GCS, Ray dashboard, and exec ports. Usually unnecessary: the
-        cluster lives on the tailnet, where peers reach each other directly.
+        Open the inter-node Ray ports (node/object manager, worker range), the
+        exec port, and on the head the GCS port. Usually unnecessary on a tailnet
+        where peers reach each other directly, but required if a firewall guards
+        the tailscale interface.
       '';
     };
   };
@@ -216,106 +250,111 @@ in
     assertions = [
       {
         assertion = cfg.role == "head" -> cfg.headAddress == null;
-        message = "services.ix-fleet: the head node must not set headAddress.";
+        message = "services.ix-ray: the head node must not set headAddress.";
       }
       {
         assertion = cfg.role == "worker" -> cfg.headAddress != null;
-        message = "services.ix-fleet: a worker must set headAddress to the head's tailscale IP.";
+        message = "services.ix-ray: a worker must set headAddress to the head's tailscale IP.";
       }
     ];
 
-    users.users.ray = {
-      isSystemUser = true;
-      group = "ray";
-      home = dataDir;
-      description = "ix-fleet Ray daemon";
-    };
-    users.groups.ray = { };
-
     ix.networking.portClaims = {
-      ix-fleet-exec = {
+      ix-ray-exec = {
         protocol = "tcp";
         port = cfg.execPort;
         description = "ix-mcp /api/exec (fleet.in_kernel)";
       };
+      ix-ray-node-manager = {
+        protocol = "tcp";
+        port = cfg.nodeManagerPort;
+        description = "Ray node manager (inter-node scheduling)";
+      };
+      ix-ray-object-manager = {
+        protocol = "tcp";
+        port = cfg.objectManagerPort;
+        description = "Ray object manager (object-store transfers)";
+      };
     }
     // optionalAttrs (cfg.role == "head") {
-      ix-fleet-gcs = {
+      ix-ray-gcs = {
         protocol = "tcp";
         port = cfg.gcsPort;
         description = "Ray GCS (workers join here)";
       };
-      ix-fleet-dashboard = {
-        protocol = "tcp";
-        port = cfg.dashboardPort;
-        description = "Ray web dashboard";
-      };
     };
 
-    networking.firewall.allowedTCPPorts = optionals cfg.openFirewall (
-      [ cfg.execPort ]
-      ++ optionals (cfg.role == "head") [
-        cfg.gcsPort
-        cfg.dashboardPort
+    networking.firewall = mkIf cfg.openFirewall {
+      allowedTCPPorts = [
+        cfg.execPort
+        cfg.nodeManagerPort
+        cfg.objectManagerPort
       ]
-    );
+      ++ optional (cfg.role == "head") cfg.gcsPort;
+      allowedTCPPortRanges = [
+        {
+          from = cfg.workerPortLow;
+          to = cfg.workerPortHigh;
+        }
+      ];
+    };
 
-    ix.healthChecks.ix-fleet = {
+    ix.healthChecks.ix-ray = {
       from = "guest";
       description = "Ray node is up and attached to the cluster";
       command = [
-        (lib.getExe' cfg.package "ray")
+        ray
         "status"
         "--address"
         "127.0.0.1:${toString cfg.gcsPort}"
       ];
     };
 
-    systemd.services.ix-fleet-ray = {
-      description = "ix-fleet Ray ${cfg.role}";
+    systemd.services.ix-ray = {
+      description = "ix-ray Ray ${cfg.role}";
       after = [
         "network-online.target"
         "tailscaled.service"
       ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
+      environment = {
+        HOME = "/run/ray";
+        RAY_DISABLE_USAGE_STATS = "1";
+      };
       serviceConfig = ix.systemdHardening // {
         Type = "simple";
-        User = "ray";
-        Group = "ray";
-        StateDirectory = "ray";
-        WorkingDirectory = dataDir;
-        ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${dataDir}/session";
-        ExecStart = rayExecStart;
-        # `ray start --block` exits non-zero on stop; restart so a transient GCS
-        # blip (head restart) re-joins rather than leaving the node detached.
+        ExecStart = lib.getExe rayLauncher;
         Restart = "on-failure";
         RestartSec = 5;
+        DynamicUser = true;
+        RuntimeDirectory = "ray";
+        StateDirectory = "ray";
+        WorkingDirectory = "/run/ray";
+        # Ray's object store is host shared memory and an attaching kernel maps it
+        # from outside this unit's namespace; a private /dev (hence /dev/shm) or
+        # user namespace would block that, so both are disabled here.
+        PrivateDevices = false;
+        PrivateUsers = false;
       };
     };
 
-    systemd.services.ix-fleet-notebook = mkIf cfg.notebook.enable {
+    systemd.services.ix-ray-notebook = mkIf cfg.notebook.enable {
       description = "ix-mcp engine driving the fleet Ray cluster";
       after = [
         "network-online.target"
-        "ix-fleet-ray.service"
+        "ix-ray.service"
       ];
       wants = [ "network-online.target" ];
-      requires = [ "ix-fleet-ray.service" ];
+      requires = [ "ix-ray.service" ];
       wantedBy = [ "multi-user.target" ];
       environment = notebookEnv;
       serviceConfig = ix.systemdHardening // {
         Type = "simple";
-        User = "ray";
-        Group = "ray";
-        StateDirectory = "ray";
-        WorkingDirectory = dataDir;
-        # The engine alone (kernel + dashboard data API, no MCP transport): the
-        # daemon shape. Its `/api/exec` backs fleet.in_kernel; its kernel joins
-        # the local Ray on the first `fleet` call.
-        ExecStart = "${lib.getExe' ix.packages.mcp "ix-notebook"}";
+        ExecStart = lib.getExe' ix.packages.mcp "ix-notebook";
         Restart = "on-failure";
         RestartSec = 5;
+        StateDirectory = "ix-ray-notebook";
+        WorkingDirectory = "/var/lib/ix-ray-notebook";
       };
     };
   };

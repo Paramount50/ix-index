@@ -189,7 +189,7 @@ await fleet.scan(hosts, "df -h --output=avail /")
   and stitch the per-host output into one host-tagged polars frame; it needs no
   Python, or even Ray, on the far side.
 
-Deployment is the `services.ix-fleet` NixOS module
+Deployment is the `services.ix-ray` NixOS module
 ([`modules/services/ray`](../../modules/services/ray)): one node is the Ray
 `head`, the rest are `worker`s pointing at its tailscale IP, and every node runs
 the ix-mcp engine so its kernel can drive Ray and answer `in_kernel`. The trust

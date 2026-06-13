@@ -6,7 +6,7 @@ tags: [mcp, fleet, ray, distributed]
 links:
   - label: fleet
     href: https://github.com/indexable-inc/index/tree/main/packages/mcp/src/fleet
-  - label: services.ix-fleet
+  - label: services.ix-ray
     href: https://github.com/indexable-inc/index/tree/main/modules/services/ray
   - label: ix-mcp
     href: https://github.com/indexable-inc/index/tree/main/packages/mcp
@@ -24,4 +24,4 @@ refs = fleet.submit(heavy, x); await fleet.get(refs)       # futures + object st
 
 Ray (bundled in the interpreter) provides the distributed object store, peer-to-peer transfer between nodes, spill-to-disk under memory pressure, and true multi-process, multi-node parallelism, so a CPU-bound job is no longer stuck behind one kernel's GIL. `fleet.in_kernel(node, code)` runs a line in another node's live ix-mcp session (token-gated) to read what it is actually doing, and the original `fleet.scan` still fans a shell command over SSH for nodes with no Python.
 
-Deploy with the `services.ix-fleet` NixOS module: one node is the Ray `head`, the rest are `worker`s on the tailnet. The trust boundary is the tailnet; `in_kernel` additionally requires a shared `IX_MCP_EXEC_TOKEN`.
+Deploy with the `services.ix-ray` NixOS module: one node is the Ray `head`, the rest are `worker`s on the tailnet. The trust boundary is the tailnet; `in_kernel` additionally requires a shared `IX_MCP_EXEC_TOKEN`.

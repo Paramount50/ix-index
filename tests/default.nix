@@ -2295,20 +2295,20 @@ let
     }
   ];
 
-  # The ix-fleet service (Ray cluster node + ix-mcp engine for the `fleet`
+  # The ix-ray service (Ray cluster node + ix-mcp engine for the `fleet`
   # distributed API). Evaluated through the real image path so a broken option,
   # unit, or port claim fails here rather than in a CI image build.
-  ixFleetHead = evalConfig [
+  ixRayHead = evalConfig [
     {
-      services.ix-fleet = {
+      services.ix-ray = {
         enable = true;
         role = "head";
       };
     }
   ];
-  ixFleetWorker = evalConfig [
+  ixRayWorker = evalConfig [
     {
-      services.ix-fleet = {
+      services.ix-ray = {
         enable = true;
         role = "worker";
         headAddress = "100.64.0.1";
@@ -2317,31 +2317,44 @@ let
   ];
 
   groups = {
-    ix-fleet = [
+    ix-ray = [
       {
         # The head runs both daemons (Ray GCS + the ix-mcp engine that drives it).
-        assertion =
-          (ixFleetHead.systemd.services ? ix-fleet-ray) && (ixFleetHead.systemd.services ? ix-fleet-notebook);
-        message = "ix-fleet head should run both the Ray daemon and the ix-mcp engine";
+        assertion = (ixRayHead.systemd.services ? ix-ray) && (ixRayHead.systemd.services ? ix-ray-notebook);
+        message = "ix-ray head should run both the Ray daemon and the ix-mcp engine";
       }
       {
-        # The head exposes the GCS (workers join) and the exec port; the engine's
-        # data API binds the exec port the `fleet` module reaches peers on.
+        # The head exposes the GCS (workers join), exec, and pinned inter-node
+        # ports; the engine's data API binds the exec port peers reach.
         assertion =
           let
-            claims = ixFleetHead.ix.networking.portClaims;
+            claims = ixRayHead.ix.networking.portClaims;
           in
-          claims.ix-fleet-gcs.port == 6379 && claims.ix-fleet-exec.port == 8799;
-        message = "ix-fleet head should claim the GCS (6379) and exec (8799) ports";
+          claims.ix-ray-gcs.port == 6379
+          && claims.ix-ray-exec.port == 8799
+          && claims.ix-ray-node-manager.port == 6380
+          && claims.ix-ray-object-manager.port == 6381;
+        message = "ix-ray head should claim the GCS, exec, and inter-node manager ports";
       }
       {
-        # A worker only joins; it must not advertise a GCS of its own.
+        # A worker joins and exposes its inter-node ports, but advertises no GCS.
         assertion =
           let
-            claims = ixFleetWorker.ix.networking.portClaims;
+            claims = ixRayWorker.ix.networking.portClaims;
           in
-          (claims ? ix-fleet-exec) && !(claims ? ix-fleet-gcs);
-        message = "ix-fleet worker should expose the exec port but not a GCS port";
+          (claims ? ix-ray-exec) && (claims ? ix-ray-node-manager) && !(claims ? ix-ray-gcs);
+        message = "ix-ray worker should expose exec + manager ports but not a GCS port";
+      }
+      {
+        # The Ray daemon must use the short /run temp-dir so its plasma AF_UNIX
+        # socket path stays under the 108-byte sun_path limit, and must keep the
+        # object store mappable from an attaching kernel (PrivateDevices off).
+        assertion =
+          let
+            unit = ixRayHead.systemd.services.ix-ray.serviceConfig;
+          in
+          unit.RuntimeDirectory == "ray" && unit.PrivateDevices == false && unit.PrivateUsers == false;
+        message = "ix-ray daemon should use /run/ray and leave the shared-memory object store mappable";
       }
       {
         # A worker with no headAddress cannot know where to join: fail eval.
@@ -2349,7 +2362,7 @@ let
           let
             failures = failedAssertionsFor [
               {
-                services.ix-fleet = {
+                services.ix-ray = {
                   enable = true;
                   role = "worker";
                 };
@@ -2357,7 +2370,7 @@ let
             ];
           in
           builtins.any (a: lib.hasInfix "headAddress" a.message) failures;
-        message = "ix-fleet worker should fail evaluation without a headAddress";
+        message = "ix-ray worker should fail evaluation without a headAddress";
       }
       {
         # The head must not set headAddress (it IS the address).
@@ -2365,7 +2378,7 @@ let
           let
             failures = failedAssertionsFor [
               {
-                services.ix-fleet = {
+                services.ix-ray = {
                   enable = true;
                   role = "head";
                   headAddress = "100.64.0.1";
@@ -2374,7 +2387,7 @@ let
             ];
           in
           builtins.any (a: lib.hasInfix "headAddress" a.message) failures;
-        message = "ix-fleet head should fail evaluation when headAddress is set";
+        message = "ix-ray head should fail evaluation when headAddress is set";
       }
     ];
 
