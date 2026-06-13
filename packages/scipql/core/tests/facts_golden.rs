@@ -1,10 +1,11 @@
 //! Golden test for SCIP → facts lowering, the part that needs neither
-//! rust-analyzer nor Soufflé. `tests/fixtures/two-sockets.scip` was produced by
-//! `rust-analyzer scip` on `packages/scipql/tests/fixtures/two-sockets`, a crate
-//! with a `net::Socket` and a `mock::Socket`. The point: the two same-named
-//! structs lower to *distinct* monikers, and byte offsets land on the name.
-//! (The full index → rename pipeline is covered by the `scipql-e2e` flake
-//! check, which has rust-analyzer + souffle.)
+//! rust-analyzer nor Soufflé. `tests/fixtures/two-sockets/index.scip` was
+//! produced by `rust-analyzer scip` on the sibling `src/` (a crate with a
+//! `net::Socket` and a `mock::Socket`), both committed here so the test is
+//! self-contained in this crate's source (the cargo-unit sandbox sees only
+//! this crate). The point: the two same-named structs lower to *distinct*
+//! monikers, and byte offsets land on the name. (The full index → rename
+//! pipeline is covered by the `scipql-e2e` flake check.)
 
 use std::path::Path;
 
@@ -14,8 +15,8 @@ fn manifest_dir() -> &'static Path {
 
 #[test]
 fn lowers_same_named_structs_to_distinct_monikers() {
-    let golden = manifest_dir().join("tests/fixtures/two-sockets.scip");
-    let fixture = manifest_dir().join("../tests/fixtures/two-sockets");
+    let fixture = manifest_dir().join("tests/fixtures/two-sockets");
+    let golden = fixture.join("index.scip");
     let index = scipql_core::load_index(&golden).expect("load golden index");
     let facts = scipql_core::facts_from_index(&index, Some(&fixture)).expect("lower facts");
 

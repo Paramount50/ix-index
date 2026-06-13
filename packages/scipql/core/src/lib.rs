@@ -16,7 +16,7 @@
 use std::path::Path;
 
 use scip::types::Index;
-use snafu::ResultExt as _;
+use snafu::{ResultExt as _, ensure};
 
 mod error;
 mod facts;
@@ -37,9 +37,10 @@ fn resolve_root(index: &Index, root: Option<&Path>) -> std::path::PathBuf {
     root.map_or_else(|| facts::project_root(index), Path::to_path_buf)
 }
 
-/// Run a Soufflé `program` over the facts lowered from `index` and return every
-/// `.output` relation. The fact relations ([`SCHEMA`]) are in scope; the
-/// program only writes its own rules and `.output` directives.
+/// Run a Soufflé `program` over the facts lowered from `index`.
+///
+/// Returns every `.output` relation. The fact relations ([`SCHEMA`]) are in
+/// scope; the program only writes its own rules and `.output` directives.
 ///
 /// # Errors
 ///
@@ -84,5 +85,6 @@ pub fn rename(
     new_name: &str,
     write: bool,
 ) -> Result<String, Error> {
+    ensure!(!selector.is_empty(), crate::error::EmptySelectorSnafu);
     fix(index, root, &rename::program(selector, new_name), write)
 }

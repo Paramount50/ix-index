@@ -36,7 +36,7 @@ fn index(project: &str, output: &str) -> PyResult<String> {
 
 /// Lower a SCIP index into the four fact relations, each a list of row dicts:
 /// `occurrence` {symbol, path, start, end, role}, `symbol_info`
-/// {symbol, kind, display_name}, `document` {path}, `relationship`
+/// {symbol, kind, `display_name`}, `document` {path}, `relationship`
 /// {symbol, related, kind}.
 #[pyfunction]
 #[pyo3(signature = (index_path, root = None))]

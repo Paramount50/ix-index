@@ -37,6 +37,9 @@ pub const BUILTINS: &[(&str, usize)] = &[
     ("no-descendant", 3),
 ];
 
+/// A list S-expression destructured into its head atom and remaining items.
+type ListForm<'a> = (&'a str, &'a [Sexpr]);
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
     Var(String),
@@ -369,7 +372,7 @@ fn capture_names(query: &str) -> Vec<&str> {
     names
 }
 
-fn expect_list<'a>(form: &'a Sexpr, what: &str) -> Result<(&'a str, &'a [Sexpr]), Error> {
+fn expect_list<'a>(form: &'a Sexpr, what: &str) -> Result<ListForm<'a>, Error> {
     let Sexpr::List { items, line } = form else {
         return DslSnafu {
             line: form.line(),

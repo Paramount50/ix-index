@@ -94,10 +94,11 @@ fn byte_offset(
 ) -> Result<usize, std::num::TryFromIntError> {
     let line = usize::try_from(line.max(0))?;
     let column = usize::try_from(column.max(0))?;
-    Ok(line_starts
-        .get(line)
-        .map_or(len, |start| start + column)
-        .min(len))
+    let line_start = line_starts.get(line).copied().unwrap_or(len);
+    // Clamp to the next line's start (and the file end) so an out-of-range
+    // column from a stale index can't splice across a line boundary.
+    let line_end = line_starts.get(line + 1).copied().unwrap_or(len);
+    Ok((line_start + column).min(line_end).min(len))
 }
 
 /// Byte offset of the start of each line (index 0 is offset 0).
@@ -201,9 +202,7 @@ fn relationship_rows(info: &SymbolInformation, path: &str) -> Vec<RelationshipRo
 /// Fails only when a document has no embedded text and its source file cannot
 /// be read.
 pub fn facts_from_index(index: &Index, root: Option<&Path>) -> Result<Facts, Error> {
-    let root = root
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| project_root(index));
+    let root = root.map_or_else(|| project_root(index), Path::to_path_buf);
     let mut facts = Facts::default();
 
     for symbol in &index.external_symbols {
@@ -252,7 +251,7 @@ pub fn facts_from_index(index: &Index, root: Option<&Path>) -> Result<Facts, Err
 }
 
 /// `metadata.project_root` as a filesystem path (`file://` stripped).
-pub(crate) fn project_root(index: &Index) -> std::path::PathBuf {
+pub fn project_root(index: &Index) -> std::path::PathBuf {
     let root = &index.metadata.project_root;
     root.strip_prefix("file://").unwrap_or(root).into()
 }
@@ -260,7 +259,15 @@ pub(crate) fn project_root(index: &Index) -> std::path::PathBuf {
 fn write_tsv(path: &Path, rows: impl Iterator<Item = Vec<String>>) -> Result<(), Error> {
     let mut out = String::new();
     for row in rows {
-        out.push_str(&row.join("\t"));
+        // Soufflé reads facts as tab-separated lines and does not unescape, so a
+        // tab/newline in a cell (reachable via an arbitrary `display_name`) would
+        // shift columns or abort the load. Monikers and paths never contain
+        // them; collapse any to a space so a stray one can't corrupt the table.
+        let cells: Vec<String> = row
+            .iter()
+            .map(|cell| cell.replace(['\t', '\n', '\r'], " "))
+            .collect();
+        out.push_str(&cells.join("\t"));
         out.push('\n');
     }
     std::fs::write(path, out).context(WriteFactsSnafu { path })

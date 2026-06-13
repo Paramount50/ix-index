@@ -26,7 +26,7 @@ enum Command {
     },
     /// Run a Soufflé program over the index's facts and print every output
     /// relation (TSV, one block per relation). The fact relations
-    /// (occurrence, symbol_info, document, relationship) are already in scope.
+    /// (`occurrence`, `symbol_info`, `document`, `relationship`) are in scope.
     Query {
         /// SCIP index (from `scipql index`).
         index: PathBuf,

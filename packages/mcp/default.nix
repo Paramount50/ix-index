@@ -874,7 +874,7 @@ let
           --set PLAYWRIGHT_BROWSERS_PATH ${lib.escapeShellArg playwrightBrowsers} \
           --set IX_GCAL_BIN ${lib.escapeShellArg "${gcalBin}/bin/gcal"} \
           --set IX_MCP_DASHBOARD_HTML ${lib.escapeShellArg dashboardHtml} \
-          --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe pkgs.souffle)} \
+          --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe' pkgs.souffle "souffle")} \
           ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "--set IX_VMKIT_BIN ${lib.escapeShellArg "${vmkitBin}/bin/vmkit"}"}
         # The notebook engine alone (kernel + dashboard + session file, no MCP
         # transport): the same interpreter and env, entered at the `notebook`
@@ -885,7 +885,7 @@ let
           --set PLAYWRIGHT_BROWSERS_PATH ${lib.escapeShellArg playwrightBrowsers} \
           --set IX_GCAL_BIN ${lib.escapeShellArg "${gcalBin}/bin/gcal"} \
           --set IX_MCP_DASHBOARD_HTML ${lib.escapeShellArg dashboardHtml} \
-          --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe pkgs.souffle)} \
+          --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe' pkgs.souffle "souffle")} \
           ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "--set IX_VMKIT_BIN ${lib.escapeShellArg "${vmkitBin}/bin/vmkit"}"}
       '';
 

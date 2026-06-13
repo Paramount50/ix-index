@@ -16,6 +16,11 @@ use std::path::PathBuf;
 
 use snafu::Snafu;
 
+/// A source file the applier reads: its path and current contents. A named
+/// alias (not a bare `(PathBuf, String)`) so signatures returning these stay
+/// clear and the anonymous-tuple lint is satisfied.
+pub type Source = (PathBuf, String);
+
 /// One pending replacement of the byte range `start..end` in file `file` (an
 /// index into the slice passed to [`apply`]/[`check_overlaps`]).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -89,7 +94,7 @@ pub fn check_overlaps(paths: &[PathBuf], edits: &[Edit]) -> Result<(), OverlapEr
 /// are replaced; the caller is responsible for non-overlap (see
 /// [`check_overlaps`]).
 #[must_use]
-pub fn apply(files: &[(PathBuf, String)], edits: &[Edit]) -> Vec<FileRewrite> {
+pub fn apply(files: &[Source], edits: &[Edit]) -> Vec<FileRewrite> {
     let mut by_file: Vec<Vec<&Edit>> = vec![Vec::new(); files.len()];
     for edit in edits {
         by_file[edit.file].push(edit);
@@ -118,7 +123,7 @@ pub fn apply(files: &[(PathBuf, String)], edits: &[Edit]) -> Vec<FileRewrite> {
 /// `files` is the same `(path, contents)` slice given to [`apply`]; each
 /// rewrite's original is looked up by path.
 #[must_use]
-pub fn unified_diff(files: &[(PathBuf, String)], rewrites: &[FileRewrite]) -> String {
+pub fn unified_diff(files: &[Source], rewrites: &[FileRewrite]) -> String {
     let mut out = String::new();
     for rewrite in rewrites {
         let original = files
@@ -139,7 +144,7 @@ pub fn unified_diff(files: &[(PathBuf, String)], rewrites: &[FileRewrite]) -> St
 mod tests {
     use super::*;
 
-    fn file(name: &str, text: &str) -> (PathBuf, String) {
+    fn file(name: &str, text: &str) -> Source {
         (PathBuf::from(name), text.to_owned())
     }
 

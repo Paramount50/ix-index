@@ -87,7 +87,7 @@ fn edit_of(
 }
 
 /// `(path, contents)` for every corpus file, the view `edit-applier` consumes.
-fn corpus_files(corpus: &Corpus) -> Vec<(PathBuf, String)> {
+fn corpus_files(corpus: &Corpus) -> Vec<edit_applier::Source> {
     corpus
         .files
         .iter()

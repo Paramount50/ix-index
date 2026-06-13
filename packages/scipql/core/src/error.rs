@@ -68,8 +68,11 @@ pub enum Error {
         value: String,
     },
 
-    #[snafu(display("edit targets {path}, which is not in the index"))]
+    #[snafu(display("edit targets {path}, which is not a document in the index"))]
     EditUnknownPath { path: String },
+
+    #[snafu(display("rename selector is empty (it would match every symbol)"))]
+    EmptySelector,
 
     #[snafu(transparent)]
     Overlap { source: edit_applier::OverlapError },

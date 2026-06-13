@@ -5,13 +5,13 @@
 //! rows become [`edit_applier::Edit`]s, checked for overlap and applied; the
 //! default is a dry-run unified diff, `write` persists the files under `root`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use edit_applier::Edit;
-use snafu::{OptionExt as _, ResultExt as _};
+use snafu::{OptionExt as _, ResultExt as _, ensure};
 
-use crate::error::{BadEditRowSnafu, Error, ReadSourceSnafu, WriteRewriteSnafu};
+use crate::error::{BadEditRowSnafu, EditUnknownPathSnafu, Error, ReadSourceSnafu, WriteRewriteSnafu};
 use crate::facts::Facts;
 use crate::souffle;
 
@@ -52,6 +52,14 @@ pub fn fix(
     let output = souffle::run(facts, &full, scratch)?;
     let rows = output.relation("edit").map_or(&[][..], |rel| &rel.rows);
 
+    // Confine edits to files the index actually documents. An `edit` row's
+    // path is whatever the (user-supplied) program emits, and `root.join(path)`
+    // would follow an absolute or `../` path outside the project; requiring
+    // membership in the indexed documents (which are project-relative) blocks
+    // that arbitrary-write vector. Legitimate edits target occurrence paths,
+    // which are document paths, so they always pass.
+    let documents: HashSet<&str> = facts.documents.iter().map(String::as_str).collect();
+
     let mut paths: Vec<String> = Vec::new();
     let mut index_of: HashMap<String, usize> = HashMap::new();
     let mut edits = Vec::new();
@@ -65,6 +73,10 @@ pub fn fix(
             }
             .fail();
         };
+        ensure!(
+            documents.contains(path.as_str()),
+            EditUnknownPathSnafu { path: path.clone() }
+        );
         let file = *index_of.entry(path.clone()).or_insert_with(|| {
             paths.push(path.clone());
             paths.len() - 1

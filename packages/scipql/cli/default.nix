@@ -48,7 +48,12 @@ stdenvNoCC.mkDerivation {
     # Prefix, not suffix: scipql must use its own pinned rust-analyzer/cargo/
     # souffle, never an ambient rustup shim that would shadow them on PATH.
     makeWrapper ${lib.getExe unwrapped} "$out/bin/scipql" \
-      --prefix PATH : ${lib.makeBinPath [ rustToolchain souffle ]}
+      --prefix PATH : ${
+        lib.makeBinPath [
+          rustToolchain
+          souffle
+        ]
+      }
     runHook postInstall
   '';
 
