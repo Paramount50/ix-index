@@ -10,7 +10,30 @@ in
   # The image carries its own east-west membership: every fleet that
   # deploys this image lands in the deployer's `declared-groups` network
   # without a fleet-level `groups` entry.
-  ix.networking.groups = [ "declared-groups" ];
+  ix = {
+    networking = {
+      groups = [ "declared-groups" ];
+      expose.http = {
+        port = httpPort;
+        description = "private HTTP API for east-west group members";
+      };
+    };
+
+    healthChecks = {
+      nginx.unit = "nginx";
+
+      http-loopback = {
+        description = "private HTTP API answers locally";
+        command = [
+          (lib.getExe pkgs.curl)
+          "--fail"
+          "--silent"
+          "--show-error"
+          "http://127.0.0.1:${toString httpPort}/"
+        ];
+      };
+    };
+  };
 
   services.nginx = {
     enable = true;
@@ -27,24 +50,4 @@ in
   };
 
   environment.systemPackages = [ pkgs.curl ];
-
-  ix.networking.expose.http = {
-    port = httpPort;
-    description = "private HTTP API for east-west group members";
-  };
-
-  ix.healthChecks = {
-    nginx.unit = "nginx";
-
-    http-loopback = {
-      description = "private HTTP API answers locally";
-      command = [
-        (lib.getExe pkgs.curl)
-        "--fail"
-        "--silent"
-        "--show-error"
-        "http://127.0.0.1:${toString httpPort}/"
-      ];
-    };
-  };
 }
