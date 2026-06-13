@@ -875,6 +875,48 @@ let
                 fi
                 mkdir -p "$out"
               '';
+          # End-to-end proof that scipql resolves SCIP monikers and rewrites
+          # only the right symbol. Runs the real pipeline (the wrapped CLI bakes
+          # rust-analyzer + the pinned toolchain + souffle): index a two-crate
+          # fixture with a `net::Socket` and a same-named `mock::Socket`, rename
+          # `net/Socket#` to `Stream`, and assert the net struct + its reference
+          # changed while the mock struct and the net struct's own `fd` field
+          # are untouched. Tree-sitter (astlog) could not tell the two apart;
+          # this is the semantic-disambiguation guarantee. The fixture is
+          # dependency-free so rust-analyzer's `cargo metadata` needs no network.
+          scipql-e2e =
+            pkgs.runCommand "scipql-e2e-check"
+              {
+                nativeBuildInputs = [ repoPackages.scipql ];
+              }
+              ''
+                export HOME="$TMPDIR/home"
+                mkdir -p "$HOME"
+                cp -r ${
+                  builtins.path {
+                    name = "scipql-two-sockets-fixture";
+                    path = paths.packagesRoot + "/scipql/tests/fixtures/two-sockets";
+                  }
+                } work
+                chmod -R u+w work
+                cd work
+
+                scipql index . -o index.scip
+                scipql rename index.scip 'net/Socket#' Stream --write
+
+                fail=0
+                grep -q 'pub struct Stream' src/net.rs || { echo "net::Socket was not renamed" >&2; fail=1; }
+                grep -q 'net::Stream' src/lib.rs || { echo "the net::Socket reference was not renamed" >&2; fail=1; }
+                grep -q 'pub struct Socket' src/mock.rs || { echo "mock::Socket was wrongly changed" >&2; fail=1; }
+                grep -q 'pub fd: i32' src/net.rs || { echo "the struct's own fd field was wrongly renamed" >&2; fail=1; }
+                if [ "$fail" != 0 ]; then
+                  echo "--- net.rs ---" >&2; cat src/net.rs >&2
+                  echo "--- mock.rs ---" >&2; cat src/mock.rs >&2
+                  echo "--- lib.rs ---" >&2; cat src/lib.rs >&2
+                  exit 1
+                fi
+                mkdir -p "$out"
+              '';
           run-records-session = repoPackages.run.passthru.tests.recordsSession;
           # Symphony's required quality lane (compile -Werror, mix format,
           # credo, mix test) as a sandboxed derivation; see

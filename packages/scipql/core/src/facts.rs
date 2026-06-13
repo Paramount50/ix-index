@@ -13,7 +13,9 @@ use protobuf::Message as _;
 use scip::types::{Index, SymbolInformation};
 use snafu::ResultExt as _;
 
-use crate::error::{Error, ParseIndexSnafu, ReadIndexSnafu, ReadSourceSnafu, WriteFactsSnafu};
+use crate::error::{
+    Error, OffsetSnafu, ParseIndexSnafu, ReadIndexSnafu, ReadSourceSnafu, WriteFactsSnafu,
+};
 
 /// The schema (`.decl` + `.input`) for every relation [`Facts`] emits. Prepended
 /// to a user's Soufflé program so their rules can read these relations without
@@ -77,11 +79,25 @@ pub fn load_index(path: &Path) -> Result<Index, Error> {
 /// Byte offset of `(line, column)` given the line-start byte offsets of a file.
 ///
 /// SCIP positions are zero-based line and (under rust-analyzer's UTF-8 encoding)
-/// byte column. A position past the end clamps to the file length.
-fn byte_offset(line_starts: &[usize], len: usize, line: i32, column: i32) -> usize {
-    let line = usize::try_from(line.max(0)).unwrap_or(0);
-    let column = usize::try_from(column.max(0)).unwrap_or(0);
-    line_starts.get(line).map_or(len, |start| start + column).min(len)
+/// byte column. Negatives are clamped to zero and a position past the end
+/// clamps to the file length.
+///
+/// # Errors
+///
+/// Propagates the (practically impossible) overflow of a non-negative `i32`
+/// into `usize`.
+fn byte_offset(
+    line_starts: &[usize],
+    len: usize,
+    line: i32,
+    column: i32,
+) -> Result<usize, std::num::TryFromIntError> {
+    let line = usize::try_from(line.max(0))?;
+    let column = usize::try_from(column.max(0))?;
+    Ok(line_starts
+        .get(line)
+        .map_or(len, |start| start + column)
+        .min(len))
 }
 
 /// Byte offset of the start of each line (index 0 is offset 0).
@@ -224,8 +240,9 @@ pub fn facts_from_index(index: &Index, root: Option<&Path>) -> Result<Facts, Err
             facts.occurrences.push(OccurrenceRow {
                 symbol: canonical_symbol(&occurrence.symbol, &path),
                 path: path.clone(),
-                start: byte_offset(&starts, len, span.start_line, span.start_col),
-                end: byte_offset(&starts, len, span.end_line, span.end_col),
+                start: byte_offset(&starts, len, span.start_line, span.start_col)
+                    .context(OffsetSnafu)?,
+                end: byte_offset(&starts, len, span.end_line, span.end_col).context(OffsetSnafu)?,
                 role: role.to_owned(),
             });
         }

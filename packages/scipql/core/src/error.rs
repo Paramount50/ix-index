@@ -34,6 +34,9 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    #[snafu(display("convert a SCIP position to a byte offset"))]
+    Offset { source: std::num::TryFromIntError },
+
     #[snafu(display("write facts {}", path.display()))]
     WriteFacts {
         path: PathBuf,
