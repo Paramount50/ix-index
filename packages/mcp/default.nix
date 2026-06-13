@@ -855,7 +855,33 @@ let
   # htpy must import and auto-escape: a `<` in a text node comes out as `&lt;`.
   htpyBundled = importTest "htpy" "import htpy; print('htpy-ok' if '&lt;' in str(htpy.div['<']) else 'htpy-bad')";
   searchBundled = importTest "search" "import search; print('search-ok', search.__version__)";
-  astlogBundled = importTest "astlog" "import astlog; print('astlog-ok', astlog.__version__, all(callable(getattr(astlog, n)) for n in ('query', 'fixes', 'fix')))";
+  # The astlog surface is callable and its public API returns polars frames:
+  # `scan`/`fixes` are DataFrames and `query` a dict of them. A trivial inline
+  # rules string against one temp file keeps it fast and offline.
+  astlogBundled = importTest "astlog" ''
+    import os, tempfile
+    import polars as pl
+    import astlog
+
+    assert all(
+        callable(getattr(astlog, n)) for n in ("query", "scan", "suppressed", "fixes", "fix")
+    ), "astlog public functions must be callable"
+
+    rules = '(rule (id x) (match rust "(identifier) @x"))\n(lint id warning "an identifier {x}")\n'
+    work = tempfile.mkdtemp()
+    with open(os.path.join(work, "s.rs"), "w") as fh:
+        fh.write("fn main() { let v = 1; }\n")
+
+    relations = astlog.query(rules, [work])
+    findings = astlog.scan(rules, [work])
+    edits = astlog.fixes(rules, [work])
+    assert isinstance(relations, dict) and all(
+        isinstance(frame, pl.DataFrame) for frame in relations.values()
+    ), "query must return a dict of DataFrames"
+    assert isinstance(findings, pl.DataFrame), "scan must return a DataFrame"
+    assert isinstance(edits, pl.DataFrame), "fixes must return a DataFrame"
+    print("astlog-ok", astlog.__version__)
+  '';
 
   # End-to-end through the bundled `fff` ctypes module: index a temp tree, wait
   # for the scan, then prove fuzzy file search and content grep both return the

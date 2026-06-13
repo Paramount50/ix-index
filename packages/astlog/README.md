@@ -82,10 +82,21 @@ the Datalog layer subsumes.
     consumers. Adding a `(lint ...)` form extends the gate without touching
     the invocation (this is how `nix run .#lint` runs
     `astlog-rules/nix.astlog`).
+  - `astlog suppressions rules.astlog [paths...] [--json]` lists every finding
+    an `astlog-ignore` comment suppresses, each with the comment that hid it
+    (its line and text), so an audit can answer "what are we explicitly
+    ignoring, where, and why". Pure inspection: always exits zero on success.
+    `--json` emits the `scan` shape plus `"commentLine"` and `"commentText"`.
   - `astlog fix rules.astlog src/ [--write]` applies rewrites.
-- **Python**: `import astlog` in the ix kernel (bundled like `search`/`tui`);
-  `astlog.query(rules, paths)`, `astlog.fixes(...)`, `astlog.fix(...,
-  write=True)`. Bindings are conversion-only.
+- **Python**: `import astlog` in the ix kernel (bundled like `search`/`tui`).
+  Results come back as polars DataFrames like every other bundled module:
+  `astlog.query(rules, paths)` returns `dict[str, pl.DataFrame]`, one frame per
+  relation, every column a struct of the seven node fields (a derived text
+  value fills only `text`); `astlog.scan(...)`, `astlog.fixes(...)`, and
+  `astlog.suppressed(...)` each return a `pl.DataFrame`; `astlog.fix(...,
+  write=True)` returns the unified diff. The Rust bindings are
+  conversion-only — they hand back records and the Python wrapper builds the
+  frames.
 
 ## Suppression
 
@@ -96,7 +107,9 @@ the comment's own line (trailing comment) or the line immediately below it.
 tree-sitter node whose kind contains "comment" (nix `comment`, rust
 `line_comment`/`block_comment`, ...). Suppression filters findings at scan
 emission only: the underlying Datalog rows still exist for joins and `query`
-output.
+output. `astlog suppressions` (and `astlog.suppressed` in Python) lists the
+findings that filter removed, each paired with the comment that suppressed it,
+so a suppression backlog stays auditable rather than invisible.
 
 Languages come from `ast-merge-langs`: every grammar that crate registers
 (Rust, Python, TypeScript, Go, Nix, ...) works here, detected by file

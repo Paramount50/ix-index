@@ -404,6 +404,41 @@ fn f() -> u32 {
 }
 
 #[test]
+fn suppressed_reports_the_originating_comment() -> TestResult {
+    // The trailing comment suppresses the unwrap on its own line; `findings`
+    // omits that row and `suppressed` reports it with the comment that hid it.
+    // A blank line below the suppressed site keeps the trailing comment's
+    // line-below coverage off the second unwrap.
+    let source = "
+fn f() -> u32 {
+    a().unwrap(); // astlog-ignore: unwrap-call (legacy, drop me)
+
+    b().unwrap();
+    0
+}
+";
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(LINT_RULES, &[dir.path().to_path_buf()])?;
+
+    let findings = analysis.findings()?;
+    assert_eq!(findings.len(), 1, "only the uncommented site is reported");
+    assert_eq!(findings[0].text, "b().unwrap()");
+
+    let suppressed = analysis.suppressed()?;
+    assert_eq!(suppressed.len(), 1, "exactly the hidden site is listed");
+    let only = &suppressed[0];
+    assert_eq!(only.finding.text, "a().unwrap()");
+    assert_eq!(only.finding.line, 3);
+    assert_eq!(only.comment_line, 3, "trailing comment shares the row's line");
+    assert_eq!(
+        only.comment_text,
+        "// astlog-ignore: unwrap-call (legacy, drop me)"
+    );
+    Ok(())
+}
+
+#[test]
 fn named_suppression_matches_only_its_rules() -> TestResult {
     // Blank lines isolate each site: a trailing suppression also covers the
     // line below it, and these cases must not bleed into each other.

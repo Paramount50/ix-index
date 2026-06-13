@@ -1,14 +1,16 @@
 //! Python bindings for `astlog-core`.
 //!
-//! Three thin sync entry points over [`astlog_core::analyze`]: [`query`]
-//! returns derived relations as plain dicts, [`fixes`] returns the planned
-//! edits, and [`fix`] returns the unified diff (optionally writing files).
+//! Thin sync entry points over [`astlog_core::analyze`]: [`query`] returns
+//! derived relations as plain dicts, [`scan`] the lint findings, [`suppressed`]
+//! the findings an `astlog-ignore` comment hid (with that comment), [`fixes`]
+//! the planned edits, and [`fix`] the unified diff (optionally writing files).
 //! All language, evaluation, and rewrite logic lives in the core crate; this
-//! module only converts at the boundary.
+//! module only converts at the boundary, returning plain records — the Python
+//! wrapper turns them into polars frames.
 
 use std::path::PathBuf;
 
-use astlog_core::{Analysis, Value};
+use astlog_core::{Analysis, Finding, Value};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList};
@@ -51,9 +53,12 @@ fn value_to_py<'py>(
     }
 }
 
-/// Evaluate a rules program and return `{relation: [{column: value}]}`.
+/// Evaluate a rules program and return
+/// `{relation: {"columns": [name], "rows": [{column: value}]}}`.
 ///
-/// A node value is a dict with `path`, `kind`, `start`, `end`, `line`,
+/// The `columns` list is carried separately so a relation with no rows still
+/// names its columns (the polars wrapper needs them to build a typed empty
+/// frame). A node value is a dict with `path`, `kind`, `start`, `end`, `line`,
 /// `column`, and `text`; a derived text value is a plain `str`. Pass
 /// `relation` to keep just one relation in the result.
 #[pyfunction]
@@ -82,7 +87,10 @@ fn query<'py>(
             }
             rows.append(cells)?;
         }
-        out.set_item(name, rows)?;
+        let entry = PyDict::new(py);
+        entry.set_item("columns", &rel.columns)?;
+        entry.set_item("rows", rows)?;
+        out.set_item(name, entry)?;
     }
     if let Some(wanted) = relation
         && !out.contains(wanted)?
@@ -116,6 +124,64 @@ fn fixes<'py>(py: Python<'py>, rules: &str, paths: Vec<PathBuf>) -> PyResult<Bou
     Ok(out)
 }
 
+/// One finding as a dict matching the `scan --json` key names exactly.
+fn finding_dict<'py>(py: Python<'py>, finding: &Finding) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    dict.set_item("file", finding.file.to_string_lossy())?;
+    dict.set_item("line", finding.line)?;
+    dict.set_item("column", finding.column)?;
+    dict.set_item("endLine", finding.end_line)?;
+    dict.set_item("endColumn", finding.end_column)?;
+    dict.set_item("rule", &finding.rule)?;
+    dict.set_item("severity", finding.severity.as_str())?;
+    dict.set_item("message", &finding.message)?;
+    dict.set_item("text", &finding.text)?;
+    Ok(dict)
+}
+
+/// Evaluate a rules program and return one finding dict per `(lint ...)` row
+/// that survives suppression, keyed exactly like the `scan --json` contract:
+/// `{file, line, column, endLine, endColumn, rule, severity, message, text}`.
+#[pyfunction]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts arguments into owned values; the by-value Vec is the FFI boundary"
+)]
+fn scan<'py>(py: Python<'py>, rules: &str, paths: Vec<PathBuf>) -> PyResult<Bound<'py, PyList>> {
+    let analysis = run(rules, &paths)?;
+    let findings = analysis.findings().map_err(|error| to_py_err(&error))?;
+    let out = PyList::empty(py);
+    for finding in &findings {
+        out.append(finding_dict(py, finding)?)?;
+    }
+    Ok(out)
+}
+
+/// Evaluate a rules program and return the findings an `astlog-ignore` comment
+/// suppressed: each scan dict plus `commentLine` and `commentText` naming the
+/// comment that hid it.
+#[pyfunction]
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "PyO3 extracts arguments into owned values; the by-value Vec is the FFI boundary"
+)]
+fn suppressed<'py>(
+    py: Python<'py>,
+    rules: &str,
+    paths: Vec<PathBuf>,
+) -> PyResult<Bound<'py, PyList>> {
+    let analysis = run(rules, &paths)?;
+    let suppressed = analysis.suppressed().map_err(|error| to_py_err(&error))?;
+    let out = PyList::empty(py);
+    for entry in &suppressed {
+        let dict = finding_dict(py, &entry.finding)?;
+        dict.set_item("commentLine", entry.comment_line)?;
+        dict.set_item("commentText", &entry.comment_text)?;
+        out.append(dict)?;
+    }
+    Ok(out)
+}
+
 /// Evaluate a rules program and return the unified diff of every rewrite.
 ///
 /// With `write=True` the rewritten files are also saved to disk.
@@ -141,6 +207,8 @@ fn fix(rules: &str, paths: Vec<PathBuf>, write: bool) -> PyResult<String> {
 #[pymodule]
 fn _astlog(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(query, module)?)?;
+    module.add_function(wrap_pyfunction!(scan, module)?)?;
+    module.add_function(wrap_pyfunction!(suppressed, module)?)?;
     module.add_function(wrap_pyfunction!(fixes, module)?)?;
     module.add_function(wrap_pyfunction!(fix, module)?)?;
     module.add("__version__", env!("CARGO_PKG_VERSION"))?;

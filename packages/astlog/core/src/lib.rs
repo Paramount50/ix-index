@@ -50,7 +50,7 @@ pub use crate::error::Error;
 pub use crate::eval::{Database, Relation, Row};
 pub use crate::program::{Lint, Program, Severity};
 pub use crate::rewrite::{Edit, FileRewrite};
-pub use crate::scan::{Finding, one_line};
+pub use crate::scan::{Finding, SuppressedFinding, one_line};
 
 /// A finished run: the checked program, the loaded corpus, every derived
 /// relation, and the edits every `(rewrite ...)` produced.
@@ -84,6 +84,18 @@ impl Analysis {
     /// to locate the finding at.
     pub fn findings(&self) -> Result<Vec<Finding>, Error> {
         scan::findings(&self.program, &self.corpus, &self.database)
+    }
+
+    /// Findings an `astlog-ignore` comment suppressed, each paired with the
+    /// comment that suppressed it, sorted like [`Analysis::findings`]. This is
+    /// the audit view: what is being explicitly ignored, where, and why.
+    ///
+    /// # Errors
+    ///
+    /// Fails when a lint relation derives a row with no node-valued column
+    /// to locate the finding at.
+    pub fn suppressed(&self) -> Result<Vec<SuppressedFinding>, Error> {
+        scan::suppressed(&self.program, &self.corpus, &self.database)
     }
 }
 

@@ -4,7 +4,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use astlog_core::{Analysis, Finding, Severity, Value, one_line};
+use astlog_core::{Analysis, Finding, Severity, SuppressedFinding, Value, one_line};
 use clap::{Parser, Subcommand};
 use snafu::{ResultExt as _, Snafu};
 
@@ -46,6 +46,17 @@ enum Command {
         /// Promote warnings to errors for the exit-code decision.
         #[arg(long)]
         error: bool,
+    },
+    /// Evaluate rules and list every finding an `astlog-ignore` comment
+    /// suppresses, with the comment behind each (pure inspection; exits zero).
+    Suppressions {
+        /// Rules file (`.astlog`).
+        rules: PathBuf,
+        /// Files or directories to scan (default: the current directory).
+        paths: Vec<PathBuf>,
+        /// Emit a JSON array of suppressed findings instead of text.
+        #[arg(long)]
+        json: bool,
     },
     /// Evaluate rules and apply `(rewrite ...)` edits.
     Fix {
@@ -141,6 +152,21 @@ fn run(cli: &Cli) -> Result<(), Error> {
                 count => FindingsSnafu { count }.fail(),
             }
         }
+        Command::Suppressions { rules, paths, json } => {
+            let paths = if paths.is_empty() {
+                vec![PathBuf::from(".")]
+            } else {
+                paths.clone()
+            };
+            let analysis = load(rules, &paths)?;
+            let suppressed = analysis.suppressed()?;
+            if *json {
+                print_suppressed_json(&suppressed);
+            } else {
+                print_suppressed_text(&suppressed);
+            }
+            Ok(())
+        }
         Command::Fix {
             rules,
             paths,
@@ -210,6 +236,51 @@ fn print_findings_json(findings: &[Finding]) {
                 "endLine": finding.end_line,
                 "endColumn": finding.end_column,
                 "text": finding.text,
+            })
+        })
+        .collect();
+    println!("{}", serde_json::Value::Array(rows));
+}
+
+fn print_suppressed_text(suppressed: &[SuppressedFinding]) {
+    for entry in suppressed {
+        let finding = &entry.finding;
+        // The suppressing comment is always in the finding's own file, so the
+        // location reads `{file}:{commentLine}`.
+        println!(
+            "{file}:{line}:{column}: ignored[{rule}]: {message} `{text}` \
+             (by {file}:{comment_line} `{comment_text}`)",
+            file = finding.file.display(),
+            line = finding.line,
+            column = finding.column,
+            rule = finding.rule,
+            message = finding.message,
+            text = finding.text,
+            comment_line = entry.comment_line,
+            comment_text = entry.comment_text,
+        );
+    }
+}
+
+/// The `suppressions --json` shape: the `scan --json` fields plus the
+/// suppressing comment's line and text.
+fn print_suppressed_json(suppressed: &[SuppressedFinding]) {
+    let rows: Vec<serde_json::Value> = suppressed
+        .iter()
+        .map(|entry| {
+            let finding = &entry.finding;
+            serde_json::json!({
+                "rule": finding.rule,
+                "severity": finding.severity.as_str(),
+                "message": finding.message,
+                "file": finding.file,
+                "line": finding.line,
+                "column": finding.column,
+                "endLine": finding.end_line,
+                "endColumn": finding.end_column,
+                "text": finding.text,
+                "commentLine": entry.comment_line,
+                "commentText": entry.comment_text,
             })
         })
         .collect();

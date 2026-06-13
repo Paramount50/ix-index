@@ -8,7 +8,7 @@
 //! immediately below it; `astlog-ignore: name1, name2` limits suppression to
 //! those rule names, a bare `astlog-ignore` suppresses every rule there.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::corpus::{Corpus, Value};
@@ -34,6 +34,17 @@ pub struct Finding {
     pub text: String,
 }
 
+/// A finding an `astlog-ignore` comment suppressed, paired with the comment
+/// that did the suppressing so an audit can answer "what, where, and why".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SuppressedFinding {
+    pub finding: Finding,
+    /// 1-based line of the suppressing comment (in the finding's file).
+    pub comment_line: usize,
+    /// The comment's source text, collapsed to one bounded line.
+    pub comment_text: String,
+}
+
 /// Findings for every lint declaration, suppression applied, sorted by
 /// (file, line, column, rule).
 ///
@@ -44,6 +55,74 @@ pub struct Finding {
 pub fn findings(program: &Program, corpus: &Corpus, db: &Database) -> Result<Vec<Finding>, Error> {
     let suppressions = Suppressions::collect(corpus);
     let mut findings = Vec::new();
+    for_each_candidate(program, corpus, db, |candidate| {
+        if suppressions
+            .source(candidate.file_index, candidate.finding.line, &candidate.finding.rule)
+            .is_none()
+        {
+            findings.push(candidate.finding);
+        }
+        Ok(())
+    })?;
+    findings.sort_by(|a, b| {
+        (&a.file, a.line, a.column, &a.rule).cmp(&(&b.file, b.line, b.column, &b.rule))
+    });
+    Ok(findings)
+}
+
+/// Every finding an `astlog-ignore` comment suppressed, paired with that
+/// comment, sorted by (file, line, column, rule) like [`findings`].
+///
+/// # Errors
+///
+/// Fails with [`Error::LintNoNode`] when a lint relation derives a row with
+/// no node-valued column to locate the finding at.
+pub fn suppressed(
+    program: &Program,
+    corpus: &Corpus,
+    db: &Database,
+) -> Result<Vec<SuppressedFinding>, Error> {
+    let suppressions = Suppressions::collect(corpus);
+    let mut suppressed = Vec::new();
+    for_each_candidate(program, corpus, db, |candidate| {
+        if let Some(source) =
+            suppressions.source(candidate.file_index, candidate.finding.line, &candidate.finding.rule)
+        {
+            suppressed.push(SuppressedFinding {
+                finding: candidate.finding,
+                comment_line: source.line,
+                comment_text: source.text.clone(),
+            });
+        }
+        Ok(())
+    })?;
+    suppressed.sort_by(|a, b| {
+        (&a.finding.file, a.finding.line, a.finding.column, &a.finding.rule).cmp(&(
+            &b.finding.file,
+            b.finding.line,
+            b.finding.column,
+            &b.finding.rule,
+        ))
+    });
+    Ok(suppressed)
+}
+
+/// A located candidate finding before suppression is applied, carrying the
+/// corpus file index so the caller can look the suppression up.
+struct Candidate {
+    finding: Finding,
+    file_index: usize,
+}
+
+/// Build every candidate finding once and hand each to `sink`; the one place
+/// the candidate-locating logic lives, shared by [`findings`] and
+/// [`suppressed`].
+fn for_each_candidate(
+    program: &Program,
+    corpus: &Corpus,
+    db: &Database,
+    mut sink: impl FnMut(Candidate) -> Result<(), Error>,
+) -> Result<(), Error> {
     for lint in &program.lints {
         let relation = db.relations.get(&lint.relation).ok_or_else(|| {
             InternalSnafu {
@@ -67,27 +146,24 @@ pub fn findings(program: &Program, corpus: &Corpus, db: &Database) -> Result<Vec
                 })?;
             let info = corpus.node_info(node);
             let start = corpus.position(node.file, info.start);
-            if suppressions.suppressed(node.file, start.line, &lint.relation) {
-                continue;
-            }
             let end = corpus.position(node.file, info.end);
-            findings.push(Finding {
-                rule: lint.relation.clone(),
-                severity: lint.severity,
-                message: render_message(lint, &relation.columns, row, corpus)?,
-                file: corpus.files[node.file].path.clone(),
-                line: start.line,
-                column: start.column,
-                end_line: end.line,
-                end_column: end.column,
-                text: one_line(corpus.node_text(node)),
-            });
+            sink(Candidate {
+                finding: Finding {
+                    rule: lint.relation.clone(),
+                    severity: lint.severity,
+                    message: render_message(lint, &relation.columns, row, corpus)?,
+                    file: corpus.files[node.file].path.clone(),
+                    line: start.line,
+                    column: start.column,
+                    end_line: end.line,
+                    end_column: end.column,
+                    text: one_line(corpus.node_text(node)),
+                },
+                file_index: node.file,
+            })?;
         }
     }
-    findings.sort_by(|a, b| {
-        (&a.file, a.line, a.column, &a.rule).cmp(&(&b.file, b.line, b.column, &b.rule))
-    });
-    Ok(findings)
+    Ok(())
 }
 
 /// Instantiate a lint message template against one relation row. Spliced
@@ -134,11 +210,20 @@ pub fn one_line(text: &str) -> String {
     out
 }
 
-/// What an `astlog-ignore` comment suppresses on one line.
+/// The comment that issued a suppression: its 1-based line and collapsed text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Source {
+    line: usize,
+    text: String,
+}
+
+/// What an `astlog-ignore` comment suppresses on one line, remembering the
+/// comment behind each directive so an audit can report why. First writer
+/// wins when several comments target the same line and rule.
 #[derive(Debug, Default)]
 struct LineSuppression {
-    all: bool,
-    rules: HashSet<String>,
+    all: Option<Source>,
+    rules: HashMap<String, Source>,
 }
 
 /// Per-file, per-line suppression entries gathered from comment nodes.
@@ -158,7 +243,8 @@ impl Suppressions {
                     if !info.kind.contains("comment") {
                         continue;
                     }
-                    let Some(directive) = parse_directive(&file.text[info.start..info.end]) else {
+                    let text = &file.text[info.start..info.end];
+                    let Some(directive) = parse_directive(text) else {
                         continue;
                     };
                     let first = corpus.position(file_index, info.start).line;
@@ -167,11 +253,24 @@ impl Suppressions {
                     let last = corpus
                         .position(file_index, info.end.saturating_sub(1))
                         .line;
+                    let source = Source {
+                        line: first,
+                        text: one_line(text),
+                    };
                     for line in first..=last + 1 {
                         let entry = lines.entry(line).or_default();
                         match &directive {
-                            Directive::All => entry.all = true,
-                            Directive::Rules(rules) => entry.rules.extend(rules.iter().cloned()),
+                            Directive::All => {
+                                entry.all.get_or_insert_with(|| source.clone());
+                            }
+                            Directive::Rules(rules) => {
+                                for rule in rules {
+                                    entry
+                                        .rules
+                                        .entry(rule.clone())
+                                        .or_insert_with(|| source.clone());
+                                }
+                            }
                         }
                     }
                 }
@@ -181,10 +280,11 @@ impl Suppressions {
         Self { by_file }
     }
 
-    fn suppressed(&self, file: usize, line: usize, rule: &str) -> bool {
-        self.by_file[file]
-            .get(&line)
-            .is_some_and(|entry| entry.all || entry.rules.contains(rule))
+    /// The comment suppressing `rule` on `line` of `file`, if any. A bare
+    /// `astlog-ignore` (the `all` directive) takes precedence over a named one.
+    fn source(&self, file: usize, line: usize, rule: &str) -> Option<&Source> {
+        let entry = self.by_file[file].get(&line)?;
+        entry.all.as_ref().or_else(|| entry.rules.get(rule))
     }
 }
 

@@ -97,8 +97,10 @@ MODULES: tuple[Module, ...] = (
     Module(
         "astlog",
         "Datalog over tree-sitter ASTs: tree-sitter query matches become relations, rules join "
-        "them (position, text, recursion), rewrites turn rows into edits "
-        "(`astlog.query` / `fixes` / `fix`)",
+        "them (position, text, recursion), `(lint ...)` rows become findings, rewrites turn rows "
+        "into edits. Results come back as polars DataFrames: `astlog.query` (dict of frames), "
+        "`scan` (lint findings), `suppressed` (what `astlog-ignore` hides + the comment), "
+        "`fixes`; `fix` returns a diff",
     ),
     Module(
         "flecs_query",
