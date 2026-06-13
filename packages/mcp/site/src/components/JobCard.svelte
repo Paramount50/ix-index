@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Job } from '$lib/types';
   import { now } from '$lib/now.svelte';
-  import { duration, jobTitle } from '$lib/format';
+  import { duration, jobTitle, jobTokens, tokens } from '$lib/format';
   import StatusChip from './StatusChip.svelte';
   import RichOutput from './RichOutput.svelte';
   import CodeView from './CodeView.svelte';
@@ -23,6 +23,15 @@
   const overBudget = $derived(elapsedSec >= job.budget);
   const hasRich = $derived(job.outputs.length > 0);
   const hasDetails = $derived(!!(job.code_html || job.code || job.output));
+
+  // Estimated token cost of this tool call: what went up to the kernel (the
+  // code) and what came back to the model (the result text). A running job's
+  // output count climbs as its captured output grows.
+  const tk = $derived(jobTokens(job));
+  const tokTitle = $derived(
+    `≈ ${tk.inTok} tokens in (${tk.inChars} chars) · ≈ ${tk.outTok} tokens out ` +
+      `(${tk.outChars} chars). Estimated at ~4 chars/token.`,
+  );
 
   // A run reads as its results by default, but some states open themselves: a
   // running job shows its source with the executing line highlighted live, a
@@ -74,6 +83,10 @@
     {#if job.status === 'running' && job.line != null}
       <span class="at" title="executing line {job.line} of this cell">line {job.line}</span>
     {/if}
+    <span class="toks" title={tokTitle}>
+      <span class="tok">{tokens(tk.inTok)}<i>in</i></span>
+      <span class="tok">{tokens(tk.outTok)}<i>out</i></span>
+    </span>
     <span class="dur">{elapsed}</span>
   </button>
 
@@ -197,10 +210,29 @@
   }
   .dur {
     flex: none;
-    margin-left: auto;
+    margin-left: 9px;
     color: var(--faint);
     font-size: 11px;
     font-variant-numeric: tabular-nums;
+  }
+  /* Estimated token cost, in and out. Pushed to the right edge (the name's flex
+     eats the slack) and kept faint and tabular so the numbers ticking up on a
+     running job sit quietly beside the duration rather than drawing the eye. */
+  .toks {
+    flex: none;
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    color: var(--faint);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+  }
+  .tok i {
+    margin-left: 3px;
+    font-style: normal;
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    color: var(--line-2);
   }
   /* A blue bar tracking elapsed-vs-budget for a running job: how much of the
      foreground "total timeout" has been spent before the call backgrounds. */
