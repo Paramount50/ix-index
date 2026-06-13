@@ -848,8 +848,14 @@ let
                     work=$(mktemp -d)
                     cp "$dir/bad.fixture" "$work/bad.$ext"
                     cp "$dir/good.fixture" "$work/good.$ext"
-                    bad=$(astlog scan "$rules" "$work/bad.$ext" --json | jq --arg r "$rule" '[.[] | select(.rule == $r)] | length')
-                    good=$(astlog scan "$rules" "$work/good.$ext" --json | jq --arg r "$rule" '[.[] | select(.rule == $r)] | length')
+                    # `astlog scan` exits nonzero on a violating fixture by
+                    # design; capture its JSON (`|| true` so the by-design exit
+                    # does not abort the `set -o pipefail` build) and count
+                    # separately, rather than piping straight into jq.
+                    bad_json=$(astlog scan "$rules" "$work/bad.$ext" --json || true)
+                    good_json=$(astlog scan "$rules" "$work/good.$ext" --json || true)
+                    bad=$(jq --arg r "$rule" '[.[] | select(.rule == $r)] | length' <<<"$bad_json")
+                    good=$(jq --arg r "$rule" '[.[] | select(.rule == $r)] | length' <<<"$good_json")
                     if [ "$bad" = 0 ]; then
                       echo "lint $rule did not fire on its violating fixture" >&2
                       fail=1
