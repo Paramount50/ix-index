@@ -18,7 +18,11 @@ use crate::error::{Error, RunRustAnalyzerSnafu};
 ///
 /// Fails if `rust-analyzer` cannot be spawned or exits non-zero.
 pub fn index(project: &Path, output: &Path) -> Result<(), Error> {
-    let status = Command::new("rust-analyzer")
+    // `SCIPQL_RUST_ANALYZER` lets a wrapper bake an absolute path; falls back to
+    // `rust-analyzer` on PATH (the CLI bakes the repo's pinned toolchain).
+    let rust_analyzer =
+        std::env::var("SCIPQL_RUST_ANALYZER").unwrap_or_else(|_| "rust-analyzer".to_owned());
+    let status = Command::new(rust_analyzer)
         .arg("scip")
         .arg(project)
         .arg("--output")

@@ -35,6 +35,7 @@ members = [
   "packages/file-search",
   "packages/scipql/core",
   "packages/scipql/cli",
+  "packages/scipql/py",
   "packages/flecs-query/core",
   "packages/flecs-query/mcp",
   "packages/flecs-query/py",

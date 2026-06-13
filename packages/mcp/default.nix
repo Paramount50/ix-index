@@ -130,6 +130,47 @@ let
       ''
   );
 
+  # The scipql package, baked into the pinned interpreter so every session can
+  # `import scipql` and run Soufflé datalog + find/replace over a SCIP semantic
+  # index. Same shape as `astlogModule`: the PyO3 cdylib comes from the shared
+  # workspace graph. (The CLI bakes in rust-analyzer/souffle; the kernel module
+  # exposes facts/query/fix/rename over an already-built index.scip.)
+  scipqlPythonSource = builtins.path {
+    name = "scipql-py-python-source";
+    path = ../scipql/py/python;
+  };
+  scipqlModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-scipql-python-module"
+      {
+        strictDeps = true;
+        meta.description = "scipql PyO3 module bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/scipql"
+        mkdir -p "$site"
+        cp -r ${scipqlPythonSource}/scipql/. "$site/"
+
+        cdylib=""
+        for candidate in \
+          ${ix.rustWorkspace.units.libraries.scipql_py}/lib/libscipql_py.so \
+          ${ix.rustWorkspace.units.libraries.scipql_py}/lib/libscipql_py-*.so \
+          ${ix.rustWorkspace.units.libraries.scipql_py}/lib/libscipql_py.dylib \
+          ${ix.rustWorkspace.units.libraries.scipql_py}/lib/libscipql_py-*.dylib
+        do
+          if [ -f "$candidate" ]; then
+            cdylib="$candidate"
+            break
+          fi
+        done
+        if [ -z "$cdylib" ]; then
+          echo "ix-scipql module: no cdylib under ${ix.rustWorkspace.units.libraries.scipql_py}/lib" >&2
+          ls -la ${ix.rustWorkspace.units.libraries.scipql_py}/lib >&2 || true
+          exit 1
+        fi
+        install -m555 "$cdylib" "$site/_scipql.abi3.so"
+      ''
+  );
+
   # The flecs-query package, baked into the pinned interpreter so every
   # session can `import flecs_query` and parse/validate Flecs Query Language
   # expressions with no setup. Same shape as `astlogModule`: the PyO3 cdylib
@@ -764,6 +805,7 @@ let
       tuiModule
       searchModule
       astlogModule
+      scipqlModule
       flecsQueryModule
       fffModule
       googleAuthModule
@@ -832,6 +874,7 @@ let
           --set PLAYWRIGHT_BROWSERS_PATH ${lib.escapeShellArg playwrightBrowsers} \
           --set IX_GCAL_BIN ${lib.escapeShellArg "${gcalBin}/bin/gcal"} \
           --set IX_MCP_DASHBOARD_HTML ${lib.escapeShellArg dashboardHtml} \
+          --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe pkgs.souffle)} \
           ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "--set IX_VMKIT_BIN ${lib.escapeShellArg "${vmkitBin}/bin/vmkit"}"}
         # The notebook engine alone (kernel + dashboard + session file, no MCP
         # transport): the same interpreter and env, entered at the `notebook`
@@ -842,6 +885,7 @@ let
           --set PLAYWRIGHT_BROWSERS_PATH ${lib.escapeShellArg playwrightBrowsers} \
           --set IX_GCAL_BIN ${lib.escapeShellArg "${gcalBin}/bin/gcal"} \
           --set IX_MCP_DASHBOARD_HTML ${lib.escapeShellArg dashboardHtml} \
+          --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe pkgs.souffle)} \
           ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "--set IX_VMKIT_BIN ${lib.escapeShellArg "${vmkitBin}/bin/vmkit"}"}
       '';
 

@@ -55,7 +55,11 @@ pub fn run(facts: &Facts, program: &str, dir: &Path) -> Result<QueryOutput, Erro
     std::fs::write(&program_path, &full_program)
         .context(crate::error::WriteFactsSnafu { path: &program_path })?;
 
-    let output = Command::new("souffle")
+    // `SCIPQL_SOUFFLE` lets a wrapper bake an absolute path (the CLI and the
+    // mcp interpreter do this) so the tool resolves without relying on PATH
+    // order; falls back to `souffle` on PATH.
+    let souffle = std::env::var("SCIPQL_SOUFFLE").unwrap_or_else(|_| "souffle".to_owned());
+    let output = Command::new(souffle)
         .arg("-F")
         .arg(&facts_dir)
         .arg("-D")
