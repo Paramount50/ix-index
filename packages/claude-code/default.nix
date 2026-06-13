@@ -69,13 +69,15 @@
   repoPackages ? { },
 
   # MCP servers baked into the wrapper as a generated `--mcp-config=<file>`
-  # layer, one plain server per entry (tool prefix `mcp__<name>`). Values use
-  # Claude's mcpServers schema (`{ type = "stdio"; command = ...; }` /
-  # `{ type = "http"; url = ...; }`). CLI `--mcp-config` layers MERGE: a user's
-  # own `--mcp-config` and a discovered project `.mcp.json` still load alongside
-  # this set, so baking the flag here replaces the old pattern of consumers
-  # symlinkJoin-wrapping this wrapper a second time just to add it. Defaults to
-  # the house pair, additions only (no stock tool is disabled or overridden):
+  # layer, one plain server per entry (tool prefix `mcp__<name>`). This is the
+  # final Claude `mcpServers` JSON; the default is rendered from the shared
+  # `ix.mcp` registry (lib/util/mcp.nix) so `index` is declared once and the
+  # Codex wrapper bakes the same server from the same source. CLI `--mcp-config`
+  # layers MERGE: a user's own `--mcp-config` and a discovered project
+  # `.mcp.json` still load alongside this set, so baking the flag here replaces
+  # the old pattern of consumers symlinkJoin-wrapping this wrapper a second time
+  # just to add it. Defaults to the house pair, additions only (no stock tool is
+  # disabled or overridden):
   #  - `index`: the ix notebook kernel (`ix-mcp serve`, packages/mcp) over
   #    stdio. Present only when the `mcp` sibling is in scope, i.e. in the
   #    flake package set but not the overlay (see `repoPackages`).
@@ -85,19 +87,11 @@
   #    exa "https://mcp.exa.ai/mcp?exaApiKey=..."`), which merges alongside and
   #    is preferred over baking a secret into the world-readable store.
   # `{ }` bakes no flag.
-  mcpServers ? {
-    exa = {
-      type = "http";
-      url = "https://mcp.exa.ai/mcp";
-    };
-  }
-  // lib.optionalAttrs (repoPackages ? mcp) {
-    index = {
-      type = "stdio";
-      command = lib.getExe repoPackages.mcp;
-      args = [ "serve" ];
-    };
-  },
+  mcpServers ? ix.mcp.toClaudeJson (
+    ix.mcp.houseServers {
+      indexCommand = if repoPackages ? mcp then lib.getExe repoPackages.mcp else null;
+    }
+  ),
 
   # Text APPENDED to Claude Code's stock system prompt. The string is
   # materialized to a store file and baked into the wrapper as

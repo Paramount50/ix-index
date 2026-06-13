@@ -334,6 +334,37 @@ let
       extraSkills = agentContextProgressiveSkills;
     };
 
+  # Declarative subagents rendered to a symlink-free `.claude/agents` directory.
+  # index-action-runner offloads a long, image- or step-heavy loop into its own
+  # context and returns only the conclusion (ENG-2792). Its frontmatter bakes a
+  # FRESH inline `index` server from the shared `ix.mcp` registry, so each
+  # spawned subagent gets its own kernel and browser rather than sharing the
+  # parent's; the server is declared from the same source the wrappers render.
+  agentContextAgents = ix.agents.mkAgentsDir {
+    inherit pkgs;
+    agents = {
+      index-action-runner = {
+        frontmatter = {
+          name = "index-action-runner";
+          description =
+            "Offload a long, image-heavy or many-step loop (browser automation, "
+            + "scanning many images or PDFs, multi-step web flows) into an isolated "
+            + "context. Give it an outcome plus the exact fields to return; it drives "
+            + "the whole loop in its own index kernel and returns only the distilled "
+            + "result, keeping screenshots and DOM dumps out of the main thread.";
+          mcpServers = ix.mcp.toClaudeJson {
+            index = {
+              transport = "stdio";
+              command = lib.getExe repoPackages.mcp;
+              args = [ "serve" ];
+            };
+          };
+        };
+        body = builtins.readFile (paths.agentContext + "/agents/index-action-runner.md");
+      };
+    };
+  };
+
   mcSource = ix.writeNushellApplication pkgs {
     name = "mc-source";
     text = builtins.readFile paths.tools.mcSource;
@@ -722,6 +753,7 @@ let
             test -s ${agentContextClaudeMd}
             test -s ${agentContextCodexMd}
             test -d ${agentContextSkills}
+            test -d ${agentContextAgents}
             mkdir -p "$out"
           '';
           # Pins the last-applied 3-way merge behind homeModules.mutable-json:
@@ -969,6 +1001,7 @@ in
       ix-shell-sync-ignored = ixShellSyncIgnored;
       mc-source = mcSource;
       update-sounds = updateSounds;
+      agents = agentContextAgents;
       claude-md = agentContextClaudeMd;
       codex-md = agentContextCodexMd;
       skills = agentContextSkills;
