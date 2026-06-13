@@ -55,6 +55,16 @@ let
     soft = entriesOf (ix.attrs.flattenToDotted settings);
   };
 in
+# These baked defaults also reach the Codex GUI app's remote-SSH sessions, not
+# just terminal use. The desktop app does NOT ship its own binary to the remote
+# (unlike VS Code Remote SSH): it bootstraps the host through the remote user's
+# login shell and runs `codex app-server` from the remote PATH (then connects via
+# `codex app-server proxy`). So whenever THIS wrapper is the `codex` first on the
+# remote's login-shell PATH, it intercepts that `app-server` launch and injects
+# the same `-c` flags, and every GUI/phone session against that host inherits the
+# defaults. Caveats: the wrapper must win the remote *login* shell PATH (the probe
+# uses `$SHELL -lc`, which skips ~/.bashrc/~/.zshrc), and a stale already-running
+# `codex app-server` is reused without re-injecting, so kill it once after a bump.
 symlinkJoin {
   name = "codex-${codex.version}";
   paths = [ codex ];
