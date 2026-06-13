@@ -2316,6 +2316,19 @@ let
     }
   ];
 
+  # The multi-node ix-spark service (Spark master/worker over Tailscale + a Spark
+  # Connect server on the master). role defaults to "master".
+  ixSparkMaster = evalConfig [ { services.ix-spark.enable = true; } ];
+  ixSparkWorker = evalConfig [
+    {
+      services.ix-spark = {
+        enable = true;
+        role = "worker";
+        masterAddress = "100.64.0.1";
+      };
+    }
+  ];
+
   groups = {
     ix-ray = [
       {
@@ -2388,6 +2401,57 @@ let
           in
           builtins.any (a: lib.hasInfix "headAddress" a.message) failures;
         message = "ix-ray head should fail evaluation when headAddress is set";
+      }
+    ];
+
+    ix-spark = [
+      {
+        # The master node runs the master, a co-located worker, and the Spark
+        # Connect server fleet.spark() dials.
+        assertion =
+          (ixSparkMaster.systemd.services ? spark-master)
+          && (ixSparkMaster.systemd.services ? spark-worker)
+          && (ixSparkMaster.systemd.services ? spark-connect);
+        message = "ix-spark master should run master + worker + connect daemons";
+      }
+      {
+        # Connect (15002) and master RPC (7077) are claimed on the master.
+        assertion =
+          let
+            claims = ixSparkMaster.ix.networking.portClaims;
+          in
+          claims.ix-spark-connect.port == 15002 && claims.ix-spark-master.port == 7077;
+        message = "ix-spark master should claim the Connect (15002) and master (7077) ports";
+      }
+      {
+        # A worker only runs a worker joining the remote master: no master, no
+        # connect, and it must not claim the master's ports.
+        assertion =
+          let
+            claims = ixSparkWorker.ix.networking.portClaims;
+          in
+          (ixSparkWorker.systemd.services ? spark-worker)
+          && !(ixSparkWorker.systemd.services ? spark-master)
+          && !(ixSparkWorker.systemd.services ? spark-connect)
+          && !(claims ? ix-spark-master)
+          && !(claims ? ix-spark-connect);
+        message = "ix-spark worker should run only a worker and claim no master/connect ports";
+      }
+      {
+        # A worker with no masterAddress cannot know where to join: fail eval.
+        assertion =
+          let
+            failures = failedAssertionsFor [
+              {
+                services.ix-spark = {
+                  enable = true;
+                  role = "worker";
+                };
+              }
+            ];
+          in
+          builtins.any (a: lib.hasInfix "masterAddress" a.message) failures;
+        message = "ix-spark worker should fail evaluation without a masterAddress";
       }
     ];
 

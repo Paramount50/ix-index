@@ -698,6 +698,47 @@ let
       doCheck = false;
     };
 
+  # The Spark Connect client `fleet.spark()` drives, pinned to the cluster's Spark
+  # version (3.5.x, via spark-hive + spark-gluten in services.ix-spark). A Connect
+  # client MUST match the server's minor, and nixpkgs' default pyspark is 4.x, so
+  # we pin our own 3.5.5. py4j stays the nixpkgs 0.10.9.9 (pyspark 3.5.5 pins
+  # 0.10.9.7, but py4j is patch-stable and pinning a second copy would duplicate
+  # it in the closure). The bundled JVM jars are stripped -- the Connect path is
+  # pure gRPC and never starts a local JVM, so ~300 MB of jars would be dead
+  # weight. pyarrow IS required (the client materializes results as Arrow), so it
+  # is bundled here, with Spark, rather than for the whole interpreter's sake.
+  pysparkConnect = pkgs.python3.pkgs.pyspark.overridePythonAttrs (old: {
+    version = "3.5.5";
+    src = pkgs.python3.pkgs.fetchPypi {
+      pname = "pyspark";
+      version = "3.5.5";
+      hash = "sha256-bv/Jzpjt8jH01oP9FPcnBim/hFjGKNaiYg3tS7NPPLk=";
+    };
+    # pyspark 3.5.5 pins py4j==0.10.9.7 exactly; relax it so the patch-newer
+    # nixpkgs py4j 0.10.9.9 satisfies the runtime-deps check.
+    pythonRelaxDeps = [ "py4j" ];
+    # Keep pyspark's own deps (py4j) and add the Spark Connect client stack.
+    propagatedBuildInputs = (old.propagatedBuildInputs or [ ]) ++ [
+      pkgs.python3.pkgs.grpcio
+      pkgs.python3.pkgs.grpcio-status
+      pkgs.python3.pkgs.googleapis-common-protos
+      pkgs.python3.pkgs.protobuf
+      pkgs.python3.pkgs.pandas
+      pkgs.python3.pkgs.pyarrow
+      pkgs.python3.pkgs.numpy
+    ];
+    # Strip the bundled Spark/JVM jars: fleet.spark uses only the gRPC Connect
+    # client, so the jars (and the local-JVM code paths that need them) are unused.
+    postInstall = (old.postInstall or "") + ''
+      rm -rf "$out/${pkgs.python3.sitePackages}/pyspark/jars"
+    '';
+    doCheck = false;
+    pythonImportsCheck = [
+      "pyspark"
+      "pyspark.sql.connect"
+    ];
+  });
+
   # The interpreter the wrapper pins. Sessions build their venv from this with
   # `--system-site-packages`, so `tui`, `search`, `fff`, `exa_py`, numpy, polars
   # (incl. Postgres via psycopg + SQLAlchemy), duckdb, httpx, htpy, and playwright
@@ -798,6 +839,11 @@ let
       # platforms the fleet and dev boxes run, so it joins the pinned interpreter
       # like any other module.
       ps.ray
+      # The Spark Connect client `fleet.spark()` drives (defined above): a 3.5.5
+      # pyspark pinned to the services.ix-spark cluster's Spark, jars stripped,
+      # carrying its Arrow/gRPC connect deps. Lets a cell open a SparkSession on
+      # the cluster master with no local JVM.
+      pysparkConnect
       # pypdf: extract text from a PDF in-kernel, so a downloaded file can be
       # read/searched without shelling out or falling back to a host tool. Pure
       # Python, small (`from pypdf import PdfReader`).

@@ -1,4 +1,4 @@
-# Apache Spark 3.5 as a single-node standalone cluster, tuned and shipping the
+# Apache Spark 3.5 as a standalone cluster, tuned and shipping the
 # Gluten + Velox native execution engine by default.
 #
 # Plain Spark runs its physical operators on the JVM. Gluten offloads them to
@@ -9,10 +9,16 @@
 # together. Turn {option}`services.ix-spark.nativeEngine.enable` off to drop
 # back to stock JVM execution.
 #
-# Scoped to a single node: master and worker run on the same host and the Gluten
-# jar is referenced by its absolute store path on `extraClassPath`. A real
-# multi-node cluster would need that same store path present on every worker
-# (shared nix store or copied closure).
+# Topology: ONE Spark cluster over Tailscale. Exactly one node sets
+# `role = "master"` (it runs the master daemon and optionally a Spark Connect
+# server); every other node is `role = "worker"` and must set `masterAddress`
+# to the master's tailscale IPv4. Daemons bind their *tailscale* IPv4 at
+# runtime, so the cluster lives on the tailnet, which is also the trust
+# boundary.
+#
+# The Gluten jar is referenced by its absolute store path. A real multi-node
+# cluster needs that same store path present on every worker (shared nix store
+# or copied closure).
 {
   config,
   ix,
@@ -26,13 +32,14 @@ let
     mkIf
     mkOption
     mkPackageOption
+    optional
     optionalAttrs
+    optionals
     types
     ;
 
   cfg = config.services.ix-spark;
   dataDir = "/var/lib/spark";
-  masterUrl = "spark://${cfg.master.host}:${toString cfg.master.port}";
 
   # `spark-hive` is the official complete distribution (hadoop3 + Hive) pinned to
   # JDK 17. Hive support is mandatory: Gluten's HiveTableScanExecTransformer
@@ -75,12 +82,16 @@ let
   };
 
   # Tuned defaults; `cfg.settings` is merged over the top so a user key wins.
+  # Driver/block-manager ports are pinned so a firewalled tailnet works.
   tunedDefaults = {
-    "spark.master" = masterUrl;
+    "spark.master" = "spark://__MASTER__:${toString cfg.master.port}";
     "spark.sql.adaptive.enabled" = "true";
     "spark.sql.adaptive.coalescePartitions.enabled" = "true";
     "spark.serializer" = "org.apache.spark.serializer.KryoSerializer";
     "spark.local.dir" = "${dataDir}/local";
+    "spark.driver.port" = "7078";
+    "spark.driver.blockManager.port" = "7079";
+    "spark.blockManager.port" = "7080";
   }
   // nativeSettings;
 
@@ -105,9 +116,39 @@ let
     SPARK_LOCAL_DIRS = "${dataDir}/local";
   };
 
-  mkUnit = description: execStart: {
+  # Resolve this node's tailscale IPv4 at runtime (it is host state, not a Nix
+  # value), fail loudly if tailscale is not up, then exec the spark daemon bound
+  # to it. The token `__IP__` in every argument is substituted with the resolved
+  # tailscale address so daemons advertise their tailnet address.
+  sparkLauncher = ix.writeNushellApplication pkgs {
+    name = "ix-spark-launch";
+    meta.description = "Resolve this node's tailscale IPv4 and exec a Spark daemon bound to it";
+    runtimeInputs = [
+      pkgs.tailscale
+      cfg.package
+    ];
+    text = ''
+      def main [...args: string] {
+        let ip = (do --ignore-errors {
+          ^tailscale ip -4 | lines | where ($it | str trim | is-not-empty) | first
+        } | default "")
+        if ($ip | str trim | is-empty) {
+          print --stderr "ix-spark: no tailscale IPv4 yet; is tailscaled up?"
+          exit 1
+        }
+        $env.SPARK_LOCAL_IP = $ip
+        let resolved = ($args | each { |a| $a | str replace --all "__IP__" $ip })
+        exec ...$resolved
+      }
+    '';
+  };
+
+  mkUnit = description: argv: {
     inherit description;
-    after = [ "network-online.target" ];
+    after = [
+      "network-online.target"
+      "tailscaled.service"
+    ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
     environment = sparkEnv;
@@ -118,15 +159,50 @@ let
       StateDirectory = "spark";
       WorkingDirectory = dataDir;
       ExecStartPre = "${pkgs.coreutils}/bin/mkdir -p ${dataDir}/work ${dataDir}/local ${dataDir}/tmp";
-      ExecStart = execStart;
+      ExecStart = lib.escapeShellArgs ([ (lib.getExe sparkLauncher) ] ++ argv);
       Restart = "on-failure";
       RestartSec = 5;
     };
   };
+
+  workerCoreArgs = lib.optionals (cfg.worker.cores != null) [
+    "--cores"
+    (toString cfg.worker.cores)
+  ];
+
+  workerMemArgs = lib.optionals (cfg.worker.memory != null) [
+    "--memory"
+    cfg.worker.memory
+  ];
 in
 {
   options.services.ix-spark = {
     enable = mkEnableOption "Apache Spark standalone cluster with the Gluten/Velox native engine";
+
+    role = mkOption {
+      type = types.enum [
+        "master"
+        "worker"
+      ];
+      default = "master";
+      description = ''
+        This node's role in the cluster. A lone node (single-node setup) keeps
+        the default `"master"`. Exactly one node must be `"master"` (it runs the
+        master daemon and optionally a Spark Connect server); every other node is
+        `"worker"` and must set
+        {option}`services.ix-spark.masterAddress`.
+      '';
+    };
+
+    masterAddress = mkOption {
+      type = types.nullOr types.str;
+      default = null;
+      example = "100.64.0.1";
+      description = ''
+        The master node's tailscale IPv4. Required on workers (they join
+        `spark://<masterAddress>:<master.port>`); must be null on the master.
+      '';
+    };
 
     package = mkPackageOption pkgs "spark-hive" {
       extraDescription = ''
@@ -138,11 +214,6 @@ in
     };
 
     master = {
-      host = mkOption {
-        type = types.str;
-        default = "127.0.0.1";
-        description = "Address the master binds and workers connect to.";
-      };
       port = mkOption {
         type = types.port;
         default = 7077;
@@ -159,7 +230,7 @@ in
       enable = mkOption {
         type = types.bool;
         default = true;
-        description = "Run a worker on this node, registered with the local master.";
+        description = "Run a worker on this node, registered with the local master (master role only).";
       };
       webUiPort = mkOption {
         type = types.port;
@@ -176,6 +247,23 @@ in
         default = null;
         example = "8g";
         description = "Memory the worker offers (Spark size string). Null lets Spark autodetect.";
+      };
+    };
+
+    connect = {
+      enable = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Run a Spark Connect gRPC server on the master node. Clients can then
+          connect via the Connect protocol without bundling a full Spark
+          distribution.
+        '';
+      };
+      port = mkOption {
+        type = types.port;
+        default = 15002;
+        description = "Spark Connect gRPC bind port.";
       };
     };
 
@@ -205,7 +293,7 @@ in
     openFirewall = mkOption {
       type = types.bool;
       default = false;
-      description = "Open the master RPC and web UI ports in the firewall.";
+      description = "Open the master RPC, web UI, Connect, and inter-node data ports in the firewall.";
     };
 
     settings = mkOption {
@@ -227,6 +315,17 @@ in
   };
 
   config = mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.role == "master" -> cfg.masterAddress == null;
+        message = "services.ix-spark: the master node must not set masterAddress.";
+      }
+      {
+        assertion = cfg.role == "worker" -> cfg.masterAddress != null;
+        message = "services.ix-spark: a worker must set masterAddress to the master's tailscale IP.";
+      }
+    ];
+
     # Velox (bundled in the Gluten jar) resolves the IANA tz database through its
     # date library, which hardcodes the FHS `/usr/share/zoneinfo` and ignores
     # $TZDIR. NixOS does not populate that path, so point it at the tzdata store
@@ -245,87 +344,157 @@ in
     };
     users.groups.spark = { };
 
-    ix.networking.portClaims = {
-      ix-spark-master = {
-        protocol = "tcp";
-        inherit (cfg.master) port;
-        description = "Spark master RPC";
+    ix.networking.portClaims =
+      # The master RPC + web UI listen only on the master node.
+      optionalAttrs (cfg.role == "master") {
+        ix-spark-master = {
+          protocol = "tcp";
+          inherit (cfg.master) port;
+          description = "Spark master RPC";
+        };
+        ix-spark-master-ui = {
+          protocol = "tcp";
+          port = cfg.master.webUiPort;
+          description = "Spark master web UI";
+        };
+      }
+      // optionalAttrs (cfg.role == "master" && cfg.connect.enable) {
+        ix-spark-connect = {
+          protocol = "tcp";
+          port = cfg.connect.port;
+          description = "Spark Connect gRPC";
+        };
+      }
+      // optionalAttrs cfg.worker.enable {
+        ix-spark-worker-ui = {
+          protocol = "tcp";
+          port = cfg.worker.webUiPort;
+          description = "Spark worker web UI";
+        };
       };
-      ix-spark-master-ui = {
-        protocol = "tcp";
-        port = cfg.master.webUiPort;
-        description = "Spark master web UI";
-      };
-    }
-    // optionalAttrs cfg.worker.enable {
-      ix-spark-worker-ui = {
-        protocol = "tcp";
-        port = cfg.worker.webUiPort;
-        description = "Spark worker web UI";
+
+    networking.firewall = mkIf cfg.openFirewall {
+      allowedTCPPorts =
+        # Pinned inter-node data-plane ports (driver + block managers), opened on
+        # every node so executors and the driver reach each other over the tailnet.
+        [
+          7078
+          7079
+          7080
+        ]
+        ++ optionals (cfg.role == "master") [
+          cfg.master.port
+          cfg.master.webUiPort
+        ]
+        ++ optional (cfg.role == "master" && cfg.connect.enable) cfg.connect.port
+        ++ optional cfg.worker.enable cfg.worker.webUiPort;
+    };
+
+    # The master web UI only exists on the master node; a worker has no local
+    # endpoint to probe here.
+    ix.healthChecks = optionalAttrs (cfg.role == "master") {
+      ix-spark = {
+        from = "guest";
+        description = "Spark master web UI responds";
+        command = [
+          (lib.getExe' pkgs.curl "curl")
+          "--fail"
+          "--silent"
+          "--show-error"
+          "--max-time"
+          "5"
+          "http://127.0.0.1:${toString cfg.master.webUiPort}/"
+        ];
       };
     };
 
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [
-      cfg.master.port
-      cfg.master.webUiPort
-    ];
-
-    ix.healthChecks.ix-spark = {
-      from = "guest";
-      description = "Spark master web UI responds";
-      command = [
-        (lib.getExe' pkgs.curl "curl")
-        "--fail"
-        "--silent"
-        "--show-error"
-        "--max-time"
-        "5"
-        "http://${cfg.master.host}:${toString cfg.master.webUiPort}/"
-      ];
-    };
-
-    systemd.services = {
-      spark-master = mkUnit "Apache Spark master" (
-        lib.escapeShellArgs [
+    systemd.services =
+      # --- Master daemon (master role only) ---
+      optionalAttrs (cfg.role == "master") {
+        spark-master = mkUnit "Apache Spark master" [
           sparkClass
           "org.apache.spark.deploy.master.Master"
           "--host"
-          cfg.master.host
+          "__IP__"
           "--port"
           (toString cfg.master.port)
           "--webui-port"
           (toString cfg.master.webUiPort)
-        ]
-      );
-    }
-    // optionalAttrs cfg.worker.enable {
-      spark-worker =
-        mkUnit "Apache Spark worker" (
-          lib.escapeShellArgs (
+        ];
+      }
+      # --- Local worker co-located with master ---
+      // optionalAttrs (cfg.role == "master" && cfg.worker.enable) {
+        spark-worker =
+          mkUnit "Apache Spark worker" (
             [
               sparkClass
               "org.apache.spark.deploy.worker.Worker"
-              masterUrl
+              "spark://__IP__:${toString cfg.master.port}"
+              "--host"
+              "__IP__"
               "--webui-port"
               (toString cfg.worker.webUiPort)
             ]
-            ++ lib.optionals (cfg.worker.cores != null) [
-              "--cores"
-              (toString cfg.worker.cores)
-            ]
-            ++ lib.optionals (cfg.worker.memory != null) [
-              "--memory"
-              cfg.worker.memory
-            ]
+            ++ workerCoreArgs
+            ++ workerMemArgs
           )
-        )
-        // {
-          after = [
-            "network-online.target"
-            "spark-master.service"
-          ];
-          requires = [ "spark-master.service" ];
-        };
-    };
+          // {
+            after = [
+              "network-online.target"
+              "tailscaled.service"
+              "spark-master.service"
+            ];
+            requires = [ "spark-master.service" ];
+          };
+      }
+      # --- Spark Connect server (master role only) ---
+      # Launched through `start-connect-server.sh` (which wraps spark-submit and
+      # puts the bundled `spark-connect_2.12-3.5.x.jar` from the full spark-hive
+      # distribution on the classpath, so no `--packages`/network is needed),
+      # NOT `spark-class` directly: `spark-class` runs the JVM class and ignores
+      # spark-submit args like `--master`/`--conf`, which the connect server needs.
+      # SPARK_NO_DAEMONIZE keeps it in the foreground for systemd Type=simple.
+      # NOTE: the connect-server runtime path is eval-verified only -- spark-hive
+      # is x86_64-linux-only, so a multi-node Spark Connect bring-up cannot be
+      # exercised on a darwin dev box and should be confirmed on first deploy.
+      // optionalAttrs (cfg.role == "master" && cfg.connect.enable) {
+        spark-connect =
+          mkUnit "Apache Spark Connect server" [
+            "${cfg.package}/sbin/start-connect-server.sh"
+            "--master"
+            "spark://__IP__:${toString cfg.master.port}"
+            "--conf"
+            "spark.connect.grpc.binding.host=__IP__"
+            "--conf"
+            "spark.connect.grpc.binding.port=${toString cfg.connect.port}"
+          ]
+          // {
+            environment = sparkEnv // {
+              SPARK_NO_DAEMONIZE = "1";
+            };
+            after = [
+              "network-online.target"
+              "tailscaled.service"
+              "spark-master.service"
+            ];
+            requires = [ "spark-master.service" ];
+          };
+      }
+      # --- Remote worker (worker role only) ---
+      // optionalAttrs (cfg.role == "worker") {
+        spark-worker = mkUnit "Apache Spark worker" (
+          [
+            sparkClass
+            "org.apache.spark.deploy.worker.Worker"
+            "spark://${cfg.masterAddress}:${toString cfg.master.port}"
+            "--host"
+            "__IP__"
+            "--webui-port"
+            (toString cfg.worker.webUiPort)
+          ]
+          ++ workerCoreArgs
+          ++ workerMemArgs
+        );
+      };
   };
 }

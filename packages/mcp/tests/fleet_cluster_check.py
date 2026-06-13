@@ -140,8 +140,58 @@ def check_exec_auth():
     assert status == 400, status
 
 
+def check_spark_dials_connect_url():
+    # Mock pyspark so the smoke runs without a Spark cluster: assert fleet.spark
+    # builds a Connect session against sc://<resolved-ip>:15002 and clamps to the
+    # SPARK_CONNECT_PORT.
+    import sys
+    import types
+
+    captured = {}
+
+    class _Builder:
+        def remote(self, url):
+            captured["url"] = url
+            return self
+
+        def config(self, key, value):
+            captured.setdefault("config", {})[key] = value
+            return self
+
+        def getOrCreate(self):
+            return "spark-session"
+
+    class _SparkSession:
+        builder = _Builder()
+
+    fake_sql = types.ModuleType("pyspark.sql")
+    fake_sql.SparkSession = _SparkSession
+    fake_pyspark = types.ModuleType("pyspark")
+    fake_pyspark.sql = fake_sql
+    sys.modules["pyspark"] = fake_pyspark
+    sys.modules["pyspark.sql"] = fake_sql
+    try:
+        session = asyncio.run(fleet.spark(master="100.0.0.7"))
+        assert session == "spark-session", session
+        assert captured["url"] == "sc://100.0.0.7:15002", captured
+        # No master and no env -> clean ClusterError, never a hang.
+        import os
+
+        os.environ.pop("IX_FLEET_SPARK_MASTER", None)
+        try:
+            asyncio.run(fleet.spark())
+        except cluster.ClusterError:
+            pass
+        else:
+            raise AssertionError("expected ClusterError without a master")
+    finally:
+        del sys.modules["pyspark"]
+        del sys.modules["pyspark.sql"]
+
+
 check_nodes_merge()
 check_submit_shape()
 check_in_kernel_requires_token()
 check_exec_auth()
+check_spark_dials_connect_url()
 print("fleet-cluster-ok")

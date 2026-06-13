@@ -59,6 +59,7 @@ import polars as pl
 # re-exported here, so `import fleet` gives the whole API in one namespace.
 from .cluster import (
     EXEC_PORT,
+    SPARK_CONNECT_PORT,
     ClusterError,
     connect,
     get,
@@ -66,6 +67,7 @@ from .cluster import (
     nodes,
     put,
     run,
+    spark,
     submit,
     up,
 )
@@ -93,9 +95,11 @@ __all__ = [
     "get",
     "put",
     "in_kernel",
+    "spark",
     "up",
     "ClusterError",
     "EXEC_PORT",
+    "SPARK_CONNECT_PORT",
 ]
 
 # A parser turns one host's raw stdout bytes into a DataFrame. Kept as a plain

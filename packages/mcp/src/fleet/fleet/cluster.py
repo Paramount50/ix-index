@@ -55,15 +55,21 @@ __all__ = [
     "get",
     "put",
     "in_kernel",
+    "spark",
     "up",
     "ClusterError",
     "EXEC_PORT",
+    "SPARK_CONNECT_PORT",
 ]
 
 # The fixed port each node's ix-mcp publishes its data API / `/api/exec` on, so
 # peers can reach each other without discovering a random port. The NixOS fleet
 # service pins IX_MCP_DASHBOARD_PORT to this; a dev box can override it.
 EXEC_PORT = int(os.environ.get("IX_FLEET_EXEC_PORT", "8799"))
+
+# The Spark Connect gRPC port the `services.ix-spark` master publishes; the
+# `fleet.spark` client dials `sc://<master>:<this>`.
+SPARK_CONNECT_PORT = int(os.environ.get("IX_FLEET_SPARK_CONNECT_PORT", "15002"))
 
 
 class ClusterError(Exception):
@@ -430,6 +436,74 @@ async def in_kernel(on: Any, code: str, *, budget: float = 15.0) -> pl.DataFrame
         schema={"host": pl.String, "ok": pl.Boolean, "output": pl.String,
                 "result": pl.String, "error": pl.String}
     )
+
+
+# --- Spark (big-data SQL / DataFrames, via Spark Connect) ------------------
+
+
+def _looks_ipv4(host: str) -> bool:
+    parts = host.split(".")
+    return len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts)
+
+
+async def _resolve_host(host: str) -> str:
+    """Map a host name to its tailscale IPv4 via :func:`nodes`; pass an IP through."""
+    if _looks_ipv4(host):
+        return host
+    df = await nodes()
+    by = {r["host"]: r["tailscale_ip"] for r in df.to_dicts() if r.get("tailscale_ip")}
+    if host in by:
+        return by[host]
+    for full, ip in by.items():
+        if full == host or full.split(".")[0] == host:
+            return ip
+    raise ClusterError(f"no node matches {host!r}; see `await fleet.nodes()`")
+
+
+async def spark(master: str | None = None, **config: Any):
+    """Open a SparkSession on the fleet's Spark cluster via Spark Connect.
+
+    The complement to Ray: Ray (:func:`run`) runs distributed *Python*; Spark is
+    for big-data *SQL / DataFrames* -- e.g. querying logs collected across the
+    fleet. Returns a remote ``SparkSession`` bound to ``sc://<master>:15002``;
+    the client is pure gRPC (no local JVM) and heavy work runs on the cluster
+    (Gluten/Velox), with results streamed back as Arrow.
+
+    ``master`` is the Spark master's tailscale IP, or a host from
+    ``await fleet.nodes()``; omitted, it falls back to ``IX_FLEET_SPARK_MASTER``.
+    ``config`` entries become ``SparkSession`` config keys.
+
+    A returned session's calls (``.sql(...).toPandas()``) run synchronously, so
+    wrap heavy queries in ``asyncio.to_thread`` to keep the kernel loop free; a
+    polars frame is ``pl.from_pandas(df.toPandas())``.
+
+    Example::
+
+        s = await fleet.spark("spark-head")
+        rows = await asyncio.to_thread(
+            lambda: s.sql("select level, count(*) c from logs group by level").toPandas()
+        )
+        pl.from_pandas(rows)
+    """
+    # Lazy: pyspark + its Arrow/gRPC stack is heavy, only paid when Spark is used.
+    from pyspark.sql import SparkSession
+
+    host = master or os.environ.get("IX_FLEET_SPARK_MASTER")
+    if not host:
+        raise ClusterError(
+            "no Spark master: pass master='<tailscale-ip-or-host>' or set "
+            "IX_FLEET_SPARK_MASTER. See `await fleet.nodes()`."
+        )
+    url = f"sc://{await _resolve_host(host)}:{SPARK_CONNECT_PORT}"
+
+    def _build():
+        builder = SparkSession.builder.remote(url)
+        for key, value in config.items():
+            builder = builder.config(key, value)
+        return builder.getOrCreate()
+
+    # getOrCreate opens the gRPC session (blocking I/O); keep it off the loop.
+    return await asyncio.to_thread(_build)
 
 
 # --- Manual bring-up (dev / ad-hoc; production uses the NixOS service) ------
