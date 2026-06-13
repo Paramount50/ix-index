@@ -149,6 +149,55 @@ and HTML inline beside the agent's text. `cells` is the agent's curated highligh
 reel (`cells.add(...)`), and `resources` are live, self-updating views. The JSON
 shape mirrors `site/src/lib/types.ts`.
 
+## The cluster: `import fleet`
+
+One kernel is one machine. `fleet` treats the whole tailnet as one cluster you
+can see and compute on, from any `python_exec` cell. Three paths, each for the
+job it fits; none subsumes the others:
+
+```python
+import fleet, socket
+
+# See it: every node, its tailscale address, online state, and Ray resources.
+await fleet.nodes()
+
+# Compute on it (Ray): ship a callable to the cluster, get the results back.
+await fleet.run(lambda: socket.gethostname(), on="all")   # {node: hostname}
+await fleet.run(train, dataset, on="any")                 # one task, anywhere
+refs = fleet.submit(heavy, x); await fleet.get(refs)      # futures + object store
+o = fleet.put(big_array); fleet.submit(use, o)            # store once, reuse
+
+# Peek a live node: run code in its existing ix-mcp session (token-gated).
+await fleet.in_kernel("hc1", "len(jobs)")
+
+# Shell fan-out (no Python on the far side): the original fleet.scan.
+await fleet.scan(hosts, "df -h --output=avail /")
+```
+
+- **`run`/`submit`/`get`/`put`** drive one **Ray** cluster spanning the tailnet.
+  Ray (bundled in the interpreter) gives the object store -- Plasma's zero-copy
+  on-node reads, peer-to-peer transfer between nodes, spill-to-disk under memory
+  pressure -- and true multi-process, multi-node parallelism. We use Ray rather
+  than reinvent a distributed store. `run` is eager (`{node: result}` for a
+  fan-out, the bare value for one target); `submit` returns object references you
+  `get` later, so a long job overlaps with the rest of your session. `on` is
+  `"all"` (one task pinned per node), `"any"` (Ray places it), or a host/list.
+- **`in_kernel`** reaches a node's *live* ix-mcp session over the token-gated
+  `/api/exec`, so you read what that node is actually doing -- a Ray task only
+  ever sees a fresh worker. Returns a polars frame (host, output, result, error).
+- **`scan`** (and `read_ndjson`/`read_text`/...) fan a *shell* command over SSH
+  and stitch the per-host output into one host-tagged polars frame; it needs no
+  Python, or even Ray, on the far side.
+
+Deployment is the `services.ix-fleet` NixOS module
+([`modules/services/ray`](../../modules/services/ray)): one node is the Ray
+`head`, the rest are `worker`s pointing at its tailscale IP, and every node runs
+the ix-mcp engine so its kernel can drive Ray and answer `in_kernel`. The trust
+boundary is the tailnet; `in_kernel` additionally requires a shared bearer token
+(`IX_MCP_EXEC_TOKEN`), so a tailnet foothold alone cannot run code in a peer's
+kernel. Ray's own data plane relies on the tailnet isolation (Ray has no per-call
+auth).
+
 An embedder that polls the SQLite store directly (the pi-harness room event
 mapper) pins its path with `IX_MCP_STORE` before launching `serve`; the server
 uses that path verbatim, so both sides agree on one file. The pinning caller
@@ -174,7 +223,9 @@ The default Tailscale-IP bind keeps the trust boundary at the tailnet.
 - You need multi-core parallelism for **pure-Python** CPU work: one kernel means
   one GIL, so pure-Python loops serialize. Offload such work to
   `asyncio.to_thread` only helps for GIL-releasing libs (numpy/polars/fff); for
-  pure-Python use a subprocess / `ProcessPoolExecutor`.
+  pure-Python use a subprocess / `ProcessPoolExecutor`, or fan it across the
+  cluster with `fleet.run`/`fleet.submit` (separate Ray worker processes, true
+  multi-core and multi-node).
 - You need crash isolation between executions: they share one kernel, so a hard
   crash (a segfaulting C extension) takes the kernel down. State is recoverable
   by re-running; the durable log survives.

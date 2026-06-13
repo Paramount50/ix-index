@@ -745,6 +745,18 @@ let
       # (runtime.__ix_snapshot / __ix_restore) depend on it to bring an agent's
       # helpers back instantly when a session file is reopened.
       ps.dill
+      # ray: the distributed-execution engine the `fleet` module drives. One Ray
+      # cluster spans the tailnet (a head node holds the GCS, the rest join as
+      # workers, all bound to their Tailscale IPv4); `fleet.run`/`fleet.submit`
+      # ship cloudpickled callables to it and the shared object store (Plasma,
+      # zero-copy on-node, peer-to-peer transfer between nodes, spill-to-disk
+      # under memory pressure) carries args and results. We use Ray rather than
+      # reinvent Plasma/Arrow/refcount-GC. It bundles its own cloudpickle, so a
+      # function defined in a cell ships by value without a separate serializer.
+      # nixpkgs ray builds on aarch64-darwin + {aarch64,x86_64}-linux, the exact
+      # platforms the fleet and dev boxes run, so it joins the pinned interpreter
+      # like any other module.
+      ps.ray
       # pypdf: extract text from a PDF in-kernel, so a downloaded file can be
       # read/searched without shelling out or falling back to a host tool. Pure
       # Python, small (`from pypdf import PdfReader`).
@@ -3354,6 +3366,32 @@ let
         mkdir -p "$out"
       '';
 
+  # The cluster surface (discovery merge, Ray submit return-shape, /api/exec
+  # auth) with the two discovery sources, the Ray remote, and the kernel all
+  # stubbed -- no live cluster or network. mcpPython carries both `fleet` and
+  # `ix_notebook_mcp`, so the script imports them with no PYTHONPATH.
+  fleetClusterSmoke =
+    pkgs.runCommand "ix-mcp-fleet-cluster-smoke"
+      {
+        nativeBuildInputs = [ mcpPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        ${lib.getExe mcpPython} ${./tests/fleet_cluster_check.py} >stdout 2>stderr || {
+          echo "ix-mcp fleet cluster smoke failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        grep -q '^fleet-cluster-ok' stdout || {
+          echo "ix-mcp fleet cluster smoke did not confirm the cluster surface:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
+
   # macOS-only modules (`screen`, `vmkit`) are only bundled on Darwin; their
   # import tests only exist there.
   # The `nix` module: parse a captured internal-json stream (no subprocess, no
@@ -3941,6 +3979,7 @@ package.overrideAttrs (old: {
         viewSmoke
         nixSmoke
         fleetSmoke
+        fleetClusterSmoke
         shSmoke
         worktreeSmoke
         browserSmoke

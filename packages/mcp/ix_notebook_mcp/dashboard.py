@@ -16,6 +16,7 @@ run outside nix), a small stub explains how to build the UI.
 from __future__ import annotations
 
 import functools
+import hmac
 import html
 import os
 from pathlib import Path
@@ -199,9 +200,13 @@ def _with_highlight_css(page: str) -> str:
 _PAGE = _with_highlight_css(_load_page())
 
 
-async def start(config: Config) -> web.AppRunner:
+def build_app(config: Config, conn) -> web.Application:
+    """Assemble the dashboard's aiohttp app over an open store ``conn``.
+
+    Split out of :func:`start` so the routes (notably the token-gated
+    ``/api/exec`` write path) are testable with an in-memory app and a fake
+    kernel, without binding a socket."""
     app = web.Application()
-    conn = store.connect(config.store_path)
 
     async def index(_request: web.Request) -> web.Response:
         return web.Response(text=_PAGE, content_type="text/html")
@@ -237,12 +242,61 @@ async def start(config: Config) -> web.AppRunner:
             return web.json_response({"error": "no such job"}, status=404)
         return web.json_response(one)
 
+    async def exec_run(request: web.Request) -> web.Response:
+        # The one *write* path on this otherwise read-only surface: run a line of
+        # code in THIS node's live kernel so a peer's `fleet.in_kernel` can read
+        # this node's real running state (its `jobs`, a held variable, hostname).
+        # Disabled unless an exec token is configured, and every request must
+        # carry it as a bearer token -- so the boundary is the tailnet AND the
+        # shared secret, not the tailnet alone (a tailnet foothold cannot exec).
+        token = config.exec_token
+        if not token:
+            return web.json_response(
+                {"error": "exec endpoint disabled (no IX_MCP_EXEC_TOKEN set)"}, status=403
+            )
+        presented = request.headers.get("Authorization", "")
+        expected = f"Bearer {token}"
+        # Constant-time compare so a wrong token cannot be guessed by timing.
+        if not hmac.compare_digest(presented, expected):
+            return web.json_response({"error": "unauthorized"}, status=401)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "body must be JSON"}, status=400)
+        code = body.get("code")
+        if not isinstance(code, str) or not code.strip():
+            return web.json_response({"error": "missing 'code'"}, status=400)
+        budget = min(float(body.get("budget", 15.0)), config.max_budget)
+        from .kernel import current_kernel
+
+        _outputs, summary = await current_kernel().python_exec(code, budget=budget)
+        if summary is None:
+            text = "".join(
+                o.get("text", "") for o in _outputs if isinstance(o, dict)
+            )
+            return web.json_response({"output": text, "result": None, "error": None})
+        return web.json_response(
+            {
+                "output": summary.get("output", ""),
+                "result": summary.get("result"),
+                "error": summary.get("error"),
+                "status": summary.get("status"),
+            }
+        )
+
     app.router.add_get("/", index)
     app.router.add_get("/api/jobs", jobs)
     app.router.add_get("/api/jobs/{id}", job)
     app.router.add_get("/api/resources", resources)
     app.router.add_get("/api/cells", cells)
     app.router.add_get("/api/snapshot", snapshot)
+    app.router.add_post("/api/exec", exec_run)
+    return app
+
+
+async def start(config: Config) -> web.AppRunner:
+    conn = store.connect(config.store_path)
+    app = build_app(config, conn)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, config.host, config.dashboard_port)

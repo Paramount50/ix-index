@@ -226,6 +226,22 @@ def _resolve_ssh_auth_sock(
     return op_sock
 
 
+def _exec_token() -> str | None:
+    """The shared secret gating `/api/exec` (a peer's `fleet.in_kernel`).
+
+    From ``IX_MCP_EXEC_TOKEN`` directly, or a file named by
+    ``IX_MCP_EXEC_TOKEN_FILE`` (the fleet service keeps the secret in a file and
+    points every node at it). Unset, the exec endpoint stays disabled.
+    """
+    token = os.environ.get("IX_MCP_EXEC_TOKEN")
+    if token:
+        return token.strip()
+    path = os.environ.get("IX_MCP_EXEC_TOKEN_FILE")
+    if path and os.path.exists(path):
+        return Path(path).read_text().strip()
+    return None
+
+
 def _serve(args: argparse.Namespace, *, engine_only: bool = False) -> int:
     wd = getattr(args, "workdir", None)
     workdir = Path(wd).resolve() if wd else Path.cwd()
@@ -313,6 +329,7 @@ def _serve(args: argparse.Namespace, *, engine_only: bool = False) -> int:
         mcp_http_port=mcp_http_port,
         stdin_fd=stdin_fd,
         stdout_fd=stdout_fd,
+        exec_token=_exec_token(),
     )
     set_config(cfg)
 
