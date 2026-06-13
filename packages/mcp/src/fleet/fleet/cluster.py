@@ -444,7 +444,10 @@ async def up(*, head: bool = False, address: str | None = None, **kw: Any) -> st
     node's tailscale IPv4 when available so peers reach it over the tailnet.
     """
     ip = _ipv4(((await _tailscale_status()) or {}).get("Self", {}).get("TailscaleIPs"))
-    cmd = ["ray", "start", "--block=false"]
+    # No `--block`: `ray start` already returns once the daemon is up (block is an
+    # opt-in foreground flag, and being a Click flag it rejects a `=value`), so we
+    # let it daemonize and capture its startup output.
+    cmd = ["ray", "start"]
     if head:
         cmd.append("--head")
         if ip:

@@ -2321,8 +2321,7 @@ let
       {
         # The head runs both daemons (Ray GCS + the ix-mcp engine that drives it).
         assertion =
-          (ixFleetHead.config.systemd.services ? ix-fleet-ray)
-          && (ixFleetHead.config.systemd.services ? ix-fleet-notebook);
+          (ixFleetHead.systemd.services ? ix-fleet-ray) && (ixFleetHead.systemd.services ? ix-fleet-notebook);
         message = "ix-fleet head should run both the Ray daemon and the ix-mcp engine";
       }
       {
@@ -2330,7 +2329,7 @@ let
         # data API binds the exec port the `fleet` module reaches peers on.
         assertion =
           let
-            claims = ixFleetHead.config.ix.networking.portClaims;
+            claims = ixFleetHead.ix.networking.portClaims;
           in
           claims.ix-fleet-gcs.port == 6379 && claims.ix-fleet-exec.port == 8799;
         message = "ix-fleet head should claim the GCS (6379) and exec (8799) ports";
@@ -2339,7 +2338,7 @@ let
         # A worker only joins; it must not advertise a GCS of its own.
         assertion =
           let
-            claims = ixFleetWorker.config.ix.networking.portClaims;
+            claims = ixFleetWorker.ix.networking.portClaims;
           in
           (claims ? ix-fleet-exec) && !(claims ? ix-fleet-gcs);
         message = "ix-fleet worker should expose the exec port but not a GCS port";

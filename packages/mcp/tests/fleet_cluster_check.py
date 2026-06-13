@@ -117,13 +117,13 @@ def check_exec_auth():
 
     kernel.current_kernel = lambda: _FakeKernel()
 
-    async def request(token, auth):
+    async def request(token, auth, payload={"code": "1+1"}):
         conn = store.connect(tmp / "store.db")
         cfg = Config(workdir=tmp, store_path=tmp / "store.db", exec_token=token)
         app = dashboard.build_app(cfg, conn)
         async with TestClient(TestServer(app)) as client:
             headers = {"Authorization": auth} if auth else {}
-            resp = await client.post("/api/exec", json={"code": "1+1"}, headers=headers)
+            resp = await client.post("/api/exec", json=payload, headers=headers)
             body = await resp.json() if resp.status == 200 else None
             return resp.status, body
 
@@ -133,6 +133,11 @@ def check_exec_auth():
     assert status == 401, status  # wrong token rejected
     status, body = asyncio.run(request("secret", "Bearer secret"))
     assert status == 200 and body["result"] == "2", (status, body)
+    # A non-numeric budget is a clean 400, not an unhandled 500.
+    status, _ = asyncio.run(
+        request("secret", "Bearer secret", {"code": "1", "budget": "abc"})
+    )
+    assert status == 400, status
 
 
 check_nodes_merge()

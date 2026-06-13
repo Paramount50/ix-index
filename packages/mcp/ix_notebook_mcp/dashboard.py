@@ -266,7 +266,13 @@ def build_app(config: Config, conn) -> web.Application:
         code = body.get("code")
         if not isinstance(code, str) or not code.strip():
             return web.json_response({"error": "missing 'code'"}, status=400)
-        budget = min(float(body.get("budget", 15.0)), config.max_budget)
+        # `bool` is an int subclass, so exclude it explicitly; clamp to
+        # [0, max_budget] so a bad/negative budget is a clean 400 or a sane value
+        # rather than an unhandled ValueError (a 500) for a malformed request.
+        raw_budget = body.get("budget", 15.0)
+        if isinstance(raw_budget, bool) or not isinstance(raw_budget, (int, float)):
+            return web.json_response({"error": "'budget' must be a number"}, status=400)
+        budget = min(max(0.0, float(raw_budget)), config.max_budget)
         from .kernel import current_kernel
 
         _outputs, summary = await current_kernel().python_exec(code, budget=budget)
