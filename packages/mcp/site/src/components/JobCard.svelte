@@ -6,7 +6,9 @@
   import RichOutput from './RichOutput.svelte';
   import CodeView from './CodeView.svelte';
 
-  let { job }: { job: Job } = $props();
+  // `latest` marks the most recent run in the feed: it opens its source by
+  // default so the thing you just ran reads in full without a click.
+  let { job, latest = false }: { job: Job; latest?: boolean } = $props();
 
   // Only an explicit caller name labels the card; the source is shown below.
   const title = $derived(jobTitle(job.name, job.id));
@@ -22,12 +24,13 @@
   const hasRich = $derived(job.outputs.length > 0);
   const hasDetails = $derived(!!(job.code_html || job.code || job.output));
 
-  // A run reads as its results by default, but the *active* states open
-  // themselves: a running job shows its source with the executing line
-  // highlighted live, and a failed one shows the line it failed on. A user
-  // click takes over from the automatic behaviour for this card.
+  // A run reads as its results by default, but some states open themselves: a
+  // running job shows its source with the executing line highlighted live, a
+  // failed one shows the line it failed on, and the most recent run opens so the
+  // thing you just ran is expanded without a click. A user click takes over from
+  // the automatic behaviour for this card.
   let userToggled = $state<boolean | null>(null);
-  const autoOpen = $derived(job.status === 'running' || job.status === 'error');
+  const autoOpen = $derived(latest || job.status === 'running' || job.status === 'error');
   const showDetails = $derived(hasDetails && (userToggled ?? autoOpen));
 
   // The kernel appends the error text to the captured stdout (so the model can

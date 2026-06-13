@@ -8,6 +8,9 @@
 
   // Executions read like a notebook: oldest at top, newest at the bottom.
   const ordered = $derived([...feed.jobs].sort((a, b) => a.started_at - b.started_at));
+  // The most recent run (last in the notebook order): its card opens its source
+  // by default, so the thing you just ran is expanded without a click.
+  const latestId = $derived(ordered.length ? ordered[ordered.length - 1].id : null);
   const running = $derived(feed.jobs.filter((j) => j.status === 'running').length);
 
   // The three panes are grid tracks sized in `fr`, so they always fill the row.
@@ -225,7 +228,7 @@
           <div class="empty">no executions yet</div>
         {:else}
           {#each ordered as job (job.id)}
-            <JobCard {job} />
+            <JobCard {job} latest={job.id === latestId} />
           {/each}
         {/if}
       </div>
