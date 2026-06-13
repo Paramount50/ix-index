@@ -467,6 +467,33 @@ fn f() -> u32 {
 }
 
 #[test]
+fn bare_suppression_reports_comment_via_all_directive() -> TestResult {
+    // A bare `astlog-ignore` (no rule list) takes the `Directive::All` branch,
+    // which records the originating comment separately from the named path.
+    // `suppressed` must still report that comment so an audit shows what an
+    // unscoped ignore is hiding.
+    let source = "
+fn f() -> u32 {
+    a().unwrap(); // astlog-ignore
+
+    b().unwrap();
+    0
+}
+";
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.rs", source)?;
+    let analysis = analyze(LINT_RULES, &[dir.path().to_path_buf()])?;
+
+    let suppressed = analysis.suppressed()?;
+    assert_eq!(suppressed.len(), 1, "exactly the hidden site is listed");
+    let only = &suppressed[0];
+    assert_eq!(only.finding.text, "a().unwrap()");
+    assert_eq!(only.comment_line, 3);
+    assert_eq!(only.comment_text, "// astlog-ignore");
+    Ok(())
+}
+
+#[test]
 fn warning_severity_is_carried_through() -> TestResult {
     let rules = r#"
 (rule (brk b) (match rust "(break_expression) @b"))

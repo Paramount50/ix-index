@@ -856,8 +856,9 @@ let
   htpyBundled = importTest "htpy" "import htpy; print('htpy-ok' if '&lt;' in str(htpy.div['<']) else 'htpy-bad')";
   searchBundled = importTest "search" "import search; print('search-ok', search.__version__)";
   # The astlog surface is callable and its public API returns polars frames:
-  # `scan`/`fixes` are DataFrames and `query` a dict of them. A trivial inline
-  # rules string against one temp file keeps it fast and offline.
+  # `scan`/`fixes`/`suppressed` are DataFrames and `query` a dict of them. A
+  # trivial inline rules string against one temp file keeps it fast and offline;
+  # an `astlog-ignore` comment exercises the suppression-listing path end to end.
   astlogBundled = importTest "astlog" ''
     import os, tempfile
     import polars as pl
@@ -870,16 +871,20 @@ let
     rules = '(rule (id x) (match rust "(identifier) @x"))\n(lint id warning "an identifier {x}")\n'
     work = tempfile.mkdtemp()
     with open(os.path.join(work, "s.rs"), "w") as fh:
-        fh.write("fn main() { let v = 1; }\n")
+        fh.write("fn main() { let v = ignored; } // astlog-ignore\n")
 
     relations = astlog.query(rules, [work])
     findings = astlog.scan(rules, [work])
     edits = astlog.fixes(rules, [work])
+    suppressed = astlog.suppressed(rules, [work])
     assert isinstance(relations, dict) and all(
         isinstance(frame, pl.DataFrame) for frame in relations.values()
     ), "query must return a dict of DataFrames"
     assert isinstance(findings, pl.DataFrame), "scan must return a DataFrame"
     assert isinstance(edits, pl.DataFrame), "fixes must return a DataFrame"
+    assert isinstance(suppressed, pl.DataFrame), "suppressed must return a DataFrame"
+    assert {"commentLine", "commentText"} <= set(suppressed.columns), suppressed.columns
+    assert suppressed.height > 0, "the astlog-ignore line must be reported as suppressed"
     print("astlog-ok", astlog.__version__)
   '';
 
