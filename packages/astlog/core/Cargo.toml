@@ -10,9 +10,9 @@ workspace = true
 
 [dependencies]
 ast-merge-langs.workspace = true
+edit-applier.workspace = true
 ignore.workspace = true
 regex.workspace = true
-similar.workspace = true
 snafu.workspace = true
 tree-sitter.workspace = true
 

@@ -1,5 +1,8 @@
-//! Rewrites: template instantiation over rewrite-body bindings, then
-//! non-overlapping byte-range splices applied per file.
+//! Rewrites: template instantiation over rewrite-body bindings into byte-range
+//! edits. The apply / diff / overlap mechanics live in the shared `edit-applier`
+//! crate (which `scipql` also uses); this module only turns derived bindings
+//! into [`Edit`]s and adapts the tree-sitter [`Corpus`] to the applier's
+//! `(path, contents)` view.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -9,21 +12,7 @@ use crate::error::{Error, OverlappingEditsSnafu, ReplaceNotNodeSnafu, TemplateVa
 use crate::eval::{Database, Evaluator};
 use crate::program::{Program, Rewrite, Segment};
 
-/// One pending replacement of a byte range in a corpus file.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Edit {
-    pub file: usize,
-    pub start: usize,
-    pub end: usize,
-    pub replacement: String,
-}
-
-/// A file with all of its edits applied.
-#[derive(Debug)]
-pub struct FileRewrite {
-    pub path: PathBuf,
-    pub content: String,
-}
+pub use edit_applier::{Edit, FileRewrite};
 
 pub fn collect(
     program: &Program,
@@ -39,7 +28,17 @@ pub fn collect(
     }
     edits.sort();
     edits.dedup();
-    check_overlaps(corpus, &edits)?;
+    let paths: Vec<PathBuf> = corpus.files.iter().map(|file| file.path.clone()).collect();
+    edit_applier::check_overlaps(&paths, &edits).map_err(|error| {
+        OverlappingEditsSnafu {
+            path: error.path,
+            first_start: error.first_start,
+            first_end: error.first_end,
+            second_start: error.second_start,
+            second_end: error.second_end,
+        }
+        .build()
+    })?;
     Ok(edits)
 }
 
@@ -87,72 +86,23 @@ fn edit_of(
     })
 }
 
-fn check_overlaps(corpus: &Corpus, edits: &[Edit]) -> Result<(), Error> {
-    for pair in edits.windows(2) {
-        let [first, second] = pair else {
-            continue;
-        };
-        // `edits` is sorted, so the pair overlaps exactly when the later edit
-        // starts before the earlier one ends.
-        #[expect(
-            clippy::suspicious_operation_groupings,
-            reason = "comparing second.start against first.end is the overlap test, not a typo"
-        )]
-        if first.file == second.file && second.start < first.end {
-            return OverlappingEditsSnafu {
-                path: corpus.files[first.file].path.clone(),
-                first_start: first.start,
-                first_end: first.end,
-                second_start: second.start,
-                second_end: second.end,
-            }
-            .fail();
-        }
-    }
-    Ok(())
+/// `(path, contents)` for every corpus file, the view `edit-applier` consumes.
+fn corpus_files(corpus: &Corpus) -> Vec<(PathBuf, String)> {
+    corpus
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file.text.clone()))
+        .collect()
 }
 
 /// Apply edits, returning only the files that changed.
 #[must_use]
 pub fn apply(corpus: &Corpus, edits: &[Edit]) -> Vec<FileRewrite> {
-    let mut by_file: Vec<Vec<&Edit>> = vec![Vec::new(); corpus.files.len()];
-    for edit in edits {
-        by_file[edit.file].push(edit);
-    }
-    by_file
-        .into_iter()
-        .enumerate()
-        .filter(|(_, edits)| !edits.is_empty())
-        .map(|(file, edits)| {
-            let source = &corpus.files[file];
-            let mut content = source.text.clone();
-            for edit in edits.into_iter().rev() {
-                content.replace_range(edit.start..edit.end, &edit.replacement);
-            }
-            FileRewrite {
-                path: source.path.clone(),
-                content,
-            }
-        })
-        .collect()
+    edit_applier::apply(&corpus_files(corpus), edits)
 }
 
 /// Unified diff of every pending rewrite against the loaded corpus.
 #[must_use]
 pub fn unified_diff(corpus: &Corpus, rewrites: &[FileRewrite]) -> String {
-    let mut out = String::new();
-    for rewrite in rewrites {
-        let original = corpus
-            .files
-            .iter()
-            .find(|file| file.path == rewrite.path)
-            .map_or("", |file| file.text.as_str());
-        let label = rewrite.path.display();
-        let diff = similar::TextDiff::from_lines(original, &rewrite.content)
-            .unified_diff()
-            .header(&format!("a/{label}"), &format!("b/{label}"))
-            .to_string();
-        out.push_str(&diff);
-    }
-    out
+    edit_applier::unified_diff(&corpus_files(corpus), rewrites)
 }

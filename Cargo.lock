@@ -747,9 +747,9 @@ name = "astlog-core"
 version = "0.1.0"
 dependencies = [
  "ast-merge-langs",
+ "edit-applier",
  "ignore",
  "regex",
- "similar",
  "snafu",
  "tempfile",
  "tree-sitter",
@@ -2086,6 +2086,14 @@ name = "dyn-clone"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
+
+[[package]]
+name = "edit-applier"
+version = "0.1.0"
+dependencies = [
+ "similar",
+ "snafu",
+]
 
 [[package]]
 name = "either"
