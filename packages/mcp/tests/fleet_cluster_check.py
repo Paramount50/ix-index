@@ -142,8 +142,7 @@ def check_exec_auth():
 
 def check_spark_dials_connect_url():
     # Mock pyspark so the smoke runs without a Spark cluster: assert fleet.spark
-    # builds a Connect session against sc://<resolved-ip>:15002 and clamps to the
-    # SPARK_CONNECT_PORT.
+    # builds a Connect session against sc://<resolved-ip>:<SPARK_CONNECT_PORT>.
     import sys
     import types
 

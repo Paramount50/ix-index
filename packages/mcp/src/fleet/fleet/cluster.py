@@ -454,8 +454,10 @@ async def _resolve_host(host: str) -> str:
     by = {r["host"]: r["tailscale_ip"] for r in df.to_dicts() if r.get("tailscale_ip")}
     if host in by:
         return by[host]
+    # Exact matches returned above; here only the short hostname (first DNS label)
+    # can still match, e.g. "spark-head" against "spark-head.tail.ts.net".
     for full, ip in by.items():
-        if full == host or full.split(".")[0] == host:
+        if full.split(".")[0] == host:
             return ip
     raise ClusterError(f"no node matches {host!r}; see `await fleet.nodes()`")
 

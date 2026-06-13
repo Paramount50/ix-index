@@ -143,6 +143,27 @@ let
     '';
   };
 
+  # The master web UI binds SPARK_LOCAL_IP (the tailscale IP the launcher
+  # exports), not 0.0.0.0, and Spark 3.5 has no `spark.ui.host` override -- so a
+  # guest-local `curl 127.0.0.1` never connects. Resolve the tailscale IP and
+  # probe the UI there, matching where the daemon actually listens.
+  sparkMasterHealth = ix.writeNushellApplication pkgs {
+    name = "ix-spark-master-health";
+    meta.description = "Probe the Spark master web UI on this node's tailscale IP";
+    runtimeInputs = [
+      pkgs.tailscale
+      pkgs.curl
+    ];
+    text = ''
+      def main [] {
+        let ip = (do --ignore-errors {
+          ^tailscale ip -4 | lines | where ($it | str trim | is-not-empty) | first
+        } | default "127.0.0.1")
+        ^curl --fail --silent --show-error --max-time 5 $"http://($ip):${toString cfg.master.webUiPort}/"
+      }
+    '';
+  };
+
   mkUnit = description: argv: {
     inherit description;
     after = [
@@ -396,15 +417,7 @@ in
       ix-spark = {
         from = "guest";
         description = "Spark master web UI responds";
-        command = [
-          (lib.getExe' pkgs.curl "curl")
-          "--fail"
-          "--silent"
-          "--show-error"
-          "--max-time"
-          "5"
-          "http://127.0.0.1:${toString cfg.master.webUiPort}/"
-        ];
+        command = [ (lib.getExe sparkMasterHealth) ];
       };
     };
 
