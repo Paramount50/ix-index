@@ -47,7 +47,7 @@ function outputModelText(output: RichOutput): string {
   if (encoded) {
     try {
       const parsed = JSON.parse(encoded) as LlmView;
-      if (typeof parsed.text === 'string') return parsed.text;
+      if (typeof parsed.text === 'string' && Array.isArray(parsed.images)) return parsed.text;
     } catch {
       // Malformed view: fall through to the plain-text representation below.
     }
@@ -59,18 +59,27 @@ function outputModelText(output: RichOutput): string {
 
 // Estimated input/output token counts for one tool call, with the underlying
 // char counts for the hover detail. Input is the `code` argument. Output is what
-// the model actually read back: the rich outputs' model text, falling back to
-// the result/stdout copy when a run produced no rich block, plus any error. The
-// `output`/`result` columns duplicate the rich text/plain, so we pick one
-// representation rather than summing the three.
+// the model actually read back: the rich outputs' model text (or the `result`
+// copy when a run produced no rich block), plus stdout and any error.
+//
+// The subtlety is stdout. The kernel folds a bare trailing expression's stdout
+// INTO the result text (runtime._merge_stdout), so when that happened `job.output`
+// is already inside the rich/result text and must not be counted twice. But an
+// explicit/rich Result is exempt from that fold: there the model received stdout
+// as its own block, the result text omits it, and it would otherwise be dropped.
+// So count stdout once: append it only when the result text does not already
+// contain it. `output`/`result`/`text-plain` are otherwise the same value, so we
+// pick one representation rather than summing the duplicates.
 export function jobTokens(job: Job): {
   inTok: number;
   outTok: number;
   inChars: number;
   outChars: number;
 } {
-  let out = job.outputs.map(outputModelText).filter(Boolean).join('\n');
-  if (!out) out = job.result ?? job.output ?? '';
+  const rich = job.outputs.map(outputModelText).filter(Boolean).join('\n');
+  let out = rich || job.result || '';
+  const stdout = job.output ?? '';
+  if (stdout && !out.includes(stdout)) out += (out ? '\n' : '') + stdout;
   if (job.error) out += (out ? '\n' : '') + job.error;
   return {
     inTok: estimateTokens(job.code),
