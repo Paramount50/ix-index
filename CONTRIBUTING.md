@@ -10,7 +10,7 @@ Local verification is the gate that decides whether a change is safe to land, no
 nix run .#lint
 ```
 
-It checks Nix formatting (nixfmt), Statix, Deadnix, the repo's astlog rules (`astlog-rules/nix.astlog`), and the remaining ast-grep rules. CI runs the same derivation as a flake check, but treat that run as advisory signal rather than a landing gate.
+It checks Nix formatting (nixfmt), Statix, Deadnix, and the repo's astlog rules (`astlog-rules/nix.astlog` for Nix, `astlog-rules/rust.astlog` for the corpus/search Rust crates). CI runs the same derivation as a flake check, but treat that run as advisory signal rather than a landing gate.
 
 The repo ships a tracked git pre-commit hook at `.githooks/pre-commit` that calls the lint app. To activate it locally, `direnv allow` in the repo root: `.envrc` exports `core.hooksPath` so git uses the tracked hook. No additional shell or framework is needed.
 

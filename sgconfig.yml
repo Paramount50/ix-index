@@ -1,6 +1,0 @@
-# The nix style rules all moved to astlog (astlog-rules/nix.astlog, #1060;
-# prefer-sri-hash followed in #1062 once astlog grew `astlog-ignore`
-# suppression comments). ast-grep keeps only the rust rules.
-ruleDirs: ["./ast-grep/rust/rules"]
-testConfigs:
-  - testDir: ./ast-grep/rust/tests

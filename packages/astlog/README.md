@@ -178,12 +178,13 @@ Deliberately written here, after evaluating the alternatives:
 
 ## In production
 
-The repo's nix lint rules live in `astlog-rules/nix.astlog` (ported from the
-old ast-grep YAML rules, #1060; `prefer-sri-hash` followed in #1062 once
-suppression comments landed) and gate `nix run .#lint` via `astlog scan`.
-Each lint has a committed good/bad fixture pair under `astlog-rules/tests/`,
-validated by the `astlog-nix-rules` flake check through the same
-`astlog scan --json` surface the gate uses.
+The repo's lint rules live in `astlog-rules/nix.astlog` (Nix) and
+`astlog-rules/rust.astlog` (the corpus/search Rust crates), both ported from
+the old ast-grep YAML rules (#1060 did the Nix rules, `prefer-sri-hash`
+followed in #1062 once suppression comments landed) and gating `nix run .#lint`
+via `astlog scan`. Each lint has a committed good/bad fixture pair under
+`astlog-rules/tests/`, validated by the `astlog-rules` flake check through the
+same `astlog scan --json` surface the gate uses.
 
 ## Planned
 

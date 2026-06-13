@@ -18,10 +18,10 @@ defensive. The Nix-specific checks on top:
 
 ## Nix style (astlog enforced)
 
-Run `nix run .#lint` before committing. It runs nixfmt, Statix, Deadnix, the
-repo's astlog rules (`astlog-rules/nix.astlog`, gated with `astlog scan`),
-and the remaining ast-grep rules (rust only). The lint app is the mechanical
-source of truth. A legitimate exception to an astlog rule is suppressed in
+Run `nix run .#lint` before committing. It runs nixfmt, Statix, Deadnix, and
+the repo's astlog rules (`astlog-rules/nix.astlog` for Nix and
+`astlog-rules/rust.astlog` for the corpus/search Rust crates, both gated with
+`astlog scan`). The lint app is the mechanical source of truth. A legitimate exception to an astlog rule is suppressed in
 place with an `# astlog-ignore: <rule>` comment on the finding's line or the
 line above it, with a comment naming the reason. The common hard rules are:
 
