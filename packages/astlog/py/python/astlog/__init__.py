@@ -50,13 +50,18 @@ file's language is detected from its extension. The same engine backs the
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import polars as pl
 
-from ._astlog import Node, __version__, fix
+from ._astlog import __version__, fix
 from ._astlog import fixes as _fixes
 from ._astlog import query as _query
 from ._astlog import scan as _scan
 from ._astlog import suppressed as _suppressed
+
+if TYPE_CHECKING:
+    from ._astlog import Node
 
 __all__ = ["__version__", "fix", "fixes", "query", "scan", "suppressed"]
 
