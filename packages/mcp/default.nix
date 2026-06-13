@@ -662,7 +662,10 @@ let
   # (incl. Postgres via psycopg + SQLAlchemy), duckdb, httpx, htpy, and playwright
   # are importable by default while an in-session `pip install` still writes to
   # the per-session venv.
-  mcpPython = pkgs.python3.withPackages (
+  # The bundled-package set the pinned interpreter carries. Named so a sibling
+  # interpreter (the vdom property-test runner below) can reuse the exact same
+  # modules and only add its test deps, instead of duplicating the long list.
+  mcpPythonPackages =
     ps:
     [
       ps.asyncssh
@@ -766,8 +769,8 @@ let
       linearModule
       mcpClientModule
     ]
-    ++ darwinExtraPackages ps
-  );
+    ++ darwinExtraPackages ps;
+  mcpPython = pkgs.python3.withPackages mcpPythonPackages;
 
   # Browser bundle that matches the playwright-driver the python package is
   # patched to use. Exposed to the worker through PLAYWRIGHT_BROWSERS_PATH on the
@@ -3855,6 +3858,51 @@ let
         mkdir -p "$out"
       '';
 
+  # Property-based (Hypothesis) tests for the vdom()/read() snapshot helpers
+  # (packages/mcp/tests/test_vdom_properties.py): they generate random HTML
+  # bodies and assert selector integrity, exclusion of hidden/script/style
+  # subtrees, name clamping, ref contiguity, determinism, the interactive_only
+  # subset relation, geometry, and read()/vdom() agreement against a real
+  # headless Chromium. Like browserVdomSmoke, vdom() only reads the DOM, so it
+  # runs headless on set_content fixtures in the sandbox with no display or
+  # network. The interpreter is mcpPython (the bundled browser module +
+  # playwright) plus pytest and hypothesis, which the bare mcpPython omits.
+  vdomTestPython = pkgs.python3.withPackages (
+    ps:
+    mcpPythonPackages ps
+    ++ [
+      ps.pytest
+      ps.hypothesis
+    ]
+  );
+  vdomPropertiesSource = builtins.path {
+    name = "ix-mcp-vdom-properties-test";
+    path = ./tests/test_vdom_properties.py;
+  };
+  vdomPropertiesSmoke =
+    pkgs.runCommand "ix-mcp-vdom-properties-smoke"
+      {
+        nativeBuildInputs = [ vdomTestPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        # `vdom()` launches a (headless) browser; point Playwright at the bundled
+        # browser bundle (no wrapper sets it for the bare interpreter).
+        export PLAYWRIGHT_BROWSERS_PATH=${lib.escapeShellArg playwrightBrowsers}
+        # Copy the test into a writable dir so pytest collects it as a plain file
+        # (a bare store path of a single .py is read by pytest as a directory).
+        cp ${vdomPropertiesSource} "$TMPDIR/test_vdom_properties.py"
+        ${lib.getExe vdomTestPython} -m pytest "$TMPDIR/test_vdom_properties.py" -q -p no:cacheprovider >stdout 2>stderr || {
+          echo "ix-mcp vdom property tests failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        cat stdout
+        mkdir -p "$out"
+      '';
+
   screenBundled = importTest "screen" "import screen; print('screen-ok', all(callable(getattr(screen, n)) for n in ('capture', 'click', 'write', 'press', 'key_down', 'key_up', 'apps', 'frontmost', 'launch', 'activate', 'terminate', 'accessibility_trusted')))";
   vmkitBundled = importTest "vmkit" "import vmkit; print('vmkit-ok', callable(vmkit.boot_linux), callable(vmkit.drive), callable(vmkit.screenshot))";
   imessageBundled = importTest "imessage" "import imessage; print('imessage-ok', all(callable(getattr(imessage, n)) for n in ('messages', 'chats', 'contacts', 'send')))";
@@ -3897,6 +3945,7 @@ package.overrideAttrs (old: {
         worktreeSmoke
         browserSmoke
         browserVdomSmoke
+        vdomPropertiesSmoke
         xBundled
         linearBundled
         ;
