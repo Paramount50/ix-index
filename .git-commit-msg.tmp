@@ -1,0 +1,30 @@
+codex: soft-default precedence + share config-rendering primitives
+
+Extract the two genuinely-general helpers out of the codex wrapper into the
+shared lib, and make the multi-agent defaults yield to a user's config.toml.
+
+lib/util:
+- attrs.flattenToDotted: nested attrset -> flat dotted-key attrset (leaf
+  semantics match deep-merge: lists/derivations are leaves).
+- toml.scalar: encode one Nix scalar as a TOML literal (scalars only; whole
+  files use pkgs.formats.toml).
+Both wired into ix (lib/default.nix). codex now composes them; only the
+--config spelling and the forced/soft split stay package glue.
+
+codex precedence: -c is codex's highest layer (above ~/.codex/config.toml),
+so baking tunables via -c wrongly outranks a user's explicit config. Split:
+- forcedSettings (check_for_update_on_startup): always -c, an invariant
+  (read-only store binary can't self-update).
+- settings (multi_agent_v2 cap 16, max_depth 3): SOFT defaults, injected only
+  when the user's config.toml does not configure that sub-namespace, detected
+  per second-segment token. A user's own later -c still wins over both.
+The wrapper becomes a small shell script; passthru.tests.wrapper covers the
+contract (forced always rides; soft injected when unset, withheld when the
+user sets it; a comment mention does not gate; argv passthrough).
+
+astlog: no-handrolled-toml-scalar flags a local `toToml` binding and points
+to ix.toml.scalar / ix.attrs.flattenToDotted, with good/bad fixtures.
+
+Verified: nix build .#codex and .#codex.tests.wrapper pass; astlog self-test
+fires on bad / clears good; the rule finds 0 hits across all 405 .nix files;
+changed files have 0 astlog violations.

@@ -204,6 +204,22 @@ let
   */
   lists = import ./util/lists.nix { inherit lib; };
 
+  /**
+    General attrset helpers beyond `nixpkgs.lib`: `flattenToDotted` collapses a
+    nested attrset to a flat one keyed by dotted paths (a config tree ->
+    `key.path=value` flags or dotted env names). See
+    [`lib/util/attrs.nix`](lib/util/attrs.nix).
+  */
+  attrs = import ./util/attrs.nix { inherit lib; };
+
+  /**
+    TOML value encoding. `scalar` renders one Nix scalar as the TOML literal a
+    `key = value` pair expects (codex `--config a.b=1` flags). Scalars only;
+    for whole TOML files use `pkgs.formats.toml`. See
+    [`lib/util/toml.nix`](lib/util/toml.nix).
+  */
+  toml = import ./util/toml.nix { inherit lib; };
+
   mkMinecraftLoader = import ./minecraft/loader.nix;
 
   /**
@@ -365,6 +381,7 @@ let
       revEpoch
       agentContext
       artifacts
+      attrs
       buildGradleFatJar
       buildJsSite
       buildLibghosttyVt
@@ -389,6 +406,7 @@ let
       secrets
       skills
       systemdHardening
+      toml
       writeBashApplication
       writeNushellApplication
       writeProcessComposeApplication

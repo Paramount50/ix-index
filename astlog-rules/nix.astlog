@@ -273,6 +273,20 @@
 (lint no-getflake-tostring error
   "`builtins.getFlake (toString ./...)` uses path-flake semantics, copying the entire tree including non-regular files; use `\"git+file:///...\"` instead")
 
+;; no-handrolled-toml-scalar: a local `toToml` binding re-rolls the scalar ->
+;; TOML literal encoder used to render `key = value` config flags. Use
+;; ix.toml.scalar from `lib/util/toml.nix` (and ix.attrs.flattenToDotted from
+;; `lib/util/attrs.nix` to collapse a nested config tree into dotted-leaf keys).
+;; Matches the binding name only; `toToml` exists nowhere else, so it is the
+;; tell-tale of a copy-pasted encoder.
+(rule (no-handrolled-toml-scalar n)
+  (match nix "
+    (binding
+      attrpath: (attrpath) @p) @n")
+  (text p "toToml"))
+(lint no-handrolled-toml-scalar error
+  "hand-rolled `toToml` scalar encoder; use ix.toml.scalar from `lib/util/toml.nix` (and ix.attrs.flattenToDotted from `lib/util/attrs.nix` for nested config trees)")
+
 ;; no-import-in-imports: Use 'imports = [ ./foo.nix ]', not
 ;; 'imports = [ (import ./foo.nix) ]'. NixOS modules auto-import paths.
 (rule (no-import-in-imports n)

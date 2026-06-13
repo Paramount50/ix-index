@@ -1,97 +1,170 @@
 {
   lib,
+  ix,
   codex,
-  makeBinaryWrapper,
   symlinkJoin,
+  runCommand,
+  writeText,
+  runtimeShell,
+  gnugrep,
   binName ? "codex",
-  # Config-key defaults, applied as highest-precedence runtime `-c key=value`
-  # overrides (codex's `--config` layer wins over every file layer, so a baked
-  # value here cannot be silently dropped by a churned ~/.codex/config.toml).
-  # Declared as data so the flags below derive from one source; a consumer adds
-  # or replaces keys with `codex.override { settings = { ... }; }`.
-  #
-  # We run a trusted config (our own AGENTS.md / hooks / MCP servers), so the
-  # fleet-wide defaults we bake are (1) turning off the startup update check
-  # (the store binary is read-only and the wrapper owns the version pin, so the
-  # check only ever costs a network round-trip it can never act on) and (2)
-  # raising the multi-agent fan-out so deep, highly-parallel task decomposition
-  # stops hitting the stock limits (see below). Anything security-shaped
-  # (sandbox mode, approval policy) is left to the user's config and codex's own
-  # requirements layer, since a bare host is genuinely not a sandbox.
-  settings ? {
-    check_for_update_on_startup = false;
 
-    # Multi-agent fan-out. Run the v2 runtime (stock default is 4 = root + 3
-    # subagents) with a much higher cap so parallel research/implementation
-    # tracks stop hitting AgentLimitReached. v2 counts the root thread plus
-    # every open subagent, so 16 => root + 15 concurrent subagents.
-    #
-    # NOTE: v2 *rejects* `agents.max_threads` ("agents.max_threads cannot be set
-    # when multi_agent_v2 is enabled"), so the concurrency cap lives here, not
-    # under [agents]. Only `agents.max_depth` is still read under v2.
+  # Forced config: codex `-c key=value` overrides applied on EVERY invocation.
+  # `-c` is codex's highest-precedence layer (above ~/.codex/config.toml), so use
+  # this ONLY for wrapper INVARIANTS the user must not silently lose. The one we
+  # bake: turn off the startup update check, since the store binary is read-only
+  # and the wrapper owns the version pin, so the check only ever costs a network
+  # round-trip it can never act on. Anything security-shaped (sandbox mode,
+  # approval policy) is left to the user's config and codex's requirements layer.
+  forcedSettings ? {
+    check_for_update_on_startup = false;
+  },
+
+  # Soft defaults: codex `-c key=value` flags injected ONLY when the user's
+  # config.toml does not already configure that sub-namespace, so an explicit
+  # user value always wins (a bare `-c` would otherwise outrank the file layer,
+  # which is wrong for a tunable). Detection is per second-segment token (the
+  # feature/table a user would set): a config that mentions `multi_agent_v2`
+  # keeps the wrapper's v2 defaults out, one that mentions `max_depth` keeps the
+  # depth default out. A user's own later `-c` still wins over both.
+  #
+  # Default: a much higher multi-agent fan-out than stock. Run the v2 runtime
+  # (stock default 4 = root + 3 subagents); 16 => root + 15 concurrent subagents.
+  # v2 REJECTS `agents.max_threads` ("cannot be set when multi_agent_v2 is
+  # enabled"), so the cap lives under the v2 feature; only `agents.max_depth` is
+  # still read under v2 (3 => parent -> child -> grandchild -> great-grandchild).
+  settings ? {
     features.multi_agent_v2 = {
       enabled = true;
       max_concurrent_threads_per_session = 16;
     };
-
-    # Sub-agent nesting depth (root = 0); 3 allows parent -> child -> grandchild
-    # -> great-grandchild before exceeds_thread_spawn_depth_limit kicks in.
     agents.max_depth = 3;
   },
 }:
 let
-  # Encode a single scalar default as the TOML codex's `-c` layer expects:
-  # booleans bare, strings quoted, numbers as-is. Nesting is handled by `flatten`
-  # below, not here, so a value is always a leaf by the time it reaches this.
-  toToml =
-    value:
-    if builtins.isBool value then
-      (lib.boolToString value)
-    else if builtins.isString value then
-      builtins.toJSON value
-    else if builtins.isInt value || builtins.isFloat value then
-      toString value
-    else
-      throw "codex: unsupported config value type for ${builtins.toJSON value}";
-  # Flatten the (possibly nested) `settings` attrset into the repeated
-  # `--config dotted.key=value` flags codex accepts, recursing to leaf scalars.
-  # This lets callers write idiomatic nested Nix (`features.multi_agent_v2.enabled
-  # = true`) while each override stays ATOMIC: codex merges a dotted leaf into the
-  # existing config tree, so we touch only that leaf and leave sibling keys (e.g.
-  # `features.multi_agent` from the file layer) intact. Emitting a value as one
-  # inline `{...}` table instead would replace the whole table and silently drop
-  # those siblings. Leaf flags carry no spaces, so each survives makeBinaryWrapper
-  # splitting `--add-flags` on whitespace.
-  flatten =
-    prefix: attrs:
-    lib.concatLists (
-      lib.mapAttrsToList (
-        name: value:
-        let
-          key = if prefix == "" then name else "${prefix}.${name}";
-        in
-        if builtins.isAttrs value then flatten key value else [ "--config ${key}=${toToml value}" ]
-      ) attrs
-    );
-  configFlags = flatten "" settings;
+  inherit (lib)
+    attrNames
+    concatMap
+    elemAt
+    escapeShellArgs
+    head
+    length
+    mapAttrsToList
+    splitString
+    ;
+
+  realCodex = lib.getExe codex;
+
+  # `key=<toml scalar>` for one flattened leaf; codex parses each `-c` value as
+  # TOML. `ix.attrs.flattenToDotted` + `ix.toml.scalar` are the shared primitives
+  # (lib/util); only the `--config` spelling and the forced/soft split below are
+  # codex-specific glue.
+  kvOf = flat: mapAttrsToList (key: value: "${key}=${ix.toml.scalar value}") flat;
+
+  forcedKv = kvOf (ix.attrs.flattenToDotted forcedSettings);
+
+  softFlat = ix.attrs.flattenToDotted settings;
+  softKv = kvOf softFlat;
+  # Per-key detection token: the second dotted segment (the feature/table a user
+  # sets), or the whole key for a top-level leaf. Parallel to `softKv`, since
+  # both walk `attrNames` in the same sorted order.
+  softTok = map (
+    key:
+    let
+      segs = splitString "." key;
+    in
+    if length segs >= 2 then elemAt segs 1 else head segs
+  ) (attrNames softFlat);
+
+  forcedInit = escapeShellArgs (concatMap (kv: [ "--config" kv ]) forcedKv);
+
+  wrapper = writeText "codex-wrapper.sh" ''
+    #!${runtimeShell}
+    # Generated by packages/codex/default.nix. Forced `-c` invariants ride every
+    # invocation; soft defaults inject only when the user's config.toml leaves
+    # that sub-namespace unset, so an explicit user value wins. Ours come before
+    # "$@", so a user's own later `-c` still wins (codex is last-wins within `-c`).
+    cfg="''${CODEX_HOME:-''${HOME}/.codex}/config.toml"
+    flags=( ${forcedInit} )
+
+    soft_tok=( ${escapeShellArgs softTok} )
+    soft_kv=( ${escapeShellArgs softKv} )
+    i=0
+    while [ "$i" -lt "''${#soft_kv[@]}" ]; do
+      tok="''${soft_tok[$i]}"
+      if [ -r "$cfg" ] && ${gnugrep}/bin/grep -Eq "^[^#]*\b''${tok}\b" "$cfg"; then
+        : # user configures this sub-namespace; leave the wrapper default out
+      else
+        flags+=( --config "''${soft_kv[$i]}" )
+      fi
+      i=$((i + 1))
+    done
+
+    exec -a "$0" ${realCodex} "''${flags[@]}" "$@"
+  '';
 in
 symlinkJoin {
   name = "codex-${codex.version}";
   paths = [ codex ];
-  nativeBuildInputs = [ makeBinaryWrapper ];
   # symlinkJoin links the whole codex output (libexec, completions, ...); we only
-  # re-wrap the entrypoint so our baked `-c` defaults ride every invocation while
-  # everything else stays pristine. `--add-flags` (prepended) keeps a user's
-  # explicit `-c` on the CLI winning, since codex is last-wins within the runtime
-  # layer.
+  # replace the entrypoint with our wrapper so the baked defaults ride every
+  # invocation while everything else stays pristine.
   postBuild = ''
     rm -f $out/bin/${binName}
-    makeBinaryWrapper ${lib.getExe codex} $out/bin/${binName} \
-      --inherit-argv0 \
-      --add-flags ${lib.escapeShellArg (lib.concatStringsSep " " configFlags)}
+    install -m755 ${wrapper} $out/bin/${binName}
   '';
   meta = codex.meta // {
     description = "${codex.meta.description or "OpenAI Codex CLI"} (index wrapper with baked defaults)";
     mainProgram = binName;
   };
+
+  # Argv/precedence net for the wrapper, run against a stub codex so it is
+  # offline and instant. Guards the soft-default contract: forced invariants
+  # always ride, a soft default is injected when its sub-namespace is unset and
+  # withheld when the user's config.toml sets it, a bare token in a comment does
+  # not gate, and user argv passes through after our flags.
+  passthru.tests.wrapper = runCommand "codex-wrapper-test" { } ''
+    stub="$PWD/stub"
+    printf '%s\n' '#!${runtimeShell}' 'for a in "$@"; do printf "%s\n" "$a"; done' > "$stub"
+    chmod +x "$stub"
+    sed "s|${realCodex}|$stub|" ${wrapper} > wrap
+    chmod +x wrap
+
+    fail() { echo "codex wrapper test: $1" >&2; echo "--- argv ---" >&2; printf '%s\n' "$2" >&2; exit 1; }
+    has() { printf '%s\n' "$1" | ${gnugrep}/bin/grep -qF "$2"; }
+
+    home=$(mktemp -d)
+    got=$(CODEX_HOME="$home" ./wrap)
+    for need in \
+      check_for_update_on_startup=false \
+      features.multi_agent_v2.enabled=true \
+      features.multi_agent_v2.max_concurrent_threads_per_session=16 \
+      agents.max_depth=3; do
+      has "$got" "$need" || fail "no config: missing $need" "$got"
+    done
+
+    home=$(mktemp -d)
+    printf '%s\n' '[features.multi_agent_v2]' 'enabled = false' > "$home/config.toml"
+    got=$(CODEX_HOME="$home" ./wrap)
+    has "$got" features.multi_agent_v2.enabled=true && fail "user set v2: should withhold v2 default" "$got"
+    has "$got" agents.max_depth=3 || fail "user set v2: max_depth default should remain" "$got"
+    has "$got" check_for_update_on_startup=false || fail "user set v2: forced flag missing" "$got"
+
+    home=$(mktemp -d)
+    printf '%s\n' '[agents]' 'max_depth = 5' > "$home/config.toml"
+    got=$(CODEX_HOME="$home" ./wrap)
+    has "$got" agents.max_depth=3 && fail "user set max_depth: should withhold depth default" "$got"
+    has "$got" features.multi_agent_v2.enabled=true || fail "user set max_depth: v2 default should remain" "$got"
+
+    home=$(mktemp -d)
+    printf '%s\n' '# a comment mentioning multi_agent_v2 must not gate' > "$home/config.toml"
+    got=$(CODEX_HOME="$home" ./wrap)
+    has "$got" features.multi_agent_v2.enabled=true || fail "comment mention should not gate" "$got"
+
+    home=$(mktemp -d)
+    got=$(CODEX_HOME="$home" ./wrap -c 'model="o3"' exec hi)
+    has "$got" 'model="o3"' || fail "user argv passthrough missing" "$got"
+
+    mkdir -p $out
+  '';
 }
