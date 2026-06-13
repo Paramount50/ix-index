@@ -11,23 +11,38 @@
   # or replaces keys with `codex.override { settings = { ... }; }`.
   #
   # We run a trusted config (our own AGENTS.md / hooks / MCP servers), so the
-  # one default we bake fleet-wide is turning off the startup update check: the
-  # store binary is read-only and the wrapper owns the version pin, so the check
-  # only ever costs a network round-trip it can never act on. Anything
-  # security-shaped (sandbox mode, approval policy) is left to the user's config
-  # and codex's own requirements layer, since a bare host is genuinely not a
-  # sandbox.
+  # fleet-wide defaults we bake are (1) turning off the startup update check
+  # (the store binary is read-only and the wrapper owns the version pin, so the
+  # check only ever costs a network round-trip it can never act on) and (2)
+  # raising the multi-agent fan-out so deep, highly-parallel task decomposition
+  # stops hitting the stock limits (see below). Anything security-shaped
+  # (sandbox mode, approval policy) is left to the user's config and codex's own
+  # requirements layer, since a bare host is genuinely not a sandbox.
   settings ? {
     check_for_update_on_startup = false;
+
+    # Multi-agent fan-out. Run the v2 runtime (stock default is 4 = root + 3
+    # subagents) with a much higher cap so parallel research/implementation
+    # tracks stop hitting AgentLimitReached. v2 counts the root thread plus
+    # every open subagent, so 16 => root + 15 concurrent subagents.
+    #
+    # NOTE: v2 *rejects* `agents.max_threads` ("agents.max_threads cannot be set
+    # when multi_agent_v2 is enabled"), so the concurrency cap lives here, not
+    # under [agents]. Only `agents.max_depth` is still read under v2.
+    features.multi_agent_v2 = {
+      enabled = true;
+      max_concurrent_threads_per_session = 16;
+    };
+
+    # Sub-agent nesting depth (root = 0); 3 allows parent -> child -> grandchild
+    # -> great-grandchild before exceeds_thread_spawn_depth_limit kicks in.
+    agents.max_depth = 3;
   },
 }:
 let
-  # Render an attrset of config defaults into the repeated `--config key=value`
-  # flags codex accepts. Each value is encoded as TOML (booleans bare, strings
-  # quoted, tables inline) so structured defaults round-trip through the runtime
-  # override layer exactly as a config.toml entry would. Inline tables are
-  # emitted WITHOUT spaces so the whole flag survives makeBinaryWrapper's
-  # space-splitting of `--add-flags`.
+  # Encode a single scalar default as the TOML codex's `-c` layer expects:
+  # booleans bare, strings quoted, numbers as-is. Nesting is handled by `flatten`
+  # below, not here, so a value is always a leaf by the time it reaches this.
   toToml =
     value:
     if builtins.isBool value then
@@ -36,11 +51,29 @@ let
       builtins.toJSON value
     else if builtins.isInt value || builtins.isFloat value then
       toString value
-    else if builtins.isAttrs value then
-      "{${lib.concatMapAttrsStringSep "," (k: v: "${k}=${toToml v}") value}}"
     else
       throw "codex: unsupported config value type for ${builtins.toJSON value}";
-  configFlags = lib.mapAttrsToList (key: value: "--config ${key}=${toToml value}") settings;
+  # Flatten the (possibly nested) `settings` attrset into the repeated
+  # `--config dotted.key=value` flags codex accepts, recursing to leaf scalars.
+  # This lets callers write idiomatic nested Nix (`features.multi_agent_v2.enabled
+  # = true`) while each override stays ATOMIC: codex merges a dotted leaf into the
+  # existing config tree, so we touch only that leaf and leave sibling keys (e.g.
+  # `features.multi_agent` from the file layer) intact. Emitting a value as one
+  # inline `{...}` table instead would replace the whole table and silently drop
+  # those siblings. Leaf flags carry no spaces, so each survives makeBinaryWrapper
+  # splitting `--add-flags` on whitespace.
+  flatten =
+    prefix: attrs:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        name: value:
+        let
+          key = if prefix == "" then name else "${prefix}.${name}";
+        in
+        if builtins.isAttrs value then flatten key value else [ "--config ${key}=${toToml value}" ]
+      ) attrs
+    );
+  configFlags = flatten "" settings;
 in
 symlinkJoin {
   name = "codex-${codex.version}";
