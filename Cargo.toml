@@ -33,6 +33,8 @@ members = [
   "packages/edit-applier",
   "packages/file-language",
   "packages/file-search",
+  "packages/scipql/core",
+  "packages/scipql/cli",
   "packages/flecs-query/core",
   "packages/flecs-query/mcp",
   "packages/flecs-query/py",
@@ -201,6 +203,7 @@ parking_lot = "0.12"
 parquet = { version = "59", features = ["arrow"] }
 percent-encoding = "2"
 progress-style = { path = "packages/progress-style" }
+protobuf = "3"
 pty-process = { version = "0.5", features = ["async"] }
 pyo3 = { version = "0.28", features = ["abi3-py311"] }
 pyo3-async-runtimes = { version = "0.28", features = ["tokio-runtime"] }
@@ -221,6 +224,8 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 rustc-hash = "2.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
+scip = "0.8"
+scipql-core = { path = "packages/scipql/core" }
 search-core = { path = "packages/search-core" }
 source-meta = { path = "packages/source/meta" }
 serde = "1"
