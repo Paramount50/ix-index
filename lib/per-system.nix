@@ -352,7 +352,7 @@ let
             + "context. Give it an outcome plus the exact fields to return; it drives "
             + "the whole loop in its own index kernel and returns only the distilled "
             + "result, keeping screenshots and DOM dumps out of the main thread.";
-          mcpServers = ix.mcp.toClaudeJson {
+          mcpServers = ix.mcp.toAgentMcpServers {
             index = {
               transport = "stdio";
               command = lib.getExe repoPackages.mcp;

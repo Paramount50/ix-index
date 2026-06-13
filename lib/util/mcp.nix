@@ -112,6 +112,20 @@ in
   toClaudeJson = servers: lib.mapAttrs (_: claudeOne) servers;
 
   /**
+    Render an attrset of neutral server definitions to the value a Claude Code
+    SUBAGENT's `mcpServers` frontmatter key expects, which differs from the
+    `.mcp.json` object `toClaudeJson` produces: an ARRAY (`(string | object)[]`)
+    whose entries are each a single-key `{ <name> = <inline config>; }` object
+    (an inline server connected only while the subagent runs). Inline servers
+    only; for a name reference to an already-configured server, append the bare
+    string to the result.
+
+    Arguments:
+    - `servers`: attrset from server name to a neutral definition.
+  */
+  toAgentMcpServers = servers: lib.mapAttrsToList (name: def: { ${name} = claudeOne def; }) servers;
+
+  /**
     Render an attrset of neutral server definitions to a flat list of
     `{ key; value; }` entries keyed by dotted `mcp_servers.<name>.*` paths with
     TOML-literal values, ready to splice into the codex launch spec's `soft`
