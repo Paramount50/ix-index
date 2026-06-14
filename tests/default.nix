@@ -39,6 +39,11 @@ let
   # Thin wrapper to keep call sites as plain lists; delegates to ix.evalImageConfig
   # so tests exercise the same evaluation path as production image builds.
   evalConfig = modules: ix.evalImageConfig { inherit modules; };
+  # The portable fleet modules (services.ix-ray / services.ix-spark) take the
+  # index lib as `indexLib` (not `ix`, which a host binds to its own specialArg).
+  # In index's own eval the `ix` specialArg already IS the index lib, so re-expose
+  # it under that name for those modules.
+  withIndexLib = { ix, ... }: { _module.args.indexLib = ix; };
   plainPkgs = import nixpkgs {
     inherit (pkgs.stdenv.hostPlatform) system;
   };
@@ -2302,6 +2307,7 @@ let
   # deploy); a placeholder here keeps the eval cheap -- it is never run, and
   # openFirewall is on so the port wiring is introspectable.
   ixRayHead = evalConfig [
+    withIndexLib
     (
       { pkgs, ... }:
       {
@@ -2315,6 +2321,7 @@ let
     )
   ];
   ixRayWorker = evalConfig [
+    withIndexLib
     (
       { pkgs, ... }:
       {
@@ -2332,6 +2339,7 @@ let
   # The multi-node ix-spark service (Spark master/worker over Tailscale + a Spark
   # Connect server on the master). role defaults to "master".
   ixSparkMaster = evalConfig [
+    withIndexLib
     {
       services.ix-spark = {
         enable = true;
@@ -2340,6 +2348,7 @@ let
     }
   ];
   ixSparkWorker = evalConfig [
+    withIndexLib
     {
       services.ix-spark = {
         enable = true;
@@ -2396,6 +2405,7 @@ let
         assertion =
           let
             failures = failedAssertionsFor [
+              withIndexLib
               {
                 services.ix-ray = {
                   enable = true;
@@ -2423,6 +2433,7 @@ let
         assertion =
           let
             failures = failedAssertionsFor [
+              withIndexLib
               {
                 services.ix-ray = {
                   enable = true;
@@ -2439,6 +2450,7 @@ let
         assertion =
           let
             failures = failedAssertionsFor [
+              withIndexLib
               {
                 services.ix-ray = {
                   enable = true;
@@ -2491,6 +2503,7 @@ let
         assertion =
           let
             failures = failedAssertionsFor [
+              withIndexLib
               {
                 services.ix-spark = {
                   enable = true;

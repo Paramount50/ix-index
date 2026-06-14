@@ -18,18 +18,22 @@
 #
 # Repo-agnostic on purpose: declares no `ix.*` NixOS *options* (port-claim /
 # health-check bookkeeping), so it imports cleanly into any NixOS system. It
-# takes the index `ix` *lib* specialArg (for `writeNushellApplication` /
-# `systemdHardening`); a consumer wires it with `_module.args.ix =
-# inputs.index.lib`. The spark distribution + Gluten bundle are index-overlay
-# packages, so an off-index consumer passes them via `package` /
-# `nativeEngine.package` (e.g. `inputs.index.packages.<sys>.spark-hive`).
+# needs only the index flake lib (`writeNushellApplication`/`systemdHardening`)
+# via the `indexLib` arg (see its note below). The spark distribution + Gluten
+# bundle are index-overlay packages, so an off-index consumer passes them via
+# `package` / `nativeEngine.package` (e.g. `inputs.index.packages.<sys>.spark-hive`).
 #
 # The Gluten jar is referenced by its absolute store path. A real multi-node
 # cluster needs that same store path present on every worker (shared nix store
 # or copied closure).
+#
+# `indexLib` is the index flake lib, supplied by the consumer via
+# `_module.args.indexLib` (NOT named `ix`, which a host binds to its own
+# specialArg). In index's own eval contexts wire `_module.args.indexLib = ix`;
+# elsewhere `_module.args.indexLib = inputs.index.lib`.
 {
   config,
-  ix,
+  indexLib,
   lib,
   pkgs,
   ...
@@ -128,7 +132,7 @@ let
   # value), fail loudly if tailscale is not up, then exec the spark daemon bound
   # to it. The token `__IP__` in every argument is substituted with the resolved
   # tailscale address so daemons advertise their tailnet address.
-  sparkLauncher = ix.writeNushellApplication pkgs {
+  sparkLauncher = indexLib.writeNushellApplication pkgs {
     name = "ix-spark-launch";
     meta.description = "Resolve this node's tailscale IPv4 and exec a Spark daemon bound to it";
     runtimeInputs = [
@@ -160,7 +164,7 @@ let
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
     environment = sparkEnv;
-    serviceConfig = ix.systemdHardening // {
+    serviceConfig = indexLib.systemdHardening // {
       Type = "simple";
       User = "spark";
       Group = "spark";

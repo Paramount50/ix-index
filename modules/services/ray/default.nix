@@ -14,10 +14,10 @@
 # Repo-agnostic on purpose: this module declares no `ix.*` NixOS *options*
 # (port-claim/health-check bookkeeping), so it imports cleanly into any NixOS
 # system -- the index fleet, the ix monorepo hosts, a personal box -- without
-# dragging in either repo's option tree. It does take the index `ix` *lib*
-# specialArg (for `writeNushellApplication`/`systemdHardening`); a consumer wires
-# it with `_module.args.ix = inputs.index.lib`. The ix-mcp engine is handed in
-# via {option}`services.ix-ray.notebookPackage` rather than reached through `ix`.
+# dragging in either repo's option tree. It needs only the index flake lib
+# (`writeNushellApplication`/`systemdHardening`), taken via the `indexLib` arg
+# (see its note below), and the ix-mcp engine, handed in via
+# {option}`services.ix-ray.notebookPackage`.
 #
 # The node-level correctness here (pinned inter-node ports, a SHORT `/run/ray`
 # temp-dir so Ray's AF_UNIX plasma socket stays under the 108-byte sun_path
@@ -27,9 +27,16 @@
 # ix-mcp interpreter imports, so the cluster and the kernels driving it run an
 # identical version (Ray requires matching versions cluster-wide) and the
 # daemons are FHS-correct with no nix-ld shim.
+# `indexLib` is the index flake lib (writeNushellApplication/systemdHardening),
+# supplied by the consumer via `_module.args.indexLib`. It is deliberately NOT
+# named `ix`: a host binds `ix` to its own specialArg (the ix monorepo's is a
+# different shape entirely), and a module formal cannot fall back to that, so a
+# distinct name is the only collision-free way to take the index lib. In index's
+# own eval contexts wire `_module.args.indexLib = ix`; elsewhere
+# `_module.args.indexLib = inputs.index.lib`.
 {
   config,
-  ix,
+  indexLib,
   lib,
   pkgs,
   ...
@@ -105,7 +112,7 @@ let
   # Resolve this node's tailscale IPv4 at runtime (it is host state, not a Nix
   # value), fail loudly if tailscale is not up, then exec `ray start` bound to
   # it. `--block` keeps the daemon in the foreground for systemd Type=simple.
-  rayLauncher = ix.writeNushellApplication pkgs {
+  rayLauncher = indexLib.writeNushellApplication pkgs {
     name = "ix-ray-launch";
     meta.description = "Resolve this node's tailscale IPv4 and exec the ray daemon bound to it";
     runtimeInputs = [
@@ -343,7 +350,7 @@ in
         HOME = "/run/ray";
         RAY_DISABLE_USAGE_STATS = "1";
       };
-      serviceConfig = ix.systemdHardening // {
+      serviceConfig = indexLib.systemdHardening // {
         Type = "simple";
         ExecStart = lib.getExe rayLauncher;
         Restart = "on-failure";
@@ -370,7 +377,7 @@ in
       requires = [ "ix-ray.service" ];
       wantedBy = [ "multi-user.target" ];
       environment = notebookEnv;
-      serviceConfig = ix.systemdHardening // {
+      serviceConfig = indexLib.systemdHardening // {
         Type = "simple";
         ExecStart = lib.getExe' cfg.notebookPackage "ix-notebook";
         Restart = "on-failure";
