@@ -87,11 +87,13 @@ def connect(address: str | None = None, *, local: bool = False, **kw: Any) -> No
     Target resolution, in order: an explicit ``address``; else
     ``IX_FLEET_RAY_ADDRESS`` (set this to ``ray://<head>:10001`` on an
     off-cluster box -- e.g. a laptop -- so it drives the fleet via the Ray
-    Client, the supported thin cross-environment path); else ``"auto"``, which on
-    a fleet node attaches to the local raylet (the NixOS service) and thus the
-    whole cluster. With ``local=True``, or if the target is unreachable, a
-    private single-node Ray is started so the same code still runs on a box with
-    no fleet. Safe to call repeatedly; the Ray-using functions here call it for you.
+    Client, the supported thin cross-environment path); else ``RAY_ADDRESS``
+    (the fleet's NixOS service sets this to the head GCS, since the daemon's
+    non-default temp-dir defeats ``"auto"`` discovery); else ``"auto"``, which on
+    a fleet node attaches to the local raylet. With ``local=True``, or if the
+    target is unreachable, a private single-node Ray is started so the same code
+    still runs on a box with no fleet. Safe to call repeatedly; the Ray-using
+    functions here call it for you.
     """
     import ray
 
@@ -102,7 +104,12 @@ def connect(address: str | None = None, *, local: bool = False, **kw: Any) -> No
     if local:
         ray.init(**common)
         return
-    target = address or os.environ.get("IX_FLEET_RAY_ADDRESS") or "auto"
+    target = (
+        address
+        or os.environ.get("IX_FLEET_RAY_ADDRESS")
+        or os.environ.get("RAY_ADDRESS")
+        or "auto"
+    )
     try:
         ray.init(address=target, **common)
     except Exception:

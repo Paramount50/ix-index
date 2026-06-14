@@ -134,11 +134,49 @@ let
     '';
   };
 
+  # The Ray GCS this node's kernel attaches to: the head's own tailscale IP on
+  # the head (resolved at runtime as `$ip`), the configured head address on a
+  # worker. `address="auto"` cannot discover the cluster because the daemon uses
+  # a non-default `--temp-dir`, so the launcher hands the kernel an explicit
+  # RAY_ADDRESS (which `fleet.connect()` reads).
+  rayAddrNu =
+    if cfg.role == "head" then
+      ''$"($ip):${toString cfg.gcsPort}"''
+    else
+      ''"${cfg.headAddress}:${toString cfg.gcsPort}"'';
+
+  # Resolve this node's tailscale IPv4, bind the dashboard/exec to it
+  # (IX_MCP_HOST), point the kernel at the local Ray GCS (RAY_ADDRESS), then exec
+  # the engine. systemd units get a minimal PATH, so tailscale must be a runtime
+  # input here rather than relied on from the system profile.
+  notebookLauncher = indexLib.writeNushellApplication pkgs {
+    name = "ix-ray-notebook-launch";
+    meta.description = "Resolve this node's tailscale IPv4, bind ix-mcp to it + the local Ray GCS, and exec it";
+    runtimeInputs = [
+      pkgs.tailscale
+      cfg.notebookPackage
+    ];
+    text = ''
+      def main [] {
+        let ip = (do --ignore-errors {
+          ^tailscale ip -4 | lines | where ($it | str trim | is-not-empty) | first
+        } | default "")
+        if ($ip | str trim | is-empty) {
+          print --stderr "ix-ray-notebook: no tailscale IPv4 yet; is tailscaled up?"
+          exit 1
+        }
+        $env.IX_MCP_HOST = $ip
+        $env.RAY_ADDRESS = ${rayAddrNu}
+        exec ${lib.getExe' cfg.notebookPackage "ix-notebook"}
+      }
+    '';
+  };
+
   # The ix-mcp engine (no MCP transport: `notebook` is the daemon shape). Its
-  # kernel auto-connects to the local Ray, and its dashboard data API exposes the
-  # `/api/exec` that `fleet.in_kernel` reaches on `execPort`. Tailnet-trust is on
-  # by default (the tailnet is the boundary, exactly as Ray's own data plane);
-  # set a tokenFile to additionally require a bearer token.
+  # kernel attaches to the local Ray (RAY_ADDRESS, set by the launcher), and its
+  # dashboard data API exposes the `/api/exec` that `fleet.in_kernel` reaches on
+  # `execPort`. Tailnet-trust is on by default (the tailnet is the boundary,
+  # exactly as Ray's own data plane); set a tokenFile to also require a token.
   notebookEnv = {
     IX_MCP_DASHBOARD_PORT = toString cfg.execPort;
     IX_FLEET_EXEC_PORT = toString cfg.execPort;
@@ -379,7 +417,7 @@ in
       environment = notebookEnv;
       serviceConfig = indexLib.systemdHardening // {
         Type = "simple";
-        ExecStart = lib.getExe' cfg.notebookPackage "ix-notebook";
+        ExecStart = lib.getExe notebookLauncher;
         Restart = "on-failure";
         RestartSec = 5;
         StateDirectory = "ix-ray-notebook";
