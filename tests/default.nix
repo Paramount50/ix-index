@@ -2298,33 +2298,54 @@ let
   # The ix-ray service (Ray cluster node + ix-mcp engine for the `fleet`
   # distributed API). Evaluated through the real image path so a broken option,
   # unit, or port claim fails here rather than in a CI image build.
+  # notebookPackage is handed in by the consumer (the real ix-mcp package on a
+  # deploy); a placeholder here keeps the eval cheap -- it is never run, and
+  # openFirewall is on so the port wiring is introspectable.
   ixRayHead = evalConfig [
-    {
-      services.ix-ray = {
-        enable = true;
-        role = "head";
-      };
-    }
+    (
+      { pkgs, ... }:
+      {
+        services.ix-ray = {
+          enable = true;
+          role = "head";
+          openFirewall = true;
+          notebookPackage = pkgs.hello;
+        };
+      }
+    )
   ];
   ixRayWorker = evalConfig [
-    {
-      services.ix-ray = {
-        enable = true;
-        role = "worker";
-        headAddress = "100.64.0.1";
-      };
-    }
+    (
+      { pkgs, ... }:
+      {
+        services.ix-ray = {
+          enable = true;
+          role = "worker";
+          headAddress = "100.64.0.1";
+          openFirewall = true;
+          notebookPackage = pkgs.hello;
+        };
+      }
+    )
   ];
 
   # The multi-node ix-spark service (Spark master/worker over Tailscale + a Spark
   # Connect server on the master). role defaults to "master".
-  ixSparkMaster = evalConfig [ { services.ix-spark.enable = true; } ];
+  ixSparkMaster = evalConfig [
+    {
+      services.ix-spark = {
+        enable = true;
+        openFirewall = true;
+      };
+    }
+  ];
   ixSparkWorker = evalConfig [
     {
       services.ix-spark = {
         enable = true;
         role = "worker";
         masterAddress = "100.64.0.1";
+        openFirewall = true;
       };
     }
   ];
@@ -2337,26 +2358,54 @@ let
         message = "ix-ray head should run both the Ray daemon and the ix-mcp engine";
       }
       {
-        # The head exposes the GCS (workers join), exec, and pinned inter-node
-        # ports; the engine's data API binds the exec port peers reach.
+        # The head opens the GCS (workers join), the Ray Client server
+        # (off-cluster `ray://` drivers), exec, and pinned inter-node ports.
         assertion =
           let
-            claims = ixRayHead.ix.networking.portClaims;
+            ports = ixRayHead.networking.firewall.allowedTCPPorts;
           in
-          claims.ix-ray-gcs.port == 6379
-          && claims.ix-ray-exec.port == 8799
-          && claims.ix-ray-node-manager.port == 6380
-          && claims.ix-ray-object-manager.port == 6381;
-        message = "ix-ray head should claim the GCS, exec, and inter-node manager ports";
+          builtins.elem 6379 ports
+          && builtins.elem 10001 ports
+          && builtins.elem 8799 ports
+          && builtins.elem 6380 ports
+          && builtins.elem 6381 ports;
+        message = "ix-ray head should open the GCS, client-server, exec, and inter-node manager ports";
       }
       {
-        # A worker joins and exposes its inter-node ports, but advertises no GCS.
+        # A worker opens its inter-node + exec ports, but neither the GCS nor the
+        # client-server port (only the head serves those).
         assertion =
           let
-            claims = ixRayWorker.ix.networking.portClaims;
+            ports = ixRayWorker.networking.firewall.allowedTCPPorts;
           in
-          (claims ? ix-ray-exec) && (claims ? ix-ray-node-manager) && !(claims ? ix-ray-gcs);
-        message = "ix-ray worker should expose exec + manager ports but not a GCS port";
+          builtins.elem 8799 ports
+          && builtins.elem 6380 ports
+          && !(builtins.elem 6379 ports)
+          && !(builtins.elem 10001 ports);
+        message = "ix-ray worker should open exec + manager ports but not the GCS/client ports";
+      }
+      {
+        # The engine trusts the tailnet for /api/exec by default, so a peer's
+        # fleet.in_kernel works without a shared token.
+        assertion =
+          (ixRayHead.systemd.services.ix-ray-notebook.environment.IX_MCP_EXEC_TRUST_NETWORK or null) == "1";
+        message = "ix-ray notebook should enable tailnet-trust exec by default";
+      }
+      {
+        # notebook.enable (the default) requires a notebookPackage to run the engine.
+        assertion =
+          let
+            failures = failedAssertionsFor [
+              {
+                services.ix-ray = {
+                  enable = true;
+                  role = "head";
+                };
+              }
+            ];
+          in
+          builtins.any (a: lib.hasInfix "notebookPackage" a.message) failures;
+        message = "ix-ray should fail evaluation when notebook.enable has no notebookPackage";
       }
       {
         # The Ray daemon must use the short /run temp-dir so its plasma AF_UNIX
@@ -2415,27 +2464,27 @@ let
         message = "ix-spark master should run master + worker + connect daemons";
       }
       {
-        # Connect (15002) and master RPC (7077) are claimed on the master.
+        # Connect (15002) and master RPC (7077) are opened on the master.
         assertion =
           let
-            claims = ixSparkMaster.ix.networking.portClaims;
+            ports = ixSparkMaster.networking.firewall.allowedTCPPorts;
           in
-          claims.ix-spark-connect.port == 15002 && claims.ix-spark-master.port == 7077;
-        message = "ix-spark master should claim the Connect (15002) and master (7077) ports";
+          builtins.elem 15002 ports && builtins.elem 7077 ports;
+        message = "ix-spark master should open the Connect (15002) and master (7077) ports";
       }
       {
         # A worker only runs a worker joining the remote master: no master, no
-        # connect, and it must not claim the master's ports.
+        # connect, and it must not open the master's ports.
         assertion =
           let
-            claims = ixSparkWorker.ix.networking.portClaims;
+            ports = ixSparkWorker.networking.firewall.allowedTCPPorts;
           in
           (ixSparkWorker.systemd.services ? spark-worker)
           && !(ixSparkWorker.systemd.services ? spark-master)
           && !(ixSparkWorker.systemd.services ? spark-connect)
-          && !(claims ? ix-spark-master)
-          && !(claims ? ix-spark-connect);
-        message = "ix-spark worker should run only a worker and claim no master/connect ports";
+          && !(builtins.elem 7077 ports)
+          && !(builtins.elem 15002 ports);
+        message = "ix-spark worker should run only a worker and open no master/connect ports";
       }
       {
         # A worker with no masterAddress cannot know where to join: fail eval.

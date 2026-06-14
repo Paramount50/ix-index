@@ -8,8 +8,9 @@ Defends three contracts:
   stays informative with only one source present.
 - `fleet.submit` return shape follows `on` (fan-out -> keyed dict; single
   explicit target -> bare value), independent of how many nodes are alive.
-- `/api/exec` is gated: disabled without a token, 401 on a wrong token, runs on
-  the live kernel with the right one.
+- `/api/exec` is gated: disabled with neither token nor network trust, allowed
+  on tailnet trust (a non-loopback bind), 401 on a wrong token, runs on the live
+  kernel with the right one. `in_kernel` carries the token only when one is set.
 """
 
 import asyncio
@@ -90,17 +91,21 @@ def check_submit_shape():
         raise AssertionError("expected ClusterError for an unknown target")
 
 
-def check_in_kernel_requires_token():
+def check_in_kernel_tokenless():
+    # in_kernel no longer hard-requires a token: a tailnet-trust cluster accepts
+    # the call on membership alone. With no token and no reachable targets it
+    # returns an empty frame rather than raising.
     import os
 
     os.environ.pop("IX_MCP_EXEC_TOKEN", None)
     os.environ.pop("IX_MCP_EXEC_TOKEN_FILE", None)
-    try:
-        asyncio.run(fleet.in_kernel("all", "1+1"))
-    except cluster.ClusterError as exc:
-        assert "token" in str(exc), exc
-    else:
-        raise AssertionError("expected ClusterError without a token")
+
+    async def no_targets(_on):
+        return []
+
+    cluster._http_targets = no_targets
+    df = asyncio.run(fleet.in_kernel("all", "1+1"))
+    assert df.height == 0, df
 
 
 def check_exec_auth():
@@ -117,9 +122,15 @@ def check_exec_auth():
 
     kernel.current_kernel = lambda: _FakeKernel()
 
-    async def request(token, auth, payload={"code": "1+1"}):
+    async def request(token, auth, payload={"code": "1+1"}, *, trust=False, host="127.0.0.1"):
         conn = store.connect(tmp / "store.db")
-        cfg = Config(workdir=tmp, store_path=tmp / "store.db", exec_token=token)
+        cfg = Config(
+            workdir=tmp,
+            store_path=tmp / "store.db",
+            host=host,
+            exec_token=token,
+            exec_trust_network=trust,
+        )
         app = dashboard.build_app(cfg, conn)
         async with TestClient(TestServer(app)) as client:
             headers = {"Authorization": auth} if auth else {}
@@ -128,9 +139,14 @@ def check_exec_auth():
             return resp.status, body
 
     status, _ = asyncio.run(request(None, None))
-    assert status == 403, status  # disabled when no token configured
+    assert status == 403, status  # disabled: neither token nor network trust
+    # Trust the network only on a non-loopback bind; a loopback bind ignores it.
+    status, _ = asyncio.run(request(None, None, trust=True, host="127.0.0.1"))
+    assert status == 403, status
+    status, body = asyncio.run(request(None, None, trust=True, host="100.0.0.5"))
+    assert status == 200 and body["result"] == "2", (status, body)  # tailnet trust
     status, _ = asyncio.run(request("secret", "Bearer wrong"))
-    assert status == 401, status  # wrong token rejected
+    assert status == 401, status  # a configured token is always required
     status, body = asyncio.run(request("secret", "Bearer secret"))
     assert status == 200 and body["result"] == "2", (status, body)
     # A non-numeric budget is a clean 400, not an unhandled 500.
@@ -190,7 +206,7 @@ def check_spark_dials_connect_url():
 
 check_nodes_merge()
 check_submit_shape()
-check_in_kernel_requires_token()
 check_exec_auth()
+check_in_kernel_tokenless()
 check_spark_dials_connect_url()
 print("fleet-cluster-ok")

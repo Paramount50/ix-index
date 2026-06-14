@@ -242,6 +242,21 @@ def _exec_token() -> str | None:
     return None
 
 
+def _exec_trust_network() -> bool:
+    """Whether to trust the bound network (the tailnet) as the `/api/exec` auth
+    boundary, so a peer's `fleet.in_kernel` works without a shared token -- the
+    same trust model Ray's own data plane relies on. Off unless
+    ``IX_MCP_EXEC_TRUST_NETWORK`` is set truthy; the dashboard additionally
+    requires a non-loopback bind before honoring it.
+    """
+    return os.environ.get("IX_MCP_EXEC_TRUST_NETWORK", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
 def _serve(args: argparse.Namespace, *, engine_only: bool = False) -> int:
     wd = getattr(args, "workdir", None)
     workdir = Path(wd).resolve() if wd else Path.cwd()
@@ -330,6 +345,7 @@ def _serve(args: argparse.Namespace, *, engine_only: bool = False) -> int:
         stdin_fd=stdin_fd,
         stdout_fd=stdout_fd,
         exec_token=_exec_token(),
+        exec_trust_network=_exec_trust_network(),
     )
     set_config(cfg)
 

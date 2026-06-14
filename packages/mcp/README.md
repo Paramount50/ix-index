@@ -173,7 +173,7 @@ rows = await asyncio.to_thread(lambda: s.sql("select level, count(*) c "
                                              "from logs group by level").toPandas())
 pl.from_pandas(rows)
 
-# Peek a live node: run code in its existing ix-mcp session (token-gated).
+# Peek a live node: run code in its existing ix-mcp session (tailnet-gated).
 await fleet.in_kernel("hc1", "len(jobs)")
 
 # Shell fan-out (no Python on the far side): the original fleet.scan.
@@ -188,7 +188,7 @@ await fleet.scan(hosts, "df -h --output=avail /")
   fan-out, the bare value for one target); `submit` returns object references you
   `get` later, so a long job overlaps with the rest of your session. `on` is
   `"all"` (one task pinned per node), `"any"` (Ray places it), or a host/list.
-- **`in_kernel`** reaches a node's *live* ix-mcp session over the token-gated
+- **`in_kernel`** reaches a node's *live* ix-mcp session over the tailnet-gated
   `/api/exec`, so you read what that node is actually doing -- a Ray task only
   ever sees a fresh worker. Returns a polars frame (host, output, result, error).
 - **`spark`** opens a `SparkSession` on the fleet's **Spark** cluster over Spark
@@ -197,9 +197,6 @@ await fleet.scan(hosts, "df -h --output=avail /")
   is pure gRPC (no JVM in the kernel); heavy work runs on the cluster with the
   Gluten/Velox native engine and streams back as Arrow. A session's calls are
   synchronous, so wrap queries in `asyncio.to_thread`.
-- **`in_kernel`** reaches a node's *live* ix-mcp session over the token-gated
-  `/api/exec`, so you read what that node is actually doing -- a Ray task only
-  ever sees a fresh worker. Returns a polars frame (host, output, result, error).
 - **`scan`** (and `read_ndjson`/`read_text`/...) fan a *shell* command over SSH
   and stitch the per-host output into one host-tagged polars frame; it needs no
   Python, or even Ray, on the far side.
@@ -210,10 +207,14 @@ Deployment is two NixOS service families on the tailnet. `services.ix-ray`
 engine so its kernel can drive Ray and answer `in_kernel`. `services.ix-spark`
 ([`modules/services/spark`](../../modules/services/spark)): one `master` (running
 a Gluten-accelerated Spark master + the Spark Connect server `fleet.spark` dials)
-and `worker`s pointing at its tailscale IP. The trust boundary is the tailnet;
-`in_kernel` additionally requires a shared bearer token (`IX_MCP_EXEC_TOKEN`), so
-a tailnet foothold alone cannot run code in a peer's kernel. Ray and Spark's own
-data planes rely on the tailnet isolation.
+and `worker`s pointing at its tailscale IP. The trust boundary is the tailnet,
+the same one Ray and Spark's own data planes rely on (no per-call auth): the
+ix-ray service runs the engine with tailnet-trust on, so `in_kernel` works across
+the fleet without a secret. Set `services.ix-ray.tokenFile` to additionally
+require a shared bearer token (`IX_MCP_EXEC_TOKEN`) for defense in depth. An
+off-cluster box (a laptop) drives the cluster by pointing `IX_FLEET_RAY_ADDRESS`
+at `ray://<head>:10001`; `nodes`/`in_kernel`/`spark` work over the tailnet
+directly.
 
 An embedder that polls the SQLite store directly (the pi-harness room event
 mapper) pins its path with `IX_MCP_STORE` before launching `serve`; the server

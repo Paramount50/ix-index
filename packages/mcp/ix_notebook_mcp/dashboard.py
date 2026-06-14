@@ -26,6 +26,11 @@ from aiohttp import web
 from . import feed, store
 from .config import Config
 
+# Binds for which "trust the network" must NOT relax the exec token: a loopback
+# bind is local-only, so tailnet trust is meaningless and could only mask a
+# misconfiguration. Trust-network is honored only on a real (tailnet/LAN) bind.
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", ""})
+
 _STUB = (
     "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
     "<title>ix-mcp</title>"
@@ -246,19 +251,27 @@ def build_app(config: Config, conn) -> web.Application:
         # The one *write* path on this otherwise read-only surface: run a line of
         # code in THIS node's live kernel so a peer's `fleet.in_kernel` can read
         # this node's real running state (its `jobs`, a held variable, hostname).
-        # Disabled unless an exec token is configured, and every request must
-        # carry it as a bearer token -- so the boundary is the tailnet AND the
-        # shared secret, not the tailnet alone (a tailnet foothold cannot exec).
+        # Two ways to gate it: a shared bearer token, and/or trusting the bound
+        # network (the tailnet) as the boundary -- the same model Ray's own data
+        # plane uses (any tailnet peer can already drive the Ray cluster). A token,
+        # if set, is always required (defense in depth); trust-network alone is
+        # honored only on a non-loopback bind. Neither -> disabled (safe default).
         token = config.exec_token
-        if not token:
+        trust = config.exec_trust_network and config.host not in _LOOPBACK_HOSTS
+        if not token and not trust:
             return web.json_response(
-                {"error": "exec endpoint disabled (no IX_MCP_EXEC_TOKEN set)"}, status=403
+                {
+                    "error": "exec endpoint disabled (set IX_MCP_EXEC_TRUST_NETWORK "
+                    "on a non-loopback bind, or IX_MCP_EXEC_TOKEN)"
+                },
+                status=403,
             )
-        presented = request.headers.get("Authorization", "")
-        expected = f"Bearer {token}"
-        # Constant-time compare so a wrong token cannot be guessed by timing.
-        if not hmac.compare_digest(presented, expected):
-            return web.json_response({"error": "unauthorized"}, status=401)
+        if token:
+            presented = request.headers.get("Authorization", "")
+            expected = f"Bearer {token}"
+            # Constant-time compare so a wrong token cannot be guessed by timing.
+            if not hmac.compare_digest(presented, expected):
+                return web.json_response({"error": "unauthorized"}, status=401)
         try:
             body = await request.json()
         except Exception:

@@ -3,7 +3,7 @@
 # Deployment side of the `fleet` Python module bundled in ix-mcp:
 # `fleet.run`/`fleet.submit` ship cloudpickled callables to Ray and the Ray
 # object store (Plasma) carries the data; `fleet.in_kernel` runs code in a
-# node's live ix-mcp session over the token-gated `/api/exec`.
+# node's live ix-mcp session over the `/api/exec` endpoint.
 #
 # Topology: ONE Ray cluster. Exactly one node sets `role = "head"` (it holds the
 # GCS); the rest are `role = "worker"` pointing `headAddress` at the head's
@@ -11,11 +11,19 @@
 # cluster lives on the tailnet, which is also the trust boundary (Ray has no
 # per-call auth of its own).
 #
+# Repo-agnostic on purpose: this module declares no `ix.*` NixOS *options*
+# (port-claim/health-check bookkeeping), so it imports cleanly into any NixOS
+# system -- the index fleet, the ix monorepo hosts, a personal box -- without
+# dragging in either repo's option tree. It does take the index `ix` *lib*
+# specialArg (for `writeNushellApplication`/`systemdHardening`); a consumer wires
+# it with `_module.args.ix = inputs.index.lib`. The ix-mcp engine is handed in
+# via {option}`services.ix-ray.notebookPackage` rather than reached through `ix`.
+#
 # The node-level correctness here (pinned inter-node ports, a SHORT `/run/ray`
 # temp-dir so Ray's AF_UNIX plasma socket stays under the 108-byte sun_path
 # limit, and PrivateDevices/PrivateUsers off so an attaching kernel can map the
 # shared-memory object store) mirrors the proven `examples/ray-cluster`
-# cluster-node module. We use nixpkgs `python3Packages.ray` -- the same Ray the
+# cluster-node module. Use nixpkgs `python3Packages.ray` -- the same Ray the
 # ix-mcp interpreter imports, so the cluster and the kernels driving it run an
 # identical version (Ray requires matching versions cluster-wide) and the
 # daemons are FHS-correct with no nix-ld shim.
@@ -32,7 +40,6 @@ let
     mkIf
     mkOption
     mkPackageOption
-    optional
     optionalAttrs
     optionals
     types
@@ -55,12 +62,16 @@ let
   # --node-ip-address, --block) are appended in the launcher once the tailscale
   # IP is resolved. Ray's web dashboard needs the `ray[default]` extras nixpkgs
   # core ray omits, so it is disabled; cluster state comes from `fleet.nodes()`.
+  # The head also pins the Ray Client server port so off-cluster `ray://` clients
+  # (e.g. a laptop driving the fleet via `fleet.connect()`) reach a known port.
   modeArgs =
     if cfg.role == "head" then
       [
         "--head"
         "--port"
         (toString cfg.gcsPort)
+        "--ray-client-server-port"
+        (toString cfg.clientServerPort)
         "--include-dashboard"
         "false"
       ]
@@ -118,10 +129,15 @@ let
 
   # The ix-mcp engine (no MCP transport: `notebook` is the daemon shape). Its
   # kernel auto-connects to the local Ray, and its dashboard data API exposes the
-  # token-gated `/api/exec` that `fleet.in_kernel` reaches on `execPort`.
+  # `/api/exec` that `fleet.in_kernel` reaches on `execPort`. Tailnet-trust is on
+  # by default (the tailnet is the boundary, exactly as Ray's own data plane);
+  # set a tokenFile to additionally require a bearer token.
   notebookEnv = {
     IX_MCP_DASHBOARD_PORT = toString cfg.execPort;
     IX_FLEET_EXEC_PORT = toString cfg.execPort;
+  }
+  // optionalAttrs cfg.execTrustNetwork {
+    IX_MCP_EXEC_TRUST_NETWORK = "1";
   }
   // optionalAttrs (cfg.tokenFile != null) {
     IX_MCP_EXEC_TOKEN_FILE = toString cfg.tokenFile;
@@ -162,10 +178,31 @@ in
       '';
     };
 
+    notebookPackage = mkOption {
+      type = types.nullOr types.package;
+      default = null;
+      example = lib.literalExpression "inputs.index.packages.\${pkgs.system}.mcp";
+      description = ''
+        The ix-mcp package providing the `ix-notebook` engine binary. Required
+        when {option}`services.ix-ray.notebook.enable` is true (the default).
+        Handed in by the consumer so this module needs no flake input of its own.
+      '';
+    };
+
     gcsPort = mkOption {
       type = types.port;
       default = 6379;
       description = "Head GCS port; workers connect here.";
+    };
+
+    clientServerPort = mkOption {
+      type = types.port;
+      default = 10001;
+      description = ''
+        Head Ray Client server port. Off-cluster drivers reach the cluster at
+        `ray://<headAddress>:<this>` (what `fleet.connect()` uses via
+        `IX_FLEET_RAY_ADDRESS`). Only the head listens here.
+      '';
     };
 
     nodeManagerPort = mkOption {
@@ -210,6 +247,7 @@ in
         Bytes of RAM for this node's object store (Plasma). Null lets Ray
         autodetect (~30% of RAM). Either way Ray spills to disk under
         `${spillDir}` when the store fills, so referenced objects are not lost.
+        Pin it on a memory-contended host to bound Ray's share.
       '';
     };
 
@@ -223,14 +261,27 @@ in
       '';
     };
 
+    execTrustNetwork = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Trust the network the `/api/exec` endpoint binds (the tailnet) as the
+        auth boundary, so `fleet.in_kernel` works without a shared token -- the
+        same trust model Ray's own data plane already relies on. Set a
+        {option}`services.ix-ray.tokenFile` to additionally require a bearer
+        token (defense in depth). With neither set the endpoint stays disabled.
+      '';
+    };
+
     tokenFile = mkOption {
       type = types.nullOr types.path;
       default = null;
       description = ''
-        File holding the shared bearer token that gates `/api/exec`. Hand every
-        node the SAME secret. Null leaves the endpoint disabled (Ray still works;
-        `fleet.in_kernel` does not). Provide it out of band (sops/agenix or a
-        deployed file); it is read at service start, not baked into the store.
+        File holding a shared bearer token that additionally gates `/api/exec`
+        on top of the tailnet boundary. Hand every node the SAME secret. Null
+        leaves the endpoint gated by the tailnet alone (when
+        {option}`services.ix-ray.execTrustNetwork` is set). Provide it out of
+        band (sops/agenix or a deployed file); it is read at service start.
       '';
     };
 
@@ -239,9 +290,9 @@ in
       default = false;
       description = ''
         Open the inter-node Ray ports (node/object manager, worker range), the
-        exec port, and on the head the GCS port. Usually unnecessary on a tailnet
-        where peers reach each other directly, but required if a firewall guards
-        the tailscale interface.
+        exec port, and on the head the GCS + client-server ports. Usually
+        unnecessary on a tailnet where peers reach each other directly, but
+        required if a firewall guards the tailscale interface.
       '';
     };
   };
@@ -256,32 +307,11 @@ in
         assertion = cfg.role == "worker" -> cfg.headAddress != null;
         message = "services.ix-ray: a worker must set headAddress to the head's tailscale IP.";
       }
+      {
+        assertion = cfg.notebook.enable -> cfg.notebookPackage != null;
+        message = "services.ix-ray: notebook.enable requires notebookPackage (the ix-mcp package).";
+      }
     ];
-
-    ix.networking.portClaims = {
-      ix-ray-exec = {
-        protocol = "tcp";
-        port = cfg.execPort;
-        description = "ix-mcp /api/exec (fleet.in_kernel)";
-      };
-      ix-ray-node-manager = {
-        protocol = "tcp";
-        port = cfg.nodeManagerPort;
-        description = "Ray node manager (inter-node scheduling)";
-      };
-      ix-ray-object-manager = {
-        protocol = "tcp";
-        port = cfg.objectManagerPort;
-        description = "Ray object manager (object-store transfers)";
-      };
-    }
-    // optionalAttrs (cfg.role == "head") {
-      ix-ray-gcs = {
-        protocol = "tcp";
-        port = cfg.gcsPort;
-        description = "Ray GCS (workers join here)";
-      };
-    };
 
     networking.firewall = mkIf cfg.openFirewall {
       allowedTCPPorts = [
@@ -289,23 +319,15 @@ in
         cfg.nodeManagerPort
         cfg.objectManagerPort
       ]
-      ++ optional (cfg.role == "head") cfg.gcsPort;
+      ++ optionals (cfg.role == "head") [
+        cfg.gcsPort
+        cfg.clientServerPort
+      ];
       allowedTCPPortRanges = [
         {
           from = cfg.workerPortLow;
           to = cfg.workerPortHigh;
         }
-      ];
-    };
-
-    ix.healthChecks.ix-ray = {
-      from = "guest";
-      description = "Ray node is up and attached to the cluster";
-      command = [
-        ray
-        "status"
-        "--address"
-        "127.0.0.1:${toString cfg.gcsPort}"
       ];
     };
 
@@ -350,11 +372,15 @@ in
       environment = notebookEnv;
       serviceConfig = ix.systemdHardening // {
         Type = "simple";
-        ExecStart = lib.getExe' ix.packages.mcp "ix-notebook";
+        ExecStart = lib.getExe' cfg.notebookPackage "ix-notebook";
         Restart = "on-failure";
         RestartSec = 5;
         StateDirectory = "ix-ray-notebook";
         WorkingDirectory = "/var/lib/ix-ray-notebook";
+        # Same shared-memory reasoning as the ray unit: the engine's kernel maps
+        # the object store, so it cannot run under a private /dev or userns.
+        PrivateDevices = false;
+        PrivateUsers = false;
       };
     };
   };

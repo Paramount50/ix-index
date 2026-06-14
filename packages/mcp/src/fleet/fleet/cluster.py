@@ -20,7 +20,7 @@ compute on, three ways, each for the job it actually fits.
   a distributed object store; the bundled interpreter carries it on every node.
 
 - **Peek a live node** -- :func:`in_kernel` runs a line of code in *another
-  node's live ix-mcp session* over the token-gated ``/api/exec`` endpoint, so
+  node's live ix-mcp session* over the tailnet-gated ``/api/exec`` endpoint, so
   you can read that node's actual running state (its ``jobs``, a variable it
   holds, its hostname) rather than a fresh worker's blank namespace. This is the
   one path that sees a node's existing kernel; Ray tasks always get a clean
@@ -31,10 +31,11 @@ interactive state), ``in_kernel`` runs in the live kernel (no object store, text
 back), and ``scan`` needs no Python on the far side at all. They do not subsume
 each other.
 
-The trust boundary is the tailnet, exactly as the dashboard's. ``in_kernel``
-additionally carries a shared bearer token (``IX_MCP_EXEC_TOKEN``) so a tailnet
-foothold alone cannot drive a peer's kernel; Ray's own data plane relies on the
-tailnet isolation (Ray has no per-call auth).
+The trust boundary is the tailnet, exactly as the dashboard's and as Ray's own
+data plane (Ray has no per-call auth, so any tailnet peer can already drive the
+cluster). ``in_kernel`` reaches a peer's ``/api/exec`` over that boundary; if the
+cluster additionally sets a shared bearer token (``IX_MCP_EXEC_TOKEN``) for
+defense in depth, ``in_kernel`` carries it automatically.
 """
 
 from __future__ import annotations
@@ -80,14 +81,17 @@ class ClusterError(Exception):
 # --- Ray bootstrap ---------------------------------------------------------
 
 
-def connect(address: str = "auto", *, local: bool = False, **kw: Any) -> None:
+def connect(address: str | None = None, *, local: bool = False, **kw: Any) -> None:
     """Connect this session's kernel to the fleet's Ray cluster (idempotent).
 
-    On a fleet node the local raylet is already running (the NixOS service), so
-    ``address="auto"`` attaches to it and thus to the whole cluster. With
-    ``local=True`` (or when no cluster is reachable) a private single-node Ray is
-    started instead, so the same code runs on a dev box with no fleet. Safe to
-    call repeatedly; the Ray-using functions here call it for you.
+    Target resolution, in order: an explicit ``address``; else
+    ``IX_FLEET_RAY_ADDRESS`` (set this to ``ray://<head>:10001`` on an
+    off-cluster box -- e.g. a laptop -- so it drives the fleet via the Ray
+    Client, the supported thin cross-environment path); else ``"auto"``, which on
+    a fleet node attaches to the local raylet (the NixOS service) and thus the
+    whole cluster. With ``local=True``, or if the target is unreachable, a
+    private single-node Ray is started so the same code still runs on a box with
+    no fleet. Safe to call repeatedly; the Ray-using functions here call it for you.
     """
     import ray
 
@@ -98,11 +102,13 @@ def connect(address: str = "auto", *, local: bool = False, **kw: Any) -> None:
     if local:
         ray.init(**common)
         return
+    target = address or os.environ.get("IX_FLEET_RAY_ADDRESS") or "auto"
     try:
-        ray.init(address=address, **common)
+        ray.init(address=target, **common)
     except Exception:
-        # No cluster to attach to (a dev box, or the service is down): fall back
-        # to a local Ray so `fleet.run` still works rather than hard-failing.
+        # No cluster to attach to (a dev box, the head is down, or a `ray://`
+        # client could not reach it): fall back to a local Ray so `fleet.run`
+        # still works rather than hard-failing.
         ray.init(**common)
 
 
@@ -391,8 +397,9 @@ async def in_kernel(on: Any, code: str, *, budget: float = 15.0) -> pl.DataFrame
     row per node: ``host``, ``ok``, ``output`` (the cell's text/stdout),
     ``result`` (the final expression's repr), and ``error``.
 
-    Requires the shared exec token (``IX_MCP_EXEC_TOKEN``); the boundary is the
-    tailnet plus that token. ``on`` is ``"all"``, a host, or a list of hosts.
+    The boundary is the tailnet (the peer's `/api/exec` trusts it), optionally
+    plus a shared token (``IX_MCP_EXEC_TOKEN``) when the cluster sets one. ``on``
+    is ``"all"``, a host, or a list of hosts.
 
     Example::
 
@@ -401,14 +408,11 @@ async def in_kernel(on: Any, code: str, *, budget: float = 15.0) -> pl.DataFrame
     """
     import httpx
 
+    # Send the bearer only when we have one; a tailnet-trust cluster (the default
+    # fleet config) accepts the call on tailnet membership alone.
     token = _exec_token()
-    if not token:
-        raise ClusterError(
-            "no exec token: set IX_MCP_EXEC_TOKEN (or IX_MCP_EXEC_TOKEN_FILE). "
-            "in_kernel runs code in a peer's live session, so it is token-gated."
-        )
     targets = await _http_targets(on)
-    headers = {"Authorization": f"Bearer {token}"}
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
 
     async with httpx.AsyncClient(timeout=budget + 30) as client:
         async def one(label: str, base: str) -> dict:

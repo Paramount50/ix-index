@@ -16,6 +16,14 @@
 # runtime, so the cluster lives on the tailnet, which is also the trust
 # boundary.
 #
+# Repo-agnostic on purpose: declares no `ix.*` NixOS *options* (port-claim /
+# health-check bookkeeping), so it imports cleanly into any NixOS system. It
+# takes the index `ix` *lib* specialArg (for `writeNushellApplication` /
+# `systemdHardening`); a consumer wires it with `_module.args.ix =
+# inputs.index.lib`. The spark distribution + Gluten bundle are index-overlay
+# packages, so an off-index consumer passes them via `package` /
+# `nativeEngine.package` (e.g. `inputs.index.packages.<sys>.spark-hive`).
+#
 # The Gluten jar is referenced by its absolute store path. A real multi-node
 # cluster needs that same store path present on every worker (shared nix store
 # or copied closure).
@@ -143,27 +151,6 @@ let
     '';
   };
 
-  # The master web UI binds SPARK_LOCAL_IP (the tailscale IP the launcher
-  # exports), not 0.0.0.0, and Spark 3.5 has no `spark.ui.host` override -- so a
-  # guest-local `curl 127.0.0.1` never connects. Resolve the tailscale IP and
-  # probe the UI there, matching where the daemon actually listens.
-  sparkMasterHealth = ix.writeNushellApplication pkgs {
-    name = "ix-spark-master-health";
-    meta.description = "Probe the Spark master web UI on this node's tailscale IP";
-    runtimeInputs = [
-      pkgs.tailscale
-      pkgs.curl
-    ];
-    text = ''
-      def main [] {
-        let ip = (do --ignore-errors {
-          ^tailscale ip -4 | lines | where ($it | str trim | is-not-empty) | first
-        } | default "127.0.0.1")
-        ^curl --fail --silent --show-error --max-time 5 $"http://($ip):${toString cfg.master.webUiPort}/"
-      }
-    '';
-  };
-
   mkUnit = description: argv: {
     inherit description;
     after = [
@@ -230,7 +217,9 @@ in
         The official complete Spark 3.5 distribution (hadoop3 + Hive) pinned to
         JDK 17. Hive support is mandatory for the Gluten native engine, and the
         Gluten Velox bundle in {option}`services.ix-spark.nativeEngine.package`
-        is built against Spark 3.5, so keep these versions aligned.
+        is built against Spark 3.5, so keep these versions aligned. Lives in the
+        index overlay; an off-index consumer passes
+        `inputs.index.packages.<sys>.spark-hive`.
       '';
     };
 
@@ -365,35 +354,6 @@ in
     };
     users.groups.spark = { };
 
-    ix.networking.portClaims =
-      # The master RPC + web UI listen only on the master node.
-      optionalAttrs (cfg.role == "master") {
-        ix-spark-master = {
-          protocol = "tcp";
-          inherit (cfg.master) port;
-          description = "Spark master RPC";
-        };
-        ix-spark-master-ui = {
-          protocol = "tcp";
-          port = cfg.master.webUiPort;
-          description = "Spark master web UI";
-        };
-      }
-      // optionalAttrs (cfg.role == "master" && cfg.connect.enable) {
-        ix-spark-connect = {
-          protocol = "tcp";
-          port = cfg.connect.port;
-          description = "Spark Connect gRPC";
-        };
-      }
-      // optionalAttrs cfg.worker.enable {
-        ix-spark-worker-ui = {
-          protocol = "tcp";
-          port = cfg.worker.webUiPort;
-          description = "Spark worker web UI";
-        };
-      };
-
     networking.firewall = mkIf cfg.openFirewall {
       allowedTCPPorts =
         # Pinned inter-node data-plane ports (driver + block managers), opened on
@@ -409,16 +369,6 @@ in
         ]
         ++ optional (cfg.role == "master" && cfg.connect.enable) cfg.connect.port
         ++ optional cfg.worker.enable cfg.worker.webUiPort;
-    };
-
-    # The master web UI only exists on the master node; a worker has no local
-    # endpoint to probe here.
-    ix.healthChecks = optionalAttrs (cfg.role == "master") {
-      ix-spark = {
-        from = "guest";
-        description = "Spark master web UI responds";
-        command = [ (lib.getExe sparkMasterHealth) ];
-      };
     };
 
     systemd.services =
