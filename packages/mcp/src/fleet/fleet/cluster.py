@@ -419,6 +419,14 @@ async def in_kernel(on: Any, code: str, *, budget: float = 15.0) -> pl.DataFrame
     # fleet config) accepts the call on tailnet membership alone.
     token = _exec_token()
     targets = await _http_targets(on)
+    empty = pl.DataFrame(
+        schema={"host": pl.String, "ok": pl.Boolean, "output": pl.String,
+                "result": pl.String, "error": pl.String}
+    )
+    # No reachable peers: return the empty frame without standing up an HTTP
+    # client (nothing to call, and constructing one is pointless work).
+    if not targets:
+        return empty
     headers = {"Authorization": f"Bearer {token}"} if token else {}
 
     async with httpx.AsyncClient(timeout=budget + 30) as client:
@@ -443,10 +451,7 @@ async def in_kernel(on: Any, code: str, *, budget: float = 15.0) -> pl.DataFrame
                         "error": f"{type(exc).__name__}: {exc}"}
 
         rows = await asyncio.gather(*(one(lbl, base) for lbl, base in targets))
-    return pl.DataFrame(rows) if rows else pl.DataFrame(
-        schema={"host": pl.String, "ok": pl.Boolean, "output": pl.String,
-                "result": pl.String, "error": pl.String}
-    )
+    return pl.DataFrame(rows) if rows else empty
 
 
 # --- Spark (big-data SQL / DataFrames, via Spark Connect) ------------------
