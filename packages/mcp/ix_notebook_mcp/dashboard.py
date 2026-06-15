@@ -19,9 +19,6 @@ import functools
 import hmac
 import html
 import os
-import socket
-import sys
-from dataclasses import replace
 from pathlib import Path
 
 from aiohttp import web
@@ -316,53 +313,13 @@ def build_app(config: Config, conn) -> web.Application:
     return app
 
 
-def _bindable(host: str, port: int) -> bool:
-    """Whether ``host:port`` can actually be bound right now.
-
-    A configured host can be 'assigned' yet unbindable -- e.g. a Tailscale IP
-    whose interface is down when the backend is stopped -- so we probe before
-    committing the app to it. Mirrors what ``loop.create_server`` does (resolve,
-    then try each address family).
-    """
-    try:
-        infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except OSError:
-        return False
-    for family, socktype, proto, _canon, sockaddr in infos:
-        try:
-            with socket.socket(family, socktype, proto) as sock:
-                sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                sock.bind(sockaddr)
-            return True
-        except OSError:
-            continue
-    return False
-
-
-async def start(config: Config) -> tuple[web.AppRunner, str]:
-    """Bind the dashboard and return the runner plus the host it actually bound.
-
-    The read-only dashboard is a non-critical subsystem, so a failed bind must
-    never take down the kernel MCP. If the configured host is unbindable (e.g. a
-    Tailscale IP whose interface is down), fall back to loopback. The fallback
-    happens *before* building the app so the ``/api/exec`` trust gate -- which
-    keys off ``config.host`` -- sees the host actually bound, not the stale one
-    (otherwise a loopback fallback would wrongly keep trusting the tailnet). The
-    returned host lets the caller correct the advertised URL.
-    """
-    host = config.host
-    if host not in _LOOPBACK_HOSTS and not _bindable(host, config.dashboard_port):
-        print(
-            f"[ix-mcp] dashboard host {host}:{config.dashboard_port} is not "
-            f"bindable; falling back to 127.0.0.1",
-            file=sys.stderr,
-            flush=True,
-        )
-        host = "127.0.0.1"
-        config = replace(config, host=host)
+async def start(config: Config) -> web.AppRunner:
+    # `config.host` is resolved to a bindable address by the CLI before the
+    # kernel spawns (see cli._serve), so the bind here is expected to succeed;
+    # a failure is a genuine error worth surfacing.
     conn = store.connect(config.store_path)
     app = build_app(config, conn)
     runner = web.AppRunner(app)
     await runner.setup()
-    await web.TCPSite(runner, host, config.dashboard_port).start()
-    return runner, host
+    await web.TCPSite(runner, config.host, config.dashboard_port).start()
+    return runner

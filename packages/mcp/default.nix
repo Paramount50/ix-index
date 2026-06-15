@@ -1463,6 +1463,12 @@ let
     ):
         assert cli._tailscale_ip() is None, "IPv6-only TailscaleIPs should yield None"
 
+    # _bindable: loopback is bindable; a reserved/unassigned address is not, so
+    # the CLI falls back to loopback instead of crashing the dashboard.
+    free = cli._free_port()
+    assert cli._bindable("127.0.0.1", free) is True, "loopback must be bindable"
+    assert cli._bindable("240.0.0.1", free) is False, "reserved address must be unbindable"
+
     print("bind-default-ok")
   '';
   bindDefaultSmoke =
@@ -1968,7 +1974,7 @@ let
     set_config(cfg)
 
     async def main():
-        runner, _ = await dashboard.start(cfg)
+        runner = await dashboard.start(cfg)
         base = f"http://127.0.0.1:{cfg.dashboard_port}"
         try:
             async with aiohttp.ClientSession() as session:
