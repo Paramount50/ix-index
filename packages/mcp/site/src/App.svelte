@@ -13,6 +13,10 @@
   const latestId = $derived(ordered.length ? ordered[ordered.length - 1].id : null);
   const running = $derived(feed.jobs.filter((j) => j.status === 'running').length);
 
+  // How many things each pane holds, in column order (cells, executions,
+  // resources). An empty pane has nothing to show, so it folds itself away.
+  const counts = $derived([feed.cells.length, feed.jobs.length, feed.resources.length]);
+
   // The three panes are grid tracks sized in `fr`, so they always fill the row.
   // A drag on a gutter moves weight between the two panes it sits between. Each
   // pane header is a toggle: click it to collapse the pane to a thin labelled
@@ -64,11 +68,18 @@
   );
   let panesEl: HTMLDivElement;
 
-  // A collapsed pane is a fixed strip; an open one takes its fr share. A gutter
-  // is only a live drag handle between two open panes; beside a collapsed pane
+  // The effective fold state, the one the layout reads: a pane is folded when the
+  // user collapsed it OR it is empty. An empty pane folds itself to a strip so it
+  // never claims a column for a "nothing here" message; it springs back to the
+  // user's chosen state the moment it has content. `collapsed` stays the user's
+  // own preference (toggled and persisted), so the auto-fold is purely derived.
+  const folded = $derived(collapsed.map((c, i) => c || counts[i] === 0));
+
+  // A folded pane is a fixed strip; an open one takes its fr share. A gutter
+  // is only a live drag handle between two open panes; beside a folded pane
   // it shrinks to a hairline seam.
-  const track = (i: number) => (collapsed[i] ? `${COLLAPSED_PX}px` : `${cols[i]}fr`);
-  const seam = (g: number) => (collapsed[g] || collapsed[g + 1] ? `${HAIRLINE}px` : `${GUTTER}px`);
+  const track = (i: number) => (folded[i] ? `${COLLAPSED_PX}px` : `${cols[i]}fr`);
+  const seam = (g: number) => (folded[g] || folded[g + 1] ? `${HAIRLINE}px` : `${GUTTER}px`);
   const gridTemplate = $derived(
     `${track(0)} ${seam(0)} ${track(1)} ${seam(1)} ${track(2)}`,
   );
@@ -82,8 +93,8 @@
 
   function startDrag(index: number, event: PointerEvent): void {
     // index 0 is the gutter between panes 0 and 1; index 1 between 1 and 2. A
-    // gutter beside a collapsed pane is inert: there is no weight to move.
-    if (!panesEl || collapsed[index] || collapsed[index + 1]) return;
+    // gutter beside a folded pane is inert: there is no weight to move.
+    if (!panesEl || folded[index] || folded[index + 1]) return;
     event.preventDefault();
     const handle = event.currentTarget as HTMLElement;
     handle.setPointerCapture(event.pointerId);
@@ -162,11 +173,12 @@
   <button
     class="sec"
     type="button"
-    aria-expanded={!collapsed[index]}
-    title={collapsed[index] ? `Show ${label}` : `Hide ${label}`}
+    aria-expanded={!folded[index]}
+    disabled={count === 0}
+    title={count === 0 ? `${label} (empty)` : folded[index] ? `Show ${label}` : `Hide ${label}`}
     onclick={() => toggle(index)}
   >
-    <span class="caret" aria-hidden="true">{collapsed[index] ? '▸' : '▾'}</span>
+    <span class="caret" aria-hidden="true">{folded[index] ? '▸' : '▾'}</span>
     <span class="label">{label}</span>
     <span class="count">{count}</span>
   </button>
@@ -192,17 +204,13 @@
 
 <div class="panes" bind:this={panesEl} style="grid-template-columns: {gridTemplate}">
   <!-- The agent's curated highlight reel: the most important results, presented. -->
-  <section class="pane cells-pane" class:collapsed={collapsed[0]}>
+  <section class="pane cells-pane" class:collapsed={folded[0]}>
     {@render head(0, 'cells', feed.cells.length)}
-    {#if !collapsed[0]}
+    {#if !folded[0]}
       <div class="pane-body">
-        {#if feed.cells.length === 0}
-          <div class="empty">the agent has not pinned any results yet</div>
-        {:else}
-          {#each feed.cells as cell (cell.id)}
-            <CellCard {cell} />
-          {/each}
-        {/if}
+        {#each feed.cells as cell (cell.id)}
+          <CellCard {cell} />
+        {/each}
       </div>
     {/if}
   </section>
@@ -210,7 +218,7 @@
   <!-- Drag to resize the panes either side; double-click to reset. -->
   <div
     class="gutter"
-    class:inert={collapsed[0] || collapsed[1]}
+    class:inert={folded[0] || folded[1]}
     role="separator"
     aria-orientation="vertical"
     aria-label="Resize cells and executions"
@@ -220,24 +228,20 @@
   ></div>
 
   <!-- Every run, oldest first, streaming live as it goes. -->
-  <section class="pane exec-pane" class:collapsed={collapsed[1]}>
+  <section class="pane exec-pane" class:collapsed={folded[1]}>
     {@render head(1, 'executions', feed.jobs.length)}
-    {#if !collapsed[1]}
+    {#if !folded[1]}
       <div class="pane-body" bind:this={execBody} onscroll={trackExec}>
-        {#if ordered.length === 0}
-          <div class="empty">no executions yet</div>
-        {:else}
-          {#each ordered as job (job.id)}
-            <JobCard {job} latest={job.id === latestId} />
-          {/each}
-        {/if}
+        {#each ordered as job (job.id)}
+          <JobCard {job} latest={job.id === latestId} />
+        {/each}
       </div>
     {/if}
   </section>
 
   <div
     class="gutter"
-    class:inert={collapsed[1] || collapsed[2]}
+    class:inert={folded[1] || folded[2]}
     role="separator"
     aria-orientation="vertical"
     aria-label="Resize executions and resources"
@@ -247,17 +251,13 @@
   ></div>
 
   <!-- Live, self-updating views: a terminal screen, a VM framebuffer, a widget. -->
-  <section class="pane res-pane" class:collapsed={collapsed[2]}>
+  <section class="pane res-pane" class:collapsed={folded[2]}>
     {@render head(2, 'resources', feed.resources.length)}
-    {#if !collapsed[2]}
+    {#if !folded[2]}
       <div class="pane-body">
-        {#if feed.resources.length === 0}
-          <div class="empty">no live resources</div>
-        {:else}
-          {#each feed.resources as resource (resource.id)}
-            <ResourceCard {resource} />
-          {/each}
-        {/if}
+        {#each feed.resources as resource (resource.id)}
+          <ResourceCard {resource} />
+        {/each}
       </div>
     {/if}
   </section>
@@ -411,6 +411,17 @@
   .sec:hover {
     color: var(--text);
   }
+  /* An empty pane's header is folded and inert: there is nothing to expand, so
+     it reads as a plain label strip rather than a control. */
+  .sec:disabled {
+    cursor: default;
+  }
+  .sec:disabled:hover {
+    color: var(--muted);
+  }
+  .sec:disabled:hover .caret {
+    color: var(--faint);
+  }
   .sec:focus-visible {
     outline: 1px solid var(--active);
     outline-offset: -1px;
@@ -444,13 +455,6 @@
   }
   .pane.collapsed .caret {
     writing-mode: horizontal-tb;
-  }
-
-  .empty {
-    padding: 2px 0;
-    color: var(--faint);
-    font-size: 12px;
-    font-style: italic;
   }
 
   /* Stack the columns on a narrow screen; the page scrolls and each pane sizes
