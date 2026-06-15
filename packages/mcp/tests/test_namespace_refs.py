@@ -17,9 +17,9 @@ import types
 from ix_notebook_mcp import introspect, runtime
 
 
-def _job(job_id: str, code: str):
-    """A minimal stand-in for a finished Job: _record_refs reads only id and code."""
-    return types.SimpleNamespace(id=job_id, code=code)
+def _job(job_id: str, code: str, status: str = "done"):
+    """A minimal stand-in for a finished Job: _record_refs reads id, code, status."""
+    return types.SimpleNamespace(id=job_id, code=code, status=status)
 
 
 def _reset() -> None:
@@ -70,6 +70,18 @@ def test_unparseable_run_records_nothing() -> None:
     _reset()
     runtime._record_refs(_job("j1", "def ((("))
     assert runtime._name_refs == {}
+
+
+def test_failed_run_is_not_credited() -> None:
+    # A run that errors may never have reached its bindings (`x = undefined()`
+    # raises before binding x), so a non-"done" run contributes no references — we
+    # under-attribute rather than claim a failed run set a value it did not.
+    _reset()
+    runtime._record_refs(_job("ok", "x = 1"))
+    runtime._record_refs(_job("boom", "x = undefined_func()", status="error"))
+    runtime._record_refs(_job("killed", "x = slow()", status="cancelled"))
+    # Only the clean run is credited.
+    assert runtime._name_refs["x"]["assigned_in"] == ["ok"]
 
 
 if __name__ == "__main__":

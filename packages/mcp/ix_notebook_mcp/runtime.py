@@ -1362,8 +1362,17 @@ def _record_refs(job: Job) -> None:
     so the namespace pane can link every variable back to the runs behind it.
     Source-based (see :func:`introspect.binding_names`): correct even when many
     background jobs mutate one shared namespace concurrently, and free (no per-access
-    kernel hook). Best-effort: a failure here just means a name shows no
-    references."""
+    kernel hook). Best-effort: a failure here just means a name shows no references.
+
+    Only a run that finished cleanly (``status == "done"``) contributes. Source
+    attribution cannot tell an assignment that executed from one a failed/cancelled
+    run never reached (``x = undefined()`` raises before binding ``x``), so crediting
+    such a run would claim it set a value it did not. We skip it entirely: a run that
+    half-bound names before erroring loses that attribution (a name may show no
+    ``assigned_in``), which is the honest trade — under-attribute rather than
+    mislead."""
+    if job.status != "done":
+        return
     try:
         from .introspect import binding_names
 

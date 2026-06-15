@@ -5,7 +5,7 @@
   // never disturbs another.
   import { fmtSize, detail, type NsRow as Row } from '$lib/namespace';
   import { focusPane } from '$lib/ui.svelte';
-  import { SCOPE_SEP } from '$lib/stream.svelte';
+  import { store, SCOPE_SEP } from '$lib/stream.svelte';
   import KindIcon from './KindIcon.svelte';
   // Svelte 5 expresses recursion by importing the component itself rather than the
   // old <svelte:self>.
@@ -31,6 +31,14 @@
   function goToRun(runId: string): void {
     focusPane(scope + SCOPE_SEP + runId);
   }
+
+  // Whether a referenced run is still published as a pane. The producer only keeps
+  // the most-recent runs (older ones are dropped from the doc), while a name's refs
+  // span the whole session, so an old id can dangle — render those non-clickable
+  // rather than focus a key that resolves to the "not in the feed" placeholder.
+  function runPresent(runId: string): boolean {
+    return (scope + SCOPE_SEP + runId) in store.panes;
+  }
 </script>
 
 <div class="nsrow">
@@ -48,25 +56,30 @@
     <span class="nsrow-size">{fmtSize(row.size)}</span>
   </button>
 
+  <!-- One run-id chip: clickable to focus the run, or a dim span if the run is no
+       longer published as a pane. -->
+  {#snippet refChip(id: string, verb: string)}
+    {#if runPresent(id)}
+      <button class="nsrow-ref" title={`${verb} in run ${id}`} onclick={() => goToRun(id)}>{id}</button
+      >
+    {:else}
+      <span class="nsrow-ref nsrow-ref-gone" title={`${verb} in run ${id} — no longer in the feed`}
+        >{id}</span
+      >
+    {/if}
+  {/snippet}
+
   {#if hasRefs}
     <!-- Provenance: the runs that set or used this variable, each a chip that
          focuses the run's pane. Indented to sit under the name column. -->
     <div class="nsrow-refs" style="padding-left: {62 + depth * 15}px">
       {#if assignedIn.length > 0}
         <span class="nsrow-reflabel">set</span>
-        {#each assignedIn as id (id)}
-          <button class="nsrow-ref" title={`assigned in run ${id}`} onclick={() => goToRun(id)}
-            >{id}</button
-          >
-        {/each}
+        {#each assignedIn as id (id)}{@render refChip(id, 'assigned')}{/each}
       {/if}
       {#if usedIn.length > 0}
         <span class="nsrow-reflabel">used</span>
-        {#each usedIn as id (id)}
-          <button class="nsrow-ref" title={`used in run ${id}`} onclick={() => goToRun(id)}
-            >{id}</button
-          >
-        {/each}
+        {#each usedIn as id (id)}{@render refChip(id, 'used')}{/each}
       {/if}
     </div>
   {/if}
@@ -173,5 +186,16 @@
   .nsrow-ref:hover {
     color: var(--ink);
     background: var(--panel-strong, var(--panel));
+  }
+  /* A run that has scrolled out of the published feed: shown for provenance but not
+     clickable (focusing it would only hit the "not in the feed" placeholder). */
+  .nsrow-ref-gone {
+    color: var(--ink-faint);
+    cursor: default;
+    opacity: 0.7;
+  }
+  .nsrow-ref-gone:hover {
+    color: var(--ink-faint);
+    background: var(--panel);
   }
 </style>
