@@ -43,6 +43,14 @@ navigation and clicks on its own, and drops off when the connection ends. (A
 one-shot ``shot()`` lands in the executions reel; the resource is the always-on
 view.)
 
+Always drive the browser THROUGH this module (``connect`` /
+``get_or_create_browser`` / ``goto`` / ``page``), never raw
+``async_playwright().start()``: the module keeps one cached connection on the
+kernel loop (so it never blocks other jobs), opens a *visible* window, and only
+this path registers the live dashboard resource. A hand-rolled Playwright launch
+gets none of that -- and a headless ``chromium.launch()`` has no debug port for
+the module to attach to, so it stays invisible to both the human and the card.
+
 ``shot()`` returns a :class:`Result`, so ending a cell with it shows the screenshot
 to the human and hands the model the same image. Every other call returns the raw
 Playwright object (``Browser`` / ``BrowserContext`` / ``Page``), so the full async

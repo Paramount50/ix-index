@@ -225,6 +225,7 @@ class Library:
 
     name: str
     credential: Credential | None = None  # external service its calls depend on
+    note: str | None = None  # one-line steer shown in the instructions' library list
 
 
 # Standard third-party libraries that are bundled and import-ready. They have no
@@ -237,7 +238,15 @@ LIBRARIES: tuple[Library, ...] = (
     Library("httpx"),
     Library("matplotlib"),
     Library("pypdf"),
-    Library("playwright"),
+    Library(
+        "playwright",
+        # Agents reach for raw `async_playwright().start()`; steer them to the
+        # `browser` module, which manages the connection on the kernel loop and
+        # publishes the live dashboard resource.
+        note="prefer the `browser` module — `browser.goto`/`shot`/`vdom` drive a "
+        "visible browser on the kernel loop and publish a live dashboard resource; "
+        "don't call `async_playwright().start()` yourself",
+    ),
     Library(
         "exa_py",
         # The SDK is a thin client over the Exa REST API; no key is bundled,
