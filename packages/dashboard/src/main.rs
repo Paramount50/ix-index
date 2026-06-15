@@ -14,19 +14,16 @@
 //! `dashboard demo` runs a self-contained producer that publishes one pane of
 //! each kind, so the canvas can be exercised with no other process running.
 
-use std::collections::HashSet;
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use dashboard_core::{
-    ExecTraceLine, ExecView, Hub, Pane, ProducerSnapshot, Publisher, RecordingStore, TerminalView,
-    discovery_dir, serve_hub, socket_path,
+    ExecTraceLine, ExecView, Hub, Pane, ProducerEvent, Publisher, RecordingStore, TerminalView,
+    discovery_dir, serve_hub, socket_path, subscribe,
 };
-use tokio::io::{AsyncBufReadExt as _, BufReader};
-use tokio::net::UnixStream;
 
 /// Aggregate every ix resource producer socket into one live web canvas.
 #[derive(Parser)]
@@ -133,13 +130,21 @@ async fn run_server(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
             (store.clone(), recorder.id)
         });
 
-    let connected = Arc::new(Mutex::new(HashSet::new()));
-    let discovery = tokio::spawn(discover(
-        hub.clone(),
-        dir,
-        connected,
-        Duration::from_millis(cli.rescan_ms),
-    ));
+    // Discover producers and fold each event into the hub. The transport
+    // (directory scan, per-socket read, stale-socket reaping) lives in
+    // `dashboard_core::subscribe`, shared with the other consumer (`ix-windows`).
+    let mut events = subscribe(dir, Duration::from_millis(cli.rescan_ms), &handle);
+    let hub_for_events = hub.clone();
+    let discovery = tokio::spawn(async move {
+        while let Some(event) = events.recv().await {
+            match event {
+                ProducerEvent::Snapshot(snapshot) => {
+                    hub_for_events.apply_scope(&snapshot.producer, &snapshot.panes);
+                }
+                ProducerEvent::Gone { producer } => hub_for_events.remove_scope(&producer),
+            }
+        }
+    });
     dashboard.push_task(discovery);
 
     tokio::signal::ctrl_c().await?;
@@ -152,89 +157,6 @@ async fn run_server(cli: &Cli) -> Result<(), Box<dyn std::error::Error>> {
         let _ = store.save(&id, &hub.export_snapshot());
     }
     Ok(())
-}
-
-/// Rescan `dir` on a fixed interval and spawn a reader for each newly-seen
-/// socket. `connected` is the set of sockets currently being read, so a socket is
-/// read by exactly one task and a re-created socket reconnects after its reader
-/// finishes.
-async fn discover(
-    hub: Arc<Hub>,
-    dir: PathBuf,
-    connected: Arc<Mutex<HashSet<PathBuf>>>,
-    rescan: Duration,
-) {
-    loop {
-        if let Ok(entries) = std::fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("sock") {
-                    continue;
-                }
-                if !connected
-                    .lock()
-                    .expect("connected set poisoned")
-                    .insert(path.clone())
-                {
-                    continue;
-                }
-                let hub = hub.clone();
-                let connected = connected.clone();
-                tokio::spawn(async move {
-                    read_producer(&hub, &path).await;
-                    connected
-                        .lock()
-                        .expect("connected set poisoned")
-                        .remove(&path);
-                });
-            }
-        }
-        tokio::time::sleep(rescan).await;
-    }
-}
-
-/// Connect to one producer socket and fold its NDJSON stream into the hub until
-/// the producer hangs up. On disconnect, the producer's scope is dropped so its
-/// panes leave the board; a stale socket file (connection refused) is reaped.
-async fn read_producer(hub: &Hub, path: &Path) {
-    let stream = match UnixStream::connect(path).await {
-        Ok(stream) => stream,
-        Err(error) => {
-            // A bound, listening socket accepts immediately, so a refusal means
-            // the socket file outlived its producer. Reap it, but only if it is
-            // actually a socket: a regular `*.sock` file the user dropped in the
-            // watched directory also refuses, and must not be deleted.
-            if error.kind() == std::io::ErrorKind::ConnectionRefused && is_socket(path) {
-                let _ = std::fs::remove_file(path);
-            }
-            return;
-        }
-    };
-
-    let mut lines = BufReader::new(stream).lines();
-    let mut producer_id: Option<String> = None;
-    while let Ok(Some(line)) = lines.next_line().await {
-        if line.is_empty() {
-            continue;
-        }
-        // Skip a malformed line rather than dropping the producer: a future wire
-        // version should degrade, not disconnect a working board.
-        if let Ok(snapshot) = serde_json::from_str::<ProducerSnapshot>(&line) {
-            producer_id = Some(snapshot.producer.clone());
-            hub.apply_scope(&snapshot.producer, &snapshot.panes);
-        }
-    }
-
-    if let Some(id) = producer_id {
-        hub.remove_scope(&id);
-    }
-}
-
-/// Whether `path` is a unix socket, used to avoid reaping a regular file that a
-/// user happened to name `*.sock` in the watched directory.
-fn is_socket(path: &Path) -> bool {
-    use std::os::unix::fs::FileTypeExt as _;
-    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_socket())
 }
 
 /// Open the recordings store at the configured directory, or the default one.

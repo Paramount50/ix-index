@@ -50,6 +50,7 @@ members = [
   "packages/google/py",
   "packages/indexbench",
   "packages/ix-dev-diagnose",
+  "packages/ix-windows",
   "packages/kitty",
   "packages/lake/iceberg",
   "packages/minecraft/nbt",
@@ -242,6 +243,7 @@ snafu = "0.9"
 strip-ansi-escapes = "0.2"
 tango-bench = "0.7"
 tantivy = "0.26"
+tao = "0.35"
 tap-protocol = { path = "packages/tap/protocol" }
 tap-pty = { path = "packages/tap/pty" }
 tar = "0.4"
@@ -293,4 +295,5 @@ url = { version = "2.5.8", default-features = false }
 uuid = "1"
 vt100 = "0.16"
 webpki-roots = "1"
+wry = "0.55"
 x509-parser = "0.18"

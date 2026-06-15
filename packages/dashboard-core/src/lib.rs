@@ -29,6 +29,7 @@ mod dashboard;
 mod error;
 mod pane;
 mod publish;
+mod subscribe;
 
 pub use dashboard::{
     Dashboard, Hub, Recorder, RecordingInfo, RecordingStore, ServedDashboard, serve_hub,
@@ -39,3 +40,4 @@ pub use pane::{
     discovery_dir, socket_path,
 };
 pub use publish::{PaneSink, Publisher};
+pub use subscribe::{ProducerEvent, subscribe};
