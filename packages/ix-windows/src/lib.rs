@@ -169,7 +169,8 @@ impl WindowManager {
         self.windows.is_empty()
     }
 
-    /// Create a borderless, transparent webview window for a resource pane.
+    /// Create a chrome-less, square, transparent webview window for a resource
+    /// pane.
     fn open<T: 'static>(
         &mut self,
         target: &EventLoopWindowTarget<T>,
@@ -181,14 +182,22 @@ impl WindowManager {
         // desktop; a tiling WM ignores the position and tiles them itself.
         let step = f64::from(self.opened % 8) * 28.0;
         self.opened = self.opened.wrapping_add(1);
-        let window = match tao::window::WindowBuilder::new()
+        // Borderless, exactly like ghostty's `window-decoration = none`: the macOS
+        // window server only rounds *titled* windows, so dropping decorations gives
+        // square corners for free, matching ghostty under a tiling WM.
+        //
+        // A borderless window has no fullscreen button, so aerospace's dialog
+        // heuristic floats it by default (the same reason terminals like kitty are
+        // special-cased, and the reason ghostty's bundle id is hardcoded to tile).
+        // ix-windows has no bundle id, so tiling relies on an `on-window-detected`
+        // rule matching the app name; see this crate's README / the aerospace config.
+        let builder = tao::window::WindowBuilder::new()
             .with_title(&pane.title)
             .with_decorations(false)
             .with_transparent(true)
             .with_inner_size(LogicalSize::new(720.0, 480.0))
-            .with_position(LogicalPosition::new(96.0 + step, 96.0 + step))
-            .build(target)
-        {
+            .with_position(LogicalPosition::new(96.0 + step, 96.0 + step));
+        let window = match builder.build(target) {
             Ok(window) => window,
             Err(error) => {
                 eprintln!("ix-windows: window for {}: {error}", pane.id);
