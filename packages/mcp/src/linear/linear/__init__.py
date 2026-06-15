@@ -45,11 +45,13 @@ __all__ = [
     "issue",
     "issue_update",
     "issue_create",
+    "issue_search",
+    "comment_create",
     "project_create",
     "LinearError",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 _ENDPOINT = "https://api.linear.app/graphql"
 
@@ -284,3 +286,64 @@ async def project_create(
     input_vars: dict[str, Any] = {"name": name, "teamIds": teams, **fields}
     data = await _gql(_PROJECT_CREATE_MUTATION, {"input": input_vars})
     return data["projectCreate"]["project"]
+
+
+_ISSUE_SEARCH_QUERY = """
+query IssueSearch($term: String!, $first: Int!) {
+  searchIssues(term: $term, first: $first) {
+    nodes {
+      id
+      identifier
+      title
+      url
+      description
+      state { id name type }
+    }
+  }
+}
+"""
+
+
+async def issue_search(term: str, first: int = 20) -> list[dict[str, Any]]:
+    """Search Linear issues by keyword or phrase.
+
+    ``term`` is the search string forwarded to Linear's full-text search.
+    ``first`` caps the number of results returned (default 20).
+
+    Returns a list of issue dicts, each containing at least
+    ``id``, ``identifier``, ``title``, ``url``, ``description``,
+    and ``state`` (``id``/``name``/``type``).
+
+    Raises :class:`LinearError` on GraphQL errors and
+    ``httpx.HTTPStatusError`` on network errors.
+    """
+    data = await _gql(_ISSUE_SEARCH_QUERY, {"term": term, "first": first})
+    return data["searchIssues"]["nodes"]
+
+
+_COMMENT_CREATE_MUTATION = """
+mutation CommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    success
+    comment {
+      id
+      url
+    }
+  }
+}
+"""
+
+
+async def comment_create(issue_id: str, body: str) -> dict[str, Any]:
+    """Add a comment to a Linear issue.
+
+    ``issue_id`` is the issue UUID.
+    ``body`` is the comment text (Markdown supported).
+
+    Returns the created comment dict with ``id`` and ``url``.
+    Raises :class:`LinearError` on GraphQL errors and
+    ``httpx.HTTPStatusError`` on network errors.
+    """
+    input_vars: dict[str, Any] = {"issueId": issue_id, "body": body}
+    data = await _gql(_COMMENT_CREATE_MUTATION, {"input": input_vars})
+    return data["commentCreate"]["comment"]

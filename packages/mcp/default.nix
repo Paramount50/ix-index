@@ -4119,7 +4119,37 @@ let
   vmkitBundled = importTest "vmkit" "import vmkit; print('vmkit-ok', callable(vmkit.boot_linux), callable(vmkit.drive), callable(vmkit.screenshot))";
   imessageBundled = importTest "imessage" "import imessage; print('imessage-ok', all(callable(getattr(imessage, n)) for n in ('messages', 'chats', 'contacts', 'send')))";
   xBundled = importTest "x" "import x; print('x-ok', callable(x.posts), x.__version__)";
-  linearBundled = importTest "linear" "import linear; print('linear-ok', all(callable(getattr(linear, n)) for n in ('issue', 'issue_update', 'issue_create', 'project_create')), linear.__version__)";
+  linearBundled = importTest "linear" "import linear; print('linear-ok', all(callable(getattr(linear, n)) for n in ('issue', 'issue_update', 'issue_create', 'issue_search', 'comment_create', 'project_create')), linear.__version__)";
+  linearTriageTestPython = pkgs.python3.withPackages (
+    ps:
+    [
+      ps.pytest
+      ps.httpx
+      linearModule
+    ]
+  );
+  linearTriageTestSource = builtins.path {
+    name = "ix-mcp-linear-triage-test";
+    path = ./tests/test_linear_triage.py;
+  };
+  linearTriageTests =
+    pkgs.runCommand "ix-mcp-linear-triage-tests"
+      {
+        nativeBuildInputs = [ linearTriageTestPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        cp ${linearTriageTestSource} "$TMPDIR/test_linear_triage.py"
+        ${lib.getExe linearTriageTestPython} -m pytest "$TMPDIR/test_linear_triage.py" -q -p no:cacheprovider >stdout 2>stderr || {
+          echo "ix-mcp linear triage tests failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        cat stdout
+        mkdir -p "$out"
+      '';
 in
 package.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
@@ -4161,6 +4191,7 @@ package.overrideAttrs (old: {
         vdomPropertiesSmoke
         xBundled
         linearBundled
+        linearTriageTests
         ;
     }
     // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
