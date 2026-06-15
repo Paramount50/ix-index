@@ -887,29 +887,13 @@ let
   fontsConf = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
 
   # `ix-mcp` is just the pinned interpreter invoked on the bundled package's CLI.
-  # Everything (the entrypoint, the one shared kernel, the dashboard) runs in this
+  # Everything (the entrypoint, the one shared kernel, the data API) runs in this
   # one interpreter, so the bundled modules are all importable with no install step.
-  # The dashboard UI is a Svelte/Vite app under ./site, built by nix to one
-  # self-contained index.html (viteSingleFile). The aiohttp dashboard server
-  # (ix_notebook_mcp/dashboard.py) serves that file and feeds it the live
-  # execution log over its REST API, so there is no committed build artifact and
-  # no runtime asset dependency (the same shape as dashboard-core's embedded UI,
-  # but read at runtime via IX_MCP_DASHBOARD_HTML since the server is Python).
-  dashboardSiteSrc = lib.fileset.toSource {
-    root = ./site;
-    fileset = lib.fileset.intersection (lib.fileset.gitTracked ./.) ./site;
-  };
-  dashboardSite = ix.buildSvelteSite pkgs {
-    pname = "ix-mcp-site";
-    version = "0.1.0";
-    src = dashboardSiteSrc;
-    serve.enable = false;
-    devServer = {
-      name = "ix-mcp-site-dev";
-      checkoutSubdir = "packages/mcp/site";
-    };
-  };
-  dashboardHtml = "${dashboardSite}/share/ix-mcp-site/index.html";
+  # The human-facing dashboard is the shared Loro hub (the `dashboard` aggregator):
+  # `ix-mcp serve` spawns it (IX_DASHBOARD_BIN) and publishes its runs/resources/
+  # namespace to it as panes; the aiohttp server keeps only the read-only /api the
+  # embedders poll. So there is no committed UI artifact and no Svelte build here.
+  dashboardHubBin = ix.rustWorkspace.units.binaries."dashboard";
 
   package =
     pkgs.runCommand "ix-mcp"
@@ -928,7 +912,7 @@ let
           --set IX_MCP_VERSION ${lib.escapeShellArg ix.rev} \
           --set PLAYWRIGHT_BROWSERS_PATH ${lib.escapeShellArg playwrightBrowsers} \
           --set IX_GCAL_BIN ${lib.escapeShellArg "${gcalBin}/bin/gcal"} \
-          --set IX_MCP_DASHBOARD_HTML ${lib.escapeShellArg dashboardHtml} \
+          --set IX_DASHBOARD_BIN ${lib.escapeShellArg (lib.getExe' dashboardHubBin "dashboard")} \
           --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe' pkgs.souffle "souffle")} \
           ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "--set IX_VMKIT_BIN ${lib.escapeShellArg "${vmkitBin}/bin/vmkit"}"}
         # The notebook engine alone (kernel + dashboard + session file, no MCP
@@ -939,7 +923,7 @@ let
           --set IX_MCP_VERSION ${lib.escapeShellArg ix.rev} \
           --set PLAYWRIGHT_BROWSERS_PATH ${lib.escapeShellArg playwrightBrowsers} \
           --set IX_GCAL_BIN ${lib.escapeShellArg "${gcalBin}/bin/gcal"} \
-          --set IX_MCP_DASHBOARD_HTML ${lib.escapeShellArg dashboardHtml} \
+          --set IX_DASHBOARD_BIN ${lib.escapeShellArg (lib.getExe' dashboardHubBin "dashboard")} \
           --set SCIPQL_SOUFFLE ${lib.escapeShellArg (lib.getExe' pkgs.souffle "souffle")} \
           ${lib.optionalString pkgs.stdenv.hostPlatform.isDarwin "--set IX_VMKIT_BIN ${lib.escapeShellArg "${vmkitBin}/bin/vmkit"}"}
       '';
@@ -1984,7 +1968,6 @@ let
                     jobs = await resp.json()
                 assert len(jobs) == 1 and jobs[0]["id"] == "job1", jobs
                 assert jobs[0]["outputs"] == rich, jobs[0]["outputs"]
-                assert jobs[0].get("code_html"), "expected highlighted code"
 
                 async with session.get(base + "/api/jobs/job1") as resp:
                     assert resp.status == 200, resp.status
@@ -2624,16 +2607,6 @@ let
     bound = introspect.cell_bindings("rows = df.height\ntotal = n + 1\n", ns)
     assert set(bound) == {"df", "n"}, bound
     assert bound["df"]["kind"] == "dataframe" and bound["n"]["summary"] == "7", bound
-
-    # The highlighter marks each identifier token with data-ix-name, the anchor the
-    # browser joins with bindings; attribute parts (head) are not names so the
-    # frontend never lights them up, but the token is still present in the markup.
-    from ix_notebook_mcp import dashboard
-
-    highlighted = dashboard._code_html("rows = df.head()\ntotal = n + 1\n")
-    assert 'data-ix-name="df"' in highlighted, highlighted
-    assert 'data-ix-name="rows"' in highlighted, highlighted
-    assert 'data-ix-name="total"' in highlighted, highlighted
 
     # Opening a pre-bindings store migrates it, and a second open (the kernel and
     # dashboard each open the store) is a no-op rather than an error.
@@ -4189,7 +4162,6 @@ package.overrideAttrs (old: {
         xBundled
         linearBundled
         ;
-      site = dashboardSite;
     }
     // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
       inherit
