@@ -14,8 +14,12 @@
   const running = $derived(feed.jobs.filter((j) => j.status === 'running').length);
 
   // How many things each pane holds, in column order (cells, executions,
-  // resources). An empty pane has nothing to show, so it folds itself away.
+  // resources). An empty pane has nothing to show, so it folds itself away to
+  // give its width to a pane that does -- but only while something is showing
+  // somewhere. If everything is empty there is no width to donate, so we keep
+  // the default layout rather than packing three empty strips against a void.
   const counts = $derived([feed.cells.length, feed.jobs.length, feed.resources.length]);
+  const anyContent = $derived(counts.some((n) => n > 0));
 
   // The three panes are grid tracks sized in `fr`, so they always fill the row.
   // A drag on a gutter moves weight between the two panes it sits between. Each
@@ -68,12 +72,16 @@
   );
   let panesEl: HTMLDivElement;
 
-  // The effective fold state, the one the layout reads: a pane is folded when the
-  // user collapsed it OR it is empty. An empty pane folds itself to a strip so it
-  // never claims a column for a "nothing here" message; it springs back to the
-  // user's chosen state the moment it has content. `collapsed` stays the user's
-  // own preference (toggled and persisted), so the auto-fold is purely derived.
-  const folded = $derived(collapsed.map((c, i) => c || counts[i] === 0));
+  // A pane auto-folds when it is empty *and* some other pane has content to fill
+  // the freed width. This is the part the header disables: an auto-folded strip
+  // cannot be expanded (there is nothing to show), but an empty pane in the
+  // all-empty layout stays a normal, collapsible pane.
+  const autoFolded = $derived(counts.map((n) => n === 0 && anyContent));
+
+  // The effective fold state the layout reads: the user's own collapse choice OR
+  // an auto-fold. `collapsed` stays the user's preference (toggled and persisted),
+  // so the auto-fold is purely derived and reverts the instant content arrives.
+  const folded = $derived(collapsed.map((c, i) => c || autoFolded[i]));
 
   // A folded pane is a fixed strip; an open one takes its fr share. A gutter
   // is only a live drag handle between two open panes; beside a folded pane
@@ -174,8 +182,8 @@
     class="sec"
     type="button"
     aria-expanded={!folded[index]}
-    disabled={count === 0}
-    title={count === 0 ? `${label} (empty)` : folded[index] ? `Show ${label}` : `Hide ${label}`}
+    disabled={autoFolded[index]}
+    title={autoFolded[index] ? `${label} (empty)` : folded[index] ? `Show ${label}` : `Hide ${label}`}
     onclick={() => toggle(index)}
   >
     <span class="caret" aria-hidden="true">{folded[index] ? '▸' : '▾'}</span>
@@ -208,9 +216,13 @@
     {@render head(0, 'cells', feed.cells.length)}
     {#if !folded[0]}
       <div class="pane-body">
-        {#each feed.cells as cell (cell.id)}
-          <CellCard {cell} />
-        {/each}
+        {#if feed.cells.length === 0}
+          <div class="empty">the agent has not pinned any results yet</div>
+        {:else}
+          {#each feed.cells as cell (cell.id)}
+            <CellCard {cell} />
+          {/each}
+        {/if}
       </div>
     {/if}
   </section>
@@ -232,9 +244,13 @@
     {@render head(1, 'executions', feed.jobs.length)}
     {#if !folded[1]}
       <div class="pane-body" bind:this={execBody} onscroll={trackExec}>
-        {#each ordered as job (job.id)}
-          <JobCard {job} latest={job.id === latestId} />
-        {/each}
+        {#if ordered.length === 0}
+          <div class="empty">no executions yet</div>
+        {:else}
+          {#each ordered as job (job.id)}
+            <JobCard {job} latest={job.id === latestId} />
+          {/each}
+        {/if}
       </div>
     {/if}
   </section>
@@ -255,9 +271,13 @@
     {@render head(2, 'resources', feed.resources.length)}
     {#if !folded[2]}
       <div class="pane-body">
-        {#each feed.resources as resource (resource.id)}
-          <ResourceCard {resource} />
-        {/each}
+        {#if feed.resources.length === 0}
+          <div class="empty">no live resources</div>
+        {:else}
+          {#each feed.resources as resource (resource.id)}
+            <ResourceCard {resource} />
+          {/each}
+        {/if}
       </div>
     {/if}
   </section>
@@ -455,6 +475,13 @@
   }
   .pane.collapsed .caret {
     writing-mode: horizontal-tb;
+  }
+
+  .empty {
+    padding: 2px 0;
+    color: var(--faint);
+    font-size: 12px;
+    font-style: italic;
   }
 
   /* Stack the columns on a narrow screen; the page scrolls and each pane sizes
