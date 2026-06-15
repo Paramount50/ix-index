@@ -85,7 +85,7 @@ in
     packages = mkOption {
       type = types.listOf types.package;
       default = [ ];
-      example = lib.literalExpression "[ pkgs.gh pkgs.jaq ]";
+      example = lib.literalExpression "[ pkgs.gh pkgs.jq ]";
       description = ''
         Extra packages on each job's PATH, on top of the git, Nix, and Cachix
         tooling the module always provides.

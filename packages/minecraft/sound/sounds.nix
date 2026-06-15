@@ -15,7 +15,7 @@
   fetchurl,
   cacert,
   curl,
-  jaq,
+  jq,
 }:
 let
   lock = lib.importJSON ./sounds/lock.json;
@@ -39,7 +39,7 @@ stdenvNoCC.mkDerivation {
   strictDeps = true;
   nativeBuildInputs = [
     curl
-    jaq
+    jq
   ];
 
   SSL_CERT_FILE = "${cacert}/etc/ssl/certs/ca-bundle.crt";
@@ -56,7 +56,7 @@ stdenvNoCC.mkDerivation {
     runHook preBuild
 
     list="$TMPDIR/sounds.tsv"
-    jaq -r --arg ex ${lib.escapeShellArg excludeRegex} '
+    jq -r --arg ex ${lib.escapeShellArg excludeRegex} '
       .objects
       | to_entries[]
       | select((.key | startswith("minecraft/sounds/")) and (.key | endswith(".ogg")))

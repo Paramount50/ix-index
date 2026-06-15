@@ -72,7 +72,7 @@ in
     pkgs.gnused
     pkgs.gnutar
     pkgs.gzip
-    pkgs.jaq
+    pkgs.jq
     ix.packages.mcp
     pkgs.nodejs_24
     pkgs.openssh

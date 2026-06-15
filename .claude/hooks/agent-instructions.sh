@@ -29,12 +29,12 @@ root=${CLAUDE_PROJECT_DIR:-}
 # for Claude Code, `codex-md` (AGENTS.md) for Codex.
 package=${1:-claude-md}
 
-# jaq builds the JSON envelope and safely escapes the document. Prefer one on
+# jq builds the JSON envelope and safely escapes the document. Prefer one on
 # PATH; fall back to nixpkgs so the hook works before direnv loads the devshell.
-if command -v jaq >/dev/null 2>&1; then
-  jaq() { command jaq "$@"; }
+if command -v jq >/dev/null 2>&1; then
+  jq() { command jq "$@"; }
 else
-  jaq() { nix run nixpkgs#jaq -- "$@"; }
+  jq() { nix run nixpkgs#jq -- "$@"; }
 fi
 
 doc=$(nix build --no-link --print-out-paths "$root#$package")
@@ -77,12 +77,12 @@ fi
 # Codex: emit the document as one value, no reloadSkills field its parser might
 # reject.
 if [ "$package" = codex-md ]; then
-  jaq -n --rawfile additionalContext "$doc" \
+  jq -n --rawfile additionalContext "$doc" \
     '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $additionalContext}}'
   exit 0
 fi
 
 # Claude Code: emit the core plus reloadSkills so the freshly materialized
 # .claude/skills is picked up this session.
-jaq -n --rawfile additionalContext "$doc" \
+jq -n --rawfile additionalContext "$doc" \
   '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $additionalContext, reloadSkills: true}}'

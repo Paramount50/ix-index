@@ -79,7 +79,7 @@ payloads directly into their log messages. These lines can be very long
 `output_text` values. When searching, be aware that keyword matches may hit
 these serialized dumps rather than meaningful log messages.
 
-## Analyzing logs with jaq
+## Analyzing logs with jq
 
 All examples below assume the log path is in `$LOG`:
 
@@ -88,7 +88,7 @@ LOG="/path/to/clean.json"
 ```
 
 **Null-safe string matching:** Many event fields are optional and may be `null`,
-including `source.name`. Use jaq's `//` (coalesce) operator before string
+including `source.name`. Use jq's `//` (coalesce) operator before string
 functions like `test()` or `startswith()` to avoid errors:
 `.output_text // "" | test("pattern")`, `(.source.name // "") | startswith("node")`.
 
@@ -100,20 +100,20 @@ These three queries orient you quickly when opening a new log.
 combinations to see what is in the log:
 
 ```bash
-jaq '[.[] | {name: .source.name, container: .source.container}] | unique' "$LOG"
+jq '[.[] | {name: .source.name, container: .source.container}] | unique' "$LOG"
 ```
 
 **2. Find failed commands** — find test commands that finished with non-zero
 exit:
 
 ```bash
-jaq '[.[] | select(.command_return_code != null and .command_return_code != "0") | {vtime_seconds, command, command_return_code}]' "$LOG"
+jq '[.[] | select(.command_return_code != null and .command_return_code != "0") | {vtime_seconds, command, command_return_code}]' "$LOG"
 ```
 
 **3. Search for errors in application logs**:
 
 ```bash
-jaq '[.[] | select(.output_text // "" | test("error|panic|fatal|crash"; "i")) | {vtime_seconds, source: .source.name, text: .output_text[:200]}]' "$LOG"
+jq '[.[] | select(.output_text // "" | test("error|panic|fatal|crash"; "i")) | {vtime_seconds, source: .source.name, text: .output_text[:200]}]' "$LOG"
 ```
 
 ### Filtering events
@@ -121,67 +121,67 @@ jaq '[.[] | select(.output_text // "" | test("error|panic|fatal|crash"; "i")) | 
 Filter by source name:
 
 ```bash
-jaq '[.[] | select(.source.name == "fault_injector")]' "$LOG"
+jq '[.[] | select(.source.name == "fault_injector")]' "$LOG"
 ```
 
 Filter by stream (application stderr only):
 
 ```bash
-jaq '[.[] | select(.source.stream == "error")]' "$LOG"
+jq '[.[] | select(.source.stream == "error")]' "$LOG"
 ```
 
 Filter fault events by fault name:
 
 ```bash
-jaq '[.[] | select(.fault.name == "partition")]' "$LOG"
+jq '[.[] | select(.fault.name == "partition")]' "$LOG"
 ```
 
 Filter by fault type:
 
 ```bash
-jaq '[.[] | select(.fault.type == "network")]' "$LOG"
+jq '[.[] | select(.fault.type == "network")]' "$LOG"
 ```
 
 Search output_text for a keyword (case-insensitive):
 
 ```bash
-jaq '[.[] | select(.output_text // "" | test("error"; "i"))]' "$LOG"
+jq '[.[] | select(.output_text // "" | test("error"; "i"))]' "$LOG"
 ```
 
 Container lifecycle events:
 
 ```bash
-jaq '[.[] | select(.event == "die")]' "$LOG"
+jq '[.[] | select(.event == "die")]' "$LOG"
 ```
 
 Find failed test-template commands (non-zero exit code):
 
 ```bash
-jaq '[.[] | select(.command_return_code != null and .command_return_code != "0")]' "$LOG"
+jq '[.[] | select(.command_return_code != null and .command_return_code != "0")]' "$LOG"
 ```
 
 Find all test command completions:
 
 ```bash
-jaq '[.[] | select(.command_return_code != null)]' "$LOG"
+jq '[.[] | select(.command_return_code != null)]' "$LOG"
 ```
 
 Find all SDK assertion events:
 
 ```bash
-jaq '[.[] | select(.antithesis_assert != null)]' "$LOG"
+jq '[.[] | select(.antithesis_assert != null)]' "$LOG"
 ```
 
 Find all assertion events for a specific property:
 
 ```bash
-jaq '[.[] | select(.antithesis_assert.id == "property name here")]' "$LOG"
+jq '[.[] | select(.antithesis_assert.id == "property name here")]' "$LOG"
 ```
 
 Combine filters — fault partitions affecting a specific container:
 
 ```bash
-jaq '[.[] | select(.fault.name == "partition" and (.fault.affected_nodes | index("mycontainer") or index("ALL")))]' "$LOG"
+jq '[.[] | select(.fault.name == "partition" and (.fault.affected_nodes | index("mycontainer") or index("ALL")))]' "$LOG"
 ```
 
 ### Filtering by virtual time
@@ -189,13 +189,13 @@ jaq '[.[] | select(.fault.name == "partition" and (.fault.affected_nodes | index
 Filter events within a time range (in seconds):
 
 ```bash
-jaq '[.[] | select(.vtime_seconds >= 100 and .vtime_seconds <= 110)]' "$LOG"
+jq '[.[] | select(.vtime_seconds >= 100 and .vtime_seconds <= 110)]' "$LOG"
 ```
 
 Events after a specific time:
 
 ```bash
-jaq '[.[] | select(.vtime_seconds >= 85.5)]' "$LOG"
+jq '[.[] | select(.vtime_seconds >= 85.5)]' "$LOG"
 ```
 
 ## Interpreting logs
@@ -303,25 +303,25 @@ field is a dictionary tracking currently active fault windows. The schema:
 To find events that occurred during a network partition:
 
 ```bash
-jaq '[.[] | select(.active_faults.network_partition != null)]' "$LOG"
+jq '[.[] | select(.active_faults.network_partition != null)]' "$LOG"
 ```
 
 To find events during any node fault:
 
 ```bash
-jaq '[.[] | select(.active_faults | keys[] | startswith("node_"))]' "$LOG"
+jq '[.[] | select(.active_faults | keys[] | startswith("node_"))]' "$LOG"
 ```
 
 To find events that happened during any ongoing fault:
 
 ```bash
-jaq '[.[] | select(.active_faults != {})]' "$LOG"
+jq '[.[] | select(.active_faults != {})]' "$LOG"
 ```
 
 To find faults within a region of vtime:
 
 ```bash
-jaq '[.[] | select(.fault != null and .vtime_seconds >= 85.0 and .vtime_seconds <= 86.0)]' "$LOG"
+jq '[.[] | select(.fault != null and .vtime_seconds >= 85.0 and .vtime_seconds <= 86.0)]' "$LOG"
 ```
 
 ### Virtual time vs application timestamps
