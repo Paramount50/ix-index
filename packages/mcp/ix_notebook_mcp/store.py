@@ -78,6 +78,12 @@ def connect(path: str | Path) -> sqlite3.Connection:
     """Open (creating if needed) the store. WAL so a reader never blocks the
     writer and sees committed in-flight rows; ``busy_timeout`` so the rare
     writer/writer overlap waits rather than raising ``database is locked``."""
+    # The store is shared across processes (kernel writes, dashboard reads), so a
+    # real file path is required. Guard None explicitly: sqlite3.connect(str(None))
+    # would otherwise silently create a database in a file literally named "None"
+    # in the cwd instead of failing. See indexable-inc/index#1100.
+    if path is None:
+        raise ValueError("store path is required (got None)")
     conn = sqlite3.connect(str(path), timeout=5.0, isolation_level=None)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=5000")
