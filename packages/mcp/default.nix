@@ -559,6 +559,25 @@ let
         cp -r ${linearPythonSource}/linear/. "$site/"
       ''
   );
+  # `nox_autotriage`: nox-aware adapter that converts a nox conformance report
+  # into linear.triage Findings and files them to Linear.  Depends on
+  # linearModule (for linear.triage).  Entry point: python -m nox_autotriage.
+  noxAutotriagePythonSource = builtins.path {
+    name = "ix-mcp-nox-autotriage-python-source";
+    path = ./src/nox_autotriage;
+  };
+  noxAutotriageModule = pkgs.python3.pkgs.toPythonModule (
+    pkgs.runCommand "ix-mcp-nox-autotriage-python-module"
+      {
+        strictDeps = true;
+        meta.description = "nox conformance -> Linear triage adapter bundled into the ix-mcp interpreter";
+      }
+      ''
+        site="$out/${pkgs.python3.sitePackages}/nox_autotriage"
+        mkdir -p "$site"
+        cp -r ${noxAutotriagePythonSource}/nox_autotriage/. "$site/"
+      ''
+  );
   # `mcp_client`: connect to any Model Context Protocol server and call its tools
   # from the kernel. Pure Python over the already-bundled `mcp` SDK (no cdylib),
   # so it wraps the SDK's awkward `async with` transport/session context managers
@@ -867,6 +886,7 @@ let
       slackModule
       tasksModule
       linearModule
+      noxAutotriageModule
       mcpClientModule
     ]
     ++ darwinExtraPackages ps;
@@ -4120,6 +4140,7 @@ let
   imessageBundled = importTest "imessage" "import imessage; print('imessage-ok', all(callable(getattr(imessage, n)) for n in ('messages', 'chats', 'contacts', 'send')))";
   xBundled = importTest "x" "import x; print('x-ok', callable(x.posts), x.__version__)";
   linearBundled = importTest "linear" "import linear; print('linear-ok', all(callable(getattr(linear, n)) for n in ('issue', 'issue_update', 'issue_create', 'issue_search', 'comment_create', 'project_create')), linear.__version__)";
+  noxAutotriageBundled = importTest "nox-autotriage" "import nox_autotriage; print('nox-autotriage-ok', callable(nox_autotriage.findings_from_conformance))";
   linearTriageTestPython = pkgs.python3.withPackages (
     ps:
     [
@@ -4144,6 +4165,43 @@ let
         cp ${linearTriageTestSource} "$TMPDIR/test_linear_triage.py"
         ${lib.getExe linearTriageTestPython} -m pytest "$TMPDIR/test_linear_triage.py" -q -p no:cacheprovider >stdout 2>stderr || {
           echo "ix-mcp linear triage tests failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        cat stdout
+        mkdir -p "$out"
+      '';
+  noxAutotriageTestPython = pkgs.python3.withPackages (
+    ps:
+    [
+      ps.pytest
+      ps.httpx
+      linearModule
+      noxAutotriageModule
+    ]
+  );
+  noxAutotriageTestSource = builtins.path {
+    name = "ix-mcp-nox-autotriage-test";
+    path = ./tests/test_nox_autotriage.py;
+  };
+  noxAutotriageTestFixtures = builtins.path {
+    name = "ix-mcp-nox-autotriage-test-fixtures";
+    path = ./tests/fixtures;
+  };
+  noxAutotriageTests =
+    pkgs.runCommand "ix-mcp-nox-autotriage-tests"
+      {
+        nativeBuildInputs = [ noxAutotriageTestPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        mkdir -p "$TMPDIR/fixtures"
+        cp ${noxAutotriageTestSource} "$TMPDIR/test_nox_autotriage.py"
+        cp -r ${noxAutotriageTestFixtures}/. "$TMPDIR/fixtures/"
+        ${lib.getExe noxAutotriageTestPython} -m pytest "$TMPDIR/test_nox_autotriage.py" -q -p no:cacheprovider >stdout 2>stderr || {
+          echo "ix-mcp nox-autotriage tests failed:" >&2
           cat stdout stderr >&2
           exit 1
         }
@@ -4192,6 +4250,8 @@ package.overrideAttrs (old: {
         xBundled
         linearBundled
         linearTriageTests
+        noxAutotriageBundled
+        noxAutotriageTests
         ;
     }
     // lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
