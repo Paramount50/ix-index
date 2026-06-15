@@ -21,6 +21,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dashboard_core::{Pane, ProducerSnapshot, View};
+use tao::dpi::{LogicalPosition, LogicalSize};
 use tao::event_loop::EventLoopWindowTarget;
 use tao::window::{Window, WindowId};
 use wry::{WebView, WebViewBuilder};
@@ -76,6 +77,10 @@ pub struct WindowManager {
     /// resource actually vanishes or its producer disconnects, so a genuine
     /// re-registration opens a fresh window.
     dismissed: HashSet<PaneKey>,
+    /// How many windows have been opened, used to cascade each new one so they
+    /// do not stack exactly on top of each other on a plain desktop. A tiling
+    /// WM ignores the position hint and lays them out itself.
+    opened: u32,
 }
 
 impl WindowManager {
@@ -172,10 +177,16 @@ impl WindowManager {
         pane: &Pane,
         html: &str,
     ) {
+        // Cascade each window so they do not perfectly overlap on a plain
+        // desktop; a tiling WM ignores the position and tiles them itself.
+        let step = f64::from(self.opened % 8) * 28.0;
+        self.opened = self.opened.wrapping_add(1);
         let window = match tao::window::WindowBuilder::new()
             .with_title(&pane.title)
             .with_decorations(false)
             .with_transparent(true)
+            .with_inner_size(LogicalSize::new(720.0, 480.0))
+            .with_position(LogicalPosition::new(96.0 + step, 96.0 + step))
             .build(target)
         {
             Ok(window) => window,
@@ -196,6 +207,11 @@ impl WindowManager {
                 return;
             }
         };
+
+        // Let WebKit render at the display's native rate (120Hz on ProMotion)
+        // rather than its default ~60fps cap.
+        #[cfg(target_os = "macos")]
+        enable_high_refresh(&webview);
 
         self.by_window.insert(id, key.clone());
         self.windows.insert(
@@ -255,6 +271,56 @@ body {
 ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ";
+
+/// Let the webview render at the display's native refresh rate (120Hz on
+/// `ProMotion`) instead of `WebKit`'s default ~60fps cap, by disabling the
+/// "Prefer Page Rendering Updates near 60fps" experimental feature.
+///
+/// That feature is not a `KVC` property (`setValue:forKey:` raises
+/// `NSUnknownKeyException`), so it goes through the private
+/// `_setEnabled:forExperimentalFeature:` API, gated by `respondsToSelector:`
+/// checks. Best-effort: on an OS without these selectors the webview is simply
+/// left at the default cap.
+#[cfg(target_os = "macos")]
+fn enable_high_refresh(webview: &WebView) {
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, Bool, NSObjectProtocol};
+    use objc2::{ClassType, msg_send, sel};
+    use objc2_foundation::NSString;
+    use objc2_web_kit::WKPreferences;
+    use wry::WebViewExtMacOS;
+
+    /// The `WebKit` experimental-feature key for the ~60fps render cap.
+    const FEATURE_KEY: &str = "PreferPageRenderingUpdatesNear60FPSEnabled";
+
+    let wk = webview.webview();
+    // SAFETY: ordinary Objective-C message sends to a live WKWebView and its
+    // preferences on the main thread; the two private selectors are each gated by
+    // a `responds_to` / `respondsToSelector:` check before use.
+    unsafe {
+        let prefs = wk.configuration().preferences();
+        let class = WKPreferences::class();
+        if !class.metaclass().responds_to(sel!(_experimentalFeatures))
+            || !prefs.respondsToSelector(sel!(_setEnabled:forExperimentalFeature:))
+        {
+            return;
+        }
+        let features: Retained<AnyObject> = msg_send![class, _experimentalFeatures];
+        let count: usize = msg_send![&*features, count];
+        for i in 0..count {
+            let feature: Retained<AnyObject> = msg_send![&*features, objectAtIndex: i];
+            let key: Retained<NSString> = msg_send![&*feature, key];
+            if key.to_string() == FEATURE_KEY {
+                let _: () = msg_send![
+                    &*prefs,
+                    _setEnabled: Bool::new(false),
+                    forExperimentalFeature: &*feature,
+                ];
+                break;
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

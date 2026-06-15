@@ -23,3 +23,10 @@ serde_json.workspace = true
 tao.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "net", "io-util", "time"] }
 wry.workspace = true
+
+# Reaching WebKit's private experimental-feature API (enable 120Hz rendering) on
+# macOS. Versions tracked to wry's own objc2 graph.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { workspace = true }
+objc2-foundation = { workspace = true }
+objc2-web-kit = { workspace = true }
