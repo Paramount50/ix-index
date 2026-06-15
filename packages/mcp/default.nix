@@ -877,6 +877,15 @@ let
   # wrapper below so launched browsers resolve without a network download.
   playwrightBrowsers = pkgs.playwright-driver.browsers;
 
+  # Headless Chromium fatally aborts the moment it needs a font but cannot load
+  # any fontconfig config: Skia's FontConfigInterface backend hits a
+  # `Not implemented` path (SkFontMgr_FontConfigInterface.cpp) and the renderer
+  # dies, surfacing to Playwright as `TargetClosedError`. The Nix build sandbox
+  # has no /etc/fonts and no fonts on disk, so the smoke tests below that launch
+  # a real (headless) browser must point fontconfig at a generated config
+  # carrying at least one real font family.
+  fontsConf = pkgs.makeFontsConf { fontDirectories = [ pkgs.dejavu_fonts ]; };
+
   # `ix-mcp` is just the pinned interpreter invoked on the bundled package's CLI.
   # Everything (the entrypoint, the one shared kernel, the dashboard) runs in this
   # one interpreter, so the bundled modules are all importable with no install step.
@@ -4073,6 +4082,7 @@ let
         # browser bundle -- the bare mcpPython has no wrapper to set this (only the
         # `ix-mcp` entrypoint does).
         export PLAYWRIGHT_BROWSERS_PATH=${lib.escapeShellArg playwrightBrowsers}
+        export FONTCONFIG_FILE=${fontsConf}
         ${lib.getExe mcpPython} ${browserVdomTestPy} >stdout 2>stderr || {
           echo "ix-mcp browser vdom smoke failed:" >&2
           cat stdout stderr >&2
@@ -4119,6 +4129,7 @@ let
         # `vdom()` launches a (headless) browser; point Playwright at the bundled
         # browser bundle (no wrapper sets it for the bare interpreter).
         export PLAYWRIGHT_BROWSERS_PATH=${lib.escapeShellArg playwrightBrowsers}
+        export FONTCONFIG_FILE=${fontsConf}
         # Copy the test into a writable dir so pytest collects it as a plain file
         # (a bare store path of a single .py is read by pytest as a directory).
         cp ${vdomPropertiesSource} "$TMPDIR/test_vdom_properties.py"

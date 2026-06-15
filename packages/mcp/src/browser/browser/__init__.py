@@ -168,7 +168,13 @@ async def _cdp_ready(endpoint: str, *, timeout: float) -> bool:
     import httpx
 
     deadline = _asyncio.get_running_loop().time() + timeout
-    async with httpx.AsyncClient() as client:
+    # verify=False: this only ever probes a local http:// CDP endpoint, so TLS
+    # never applies. A verifying client (the default) eagerly builds an SSL
+    # context at construction, loading the CA bundle named by $SSL_CERT_FILE; in
+    # a minimal sandbox like the Nix build sandbox that variable points at a path
+    # that does not exist, so construction aborts with FileNotFoundError before
+    # the probe ever runs.
+    async with httpx.AsyncClient(verify=False) as client:
         while _asyncio.get_running_loop().time() < deadline:
             try:
                 resp = await client.get(f"{endpoint}/json/version", timeout=1.0)
