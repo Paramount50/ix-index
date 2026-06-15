@@ -99,6 +99,47 @@ def _mentioned_names(code: str) -> set[str]:
     return names
 
 
+def binding_names(code: str) -> tuple[set[str], set[str]]:
+    """Split a cell's identifiers into ``(assigned, used)`` by their syntactic role.
+
+    ``assigned`` is every name the cell *binds*: a ``Store``/``Del`` ``Name`` (so
+    plain assignment, augmented assignment, ``for`` targets, ``with as``,
+    ``except as``, and the walrus all count), the bound head of each import, and
+    each ``def``/``class`` name. ``used`` is every ``Load`` ``Name`` — a reference,
+    read where the cell consumes the value.
+
+    This is the kernel's own parse (the same walk :func:`cell_bindings` does),
+    reused so a run's namespace references cost no extra runtime: attributing from
+    the cell's *source* is also the only correct attribution when many background
+    jobs mutate one shared namespace concurrently, where an after-the-fact
+    namespace diff would credit one job's writes to another. A name that only
+    appears inside a nested scope (a local in a ``def``) is conservatively
+    included; that is harmless because references are only ever shown for names
+    that are actually live top-level variables. Returns two empty sets for code
+    that does not parse."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return set(), set()
+    assigned: set[str] = set()
+    used: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                assigned.add(node.id)
+            else:
+                used.add(node.id)
+        elif isinstance(node, ast.alias):
+            assigned.add(node.asname or node.name.split(".", 1)[0])
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            assigned.add(node.name)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            # `except E as s` binds `s` as a bare string on the handler, not a
+            # Store ``Name`` node, so ``ast.walk`` would otherwise miss it.
+            assigned.add(node.name)
+    return assigned, used
+
+
 def describe(value) -> dict:
     """A compact descriptor for one live value.
 
@@ -192,6 +233,7 @@ def namespace_rows(
     max_names: int = _MAX_NAMES,
     max_depth: int = _MAX_DEPTH,
     breadth: int = _BREADTH,
+    refs: dict[str, dict] | None = None,
 ) -> list[dict]:
     """Describe values in ``ns`` as namespace-view rows.
 
@@ -207,7 +249,12 @@ def namespace_rows(
     :func:`cell_bindings`) so a session with thousands of globals cannot stall the
     kernel's event loop on a job finish. Reuses :func:`describe`, so it is bounded
     and side-effect-free; a value whose introspection raises is skipped, not
-    fatal."""
+    fatal.
+
+    ``refs`` (optional), keyed by name, attaches a variable's provenance to its
+    *top-level* row: ``assigned_in`` and ``used_in``, each a list of run ids that
+    bound or referenced the name (see :func:`binding_names`). Children never carry
+    refs — provenance is a property of a variable, not of a container's members."""
     # One shared budget for the whole call: a mutable [remaining] cell decremented
     # as child rows are emitted, so the total tree (across every top-level name) is
     # bounded regardless of how deep or wide any one branch goes.
@@ -216,6 +263,11 @@ def namespace_rows(
     for name, value in islice(ns.items(), max_names):
         row = _row(name, value, depth=0, max_depth=max_depth, breadth=breadth, budget=budget)
         if row is not None:
+            if refs is not None and (ref := refs.get(name)):
+                if ref.get("assigned_in"):
+                    row["assigned_in"] = list(ref["assigned_in"])
+                if ref.get("used_in"):
+                    row["used_in"] = list(ref["used_in"])
             rows.append(row)
     # Only the top level sorts heaviest-first; children keep natural (dict/list)
     # order so the user sees the container's own layout when they drill in.

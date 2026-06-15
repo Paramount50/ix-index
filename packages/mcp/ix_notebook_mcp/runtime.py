@@ -1298,6 +1298,9 @@ async def _runner(job: Job, ns: dict) -> None:
 def _persist_final(job: Job) -> None:
     if _store is None or _store_conn is None:
         return
+    # Record this run's name references first, so the snapshot below already shows
+    # the just-finished job among each name's assigned_in/used_in.
+    _record_refs(job)
     try:
         result_repr = None if job._result is None else _safe_repr(job._result)
         _store.finish(
@@ -1333,15 +1336,56 @@ def _cell_bindings(job: Job) -> dict:
         return {}
 
 
+# Per-name provenance for the namespace pane: which runs bound or referenced each
+# name. Accumulated across the whole session (the pane itself is rebuilt every job
+# finish, but a variable's references span every run that touched it). Each list is
+# kept most-recent-last, deduped, and capped so a name touched by hundreds of runs
+# stays bounded. Reset by install() so a fresh session starts clean.
+_MAX_REFS_PER_NAME = 25
+_name_refs: dict[str, dict[str, list[str]]] = {}
+
+
+def _push_ref(name: str, key: str, job_id: str) -> None:
+    """Append ``job_id`` under ``_name_refs[name][key]`` (``"assigned_in"`` or
+    ``"used_in"``), most-recent-last, deduped and capped to ``_MAX_REFS_PER_NAME``."""
+    entry = _name_refs.setdefault(name, {"assigned_in": [], "used_in": []})
+    lst = entry[key]
+    if job_id in lst:
+        lst.remove(job_id)
+    lst.append(job_id)
+    if len(lst) > _MAX_REFS_PER_NAME:
+        del lst[:-_MAX_REFS_PER_NAME]
+
+
+def _record_refs(job: Job) -> None:
+    """Record this run as an assigner/user of each name its source binds/references,
+    so the namespace pane can link every variable back to the runs behind it.
+    Source-based (see :func:`introspect.binding_names`): correct even when many
+    background jobs mutate one shared namespace concurrently, and free (no per-access
+    kernel hook). Best-effort: a failure here just means a name shows no
+    references."""
+    try:
+        from .introspect import binding_names
+
+        assigned, used = binding_names(job.code)
+        for name in assigned:
+            _push_ref(name, "assigned_in", job.id)
+        for name in used:
+            _push_ref(name, "used_in", job.id)
+    except Exception:
+        pass
+
+
 def _namespace_snapshot(job: Job) -> list:
     """Every user-bound name in the job's namespace, described for the dashboard's
     namespace pane. Stored with each finished run; the newest is the live
-    namespace. Best-effort: a failure here just means no namespace pane."""
+    namespace. Each row also carries the runs that assigned/used the name (see
+    :data:`_name_refs`). Best-effort: a failure here just means no namespace pane."""
     ns = job._ns if job._ns is not None else _shared_ns()
     try:
         from .introspect import namespace_rows
 
-        return namespace_rows(_namespace_candidates(ns))
+        return namespace_rows(_namespace_candidates(ns), refs=_name_refs)
     except Exception:
         return []
 
@@ -2799,6 +2843,9 @@ def install(user_ns: dict | None = None) -> None:
     # names bound after this line (see _snapshot_candidates).
     global _baseline_names
     _baseline_names = frozenset(target)
+    # A fresh session starts with no recorded references (the namespace is empty of
+    # user names; refs accumulate as runs touch them).
+    _name_refs.clear()
 
     try:
         asyncio.get_event_loop().create_task(_flusher())

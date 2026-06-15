@@ -275,3 +275,90 @@ def test_global_budget_bounds_total_rows() -> None:
     # over-breadth container) add at most as many again. Far below the exponential
     # blowup the budget prevents.
     assert total <= 2 * introspect._MAX_TOTAL_CHILDREN + 100
+
+
+# --------------------------------------------------------------------------- #
+# binding_names: the assigned/used split that powers namespace references
+# --------------------------------------------------------------------------- #
+
+
+def test_binding_names_splits_assignments_from_references() -> None:
+    assigned, used = introspect.binding_names("x = a + b")
+    assert assigned == {"x"}
+    # Both operands are referenced; the target is not "used".
+    assert used == {"a", "b"}
+
+
+def test_binding_names_counts_every_binding_form_as_assigned() -> None:
+    # Plain/augmented assignment, for-target, with-as, except-as, walrus, import,
+    # def, and class all bind a name and must land in `assigned`.
+    code = (
+        "import os\n"
+        "import a.b as c\n"
+        "from x import y\n"
+        "p = 1\n"
+        "p += 1\n"
+        "for q in seq: pass\n"
+        "with ctx() as r: pass\n"
+        "try:\n    pass\nexcept E as s:\n    pass\n"
+        "if (w := compute()): pass\n"
+        "def fn(): pass\n"
+        "class K: pass\n"
+    )
+    assigned, _ = introspect.binding_names(code)
+    assert {"os", "c", "y", "p", "q", "r", "s", "w", "fn", "K"} <= assigned
+
+
+def test_binding_names_records_loads_as_used() -> None:
+    _, used = introspect.binding_names("print(value)\nresult = transform(value)")
+    assert {"print", "value", "transform"} <= used
+    # A pure assignment target is not a use.
+    assert "result" not in used
+
+
+def test_binding_names_unparseable_code_is_empty() -> None:
+    assert introspect.binding_names("def (((") == (set(), set())
+
+
+# --------------------------------------------------------------------------- #
+# namespace_rows refs: provenance attaches to top-level rows only
+# --------------------------------------------------------------------------- #
+
+
+def test_refs_attach_to_top_level_rows() -> None:
+    refs = {"x": {"assigned_in": ["j1", "j2"], "used_in": ["j3"]}}
+    rows = introspect.namespace_rows({"x": 123}, refs=refs)
+    row = rows[0]
+    assert row["assigned_in"] == ["j1", "j2"]
+    assert row["used_in"] == ["j3"]
+    # The row carries copies, not the caller's lists (mutating the row must not
+    # corrupt the shared refs registry).
+    row["assigned_in"].append("oops")
+    assert refs["x"]["assigned_in"] == ["j1", "j2"]
+
+
+def test_refs_are_omitted_when_empty_or_absent() -> None:
+    refs = {"x": {"assigned_in": ["j1"], "used_in": []}}
+    rows = introspect.namespace_rows({"x": 1, "y": 2}, refs=refs)
+    by_name = {r["name"]: r for r in rows}
+    # Empty list -> key omitted (no noise rows for the UI to special-case).
+    assert "used_in" not in by_name["x"]
+    assert by_name["x"]["assigned_in"] == ["j1"]
+    # A name with no refs entry carries neither key.
+    assert "assigned_in" not in by_name["y"]
+    assert "used_in" not in by_name["y"]
+
+
+def test_refs_do_not_leak_onto_children() -> None:
+    refs = {"d": {"assigned_in": ["j1"], "used_in": ["j2"]}}
+    row = introspect.namespace_rows({"d": {"k": 1}}, refs=refs)[0]
+    assert row["assigned_in"] == ["j1"]
+    # The container's member is not the variable, so it carries no provenance.
+    assert "assigned_in" not in row["children"][0]
+    assert "used_in" not in row["children"][0]
+
+
+def test_no_refs_argument_leaves_rows_unchanged() -> None:
+    row = _only_row(1)
+    assert "assigned_in" not in row
+    assert "used_in" not in row

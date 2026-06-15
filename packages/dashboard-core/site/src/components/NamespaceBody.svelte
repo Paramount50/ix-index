@@ -28,7 +28,7 @@
       <div class="ns-group">
         <div class="ns-grouphead">{group.name}<span class="ns-groupn">{group.rows.length}</span></div>
         {#each group.rows as row, i (row.name + ':' + i)}
-          <NsRow {row} />
+          <NsRow {row} scope={pane.scope} />
         {/each}
       </div>
     {/each}

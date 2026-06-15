@@ -13,6 +13,12 @@ export interface NsRow {
   size: number;
   shape: string;
   children?: NsRow[];
+  // Run ids that bound (`assigned_in`) or referenced (`used_in`) this variable,
+  // most-recent-last, present only on top-level rows (provenance is a property of a
+  // variable, not of a container's members). Each id is an exec pane's id, so the
+  // view can link a name back to the runs behind it.
+  assigned_in?: string[];
+  used_in?: string[];
 }
 
 // Human byte size; empty for the sizeless (modules, functions report 0).
