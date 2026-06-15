@@ -3827,6 +3827,94 @@ let
         else:
             raise SystemExit(f"shot({_bad}) should raise ValueError")
 
+    # --- live dashboard resource -------------------------------------------
+    # A connected browser publishes itself as a live resource: a throttled
+    # screenshot of the front tab. No real Chromium needed -- fake the context.
+    EP = "http://127.0.0.1:9222"
+
+    class _FakePage:
+        url = "https://example.com/"
+
+        async def title(self):
+            return "Example"
+
+        async def screenshot(self, **_kw):
+            return b"NOT-A-REAL-PNG"  # _encode_shot tolerates non-images
+
+    class _FakeCtx:
+        def __init__(self, pages):
+            self.pages = pages
+
+    class _FakeBrowser:
+        def __init__(self):
+            self.connected = True
+
+        def is_connected(self):
+            return self.connected
+
+    _orig_context = browser.context
+    _pages = [_FakePage()]
+
+    async def _fake_context(endpoint=EP):
+        return _FakeCtx(_pages)
+
+    browser.context = _fake_context
+
+    # A page renders to an inline <img> with its title/url.
+    browser._resource_html_cache.clear()
+    _h = _aio.run(browser._resource_html(EP))
+    assert "<img" in _h and "example.com" in _h, _h[:200]
+
+    # Throttled: a call within the TTL reuses the cache even though the tab list
+    # changed underneath it (the screenshot is the expensive part).
+    _pages.clear()
+    assert _aio.run(browser._resource_html(EP)) == _h
+
+    # No open tabs: a passive placeholder, and never creates a tab.
+    browser._resource_html_cache.clear()
+    assert "no open tabs" in _aio.run(browser._resource_html(EP))
+
+    # Render never raises: a failing capture becomes an error card.
+    async def _boom(endpoint=EP):
+        raise RuntimeError("kaboom")
+
+    browser.context = _boom
+    browser._resource_html_cache.clear()
+    _e = _aio.run(browser._resource_html(EP))
+    assert "render failed" in _e and "kaboom" in _e, _e[:200]
+
+    # connect() publishes the resource on a fresh connection; mimic that here.
+    browser.context = _fake_context
+    _pages[:] = [_FakePage()]
+    runtime.resources.clear()
+    browser._browsers.clear()
+    _fb = _FakeBrowser()
+    browser._browsers[EP] = _fb
+    _res = browser._register_resource(EP)
+    _rid = "browser:" + EP
+    assert _res is not None and _rid in runtime.resources, list(runtime.resources)
+    assert _res.kind == "browser" and _res.title == "browser · " + EP, (_res.kind, _res.title)
+    assert _res.alive() is True
+    browser._resource_html_cache.clear()
+    assert "<img" in _aio.run(_res.render_html())
+
+    # Keyed by endpoint: a reconnect refreshes the one card, never stacks.
+    browser._register_resource(EP)
+    assert sum(1 for k in runtime.resources if k == _rid) == 1
+
+    # alive() drops the card once the connection is gone (the sweep then closes it).
+    _fb.connected = False
+    assert _res.alive() is False
+    _fb.connected = True
+    browser._browsers.pop(EP)
+    assert _res.alive() is False
+
+    # Leave the module clean for any later assertions.
+    browser.context = _orig_context
+    browser._browsers.clear()
+    runtime.resources.clear()
+    browser._resource_html_cache.clear()
+
     print("browser-ok", browser.__version__)
   '';
   browserSmoke =
