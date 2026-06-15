@@ -209,7 +209,7 @@ class Agent:
         # Clear any onboarding gates, re-sweeping until none match (one gate can
         # reveal the next), bounded so a misfiring pattern cannot spin forever.
         for _ in range(len(self._gates) + 2):
-            txt = (await self._tui.snapshot(styled=False)).text
+            txt = await self._tui.text()
             gate = next((g for g in self._gates if _gate_matches(g.pattern, txt)), None)
             if gate is None:
                 break
@@ -309,7 +309,7 @@ class Agent:
         last: str | None = None
         stable_since: float | None = None
         while True:
-            txt = (await self._tui.snapshot(styled=False)).text
+            txt = await self._tui.text()
             digest = hashlib.md5(txt.encode()).hexdigest()
             busy = bool(self._busy) and self._busy.lower() in txt.lower()
             if not busy and digest == last:
@@ -386,7 +386,7 @@ class Agent:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while loop.time() < deadline:
-            txt = (await self._tui.snapshot(styled=False)).text
+            txt = await self._tui.text()
             if self._busy and self._busy.lower() in txt.lower():
                 return True
             if not self._busy and hashlib.md5(txt.encode()).hexdigest() != before:
@@ -395,7 +395,7 @@ class Agent:
         return False
 
     async def _screen_hash(self) -> str:
-        txt = (await self._tui.snapshot(styled=False)).text
+        txt = await self._tui.text()
         return hashlib.md5(txt.encode()).hexdigest()
 
     def __repr__(self) -> str:
