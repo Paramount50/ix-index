@@ -265,8 +265,9 @@ fn escape_text(text: &str) -> String {
         .replace('>', "&gt;")
 }
 
-/// Ghostty-flavored shell styling: a dark background, system monospace, comfy
-/// padding, and a themed scrollbar. Catppuccin-ish tones to match the dashboard.
+/// Ghostty-flavored shell styling: a dark background, system monospace, and a
+/// themed scrollbar. Catppuccin-ish tones to match the dashboard. The root holds
+/// the resource content full-bleed (no padding) so a window is just the content.
 const STYLE: &str = "\
 :root { color-scheme: dark; }
 html, body { margin: 0; height: 100%; }
@@ -275,7 +276,7 @@ body {
   color: #cdd6f4;
   font: 14px/1.5 ui-monospace, 'SF Mono', Menlo, monospace;
 }
-#ix-root { padding: 14px; }
+#ix-root { padding: 0; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: #45475a; border-radius: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

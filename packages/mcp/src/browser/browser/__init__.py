@@ -319,10 +319,21 @@ async def _resource_html(endpoint: str = DEFAULT_ENDPOINT) -> str:
             data, mime = _encode_shot(png, max_dim=_RESOURCE_MAX_DIM, fmt="jpeg", quality=55)
             note = f"{await pg.title()} \u2014 {pg.url}"
             data_uri = f"data:{mime};base64," + _base64.b64encode(data).decode("ascii")
+            # Full-bleed screenshot with the title/url as a hover-reveal overlay
+            # (hidden until the pointer is over the card), so a windowed resource is
+            # just the page until you ask for its identity. A scoped <style> drives
+            # the :hover, which inline styles cannot; it renders the same in the
+            # dashboard sidebar and in an ix-windows native window.
+            esc = _html.escape(note)
             html = (
-                '<div style="font:12px ui-monospace,monospace">'
-                f'<div style="opacity:.7;margin-bottom:4px">{_html.escape(note)}</div>'
-                f'<img alt="{_html.escape(note)}" src="{data_uri}" style="max-width:100%" /></div>'
+                "<style>.ixb{position:relative;line-height:0}"
+                ".ixb .ixbar{position:absolute;inset:0 0 auto 0;padding:4px 8px;"
+                "background:linear-gradient(rgba(0,0,0,.78),transparent);color:#fff;"
+                "font:12px ui-monospace,monospace;opacity:0;transition:opacity .12s;"
+                "pointer-events:none}.ixb:hover .ixbar{opacity:1}</style>"
+                f'<div class="ixb"><img alt="{esc}" src="{data_uri}" '
+                'style="display:block;width:100%" />'
+                f'<div class="ixbar">{esc}</div></div>'
             )
     except Exception as exc:
         html = (
