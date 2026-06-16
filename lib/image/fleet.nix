@@ -37,6 +37,14 @@ let
 
   moduleList = spec: toList (spec.modules or spec.module or [ ]);
 
+  # Default `switch.sourceInstallable`. The remote path goes through `ix up`,
+  # which rewrites a bare `.#<node>` to `nixosConfigurations.<node>...` and (for
+  # the native multi-VM switch) derives the VM name from that attr. The local
+  # path runs a plain `nix build <installable>` with no such rewrite, so it must
+  # name the `.#<node>-system` package alias that resolves to the toplevel.
+  defaultSourceInstallable =
+    nodeName: buildOn: if buildOn == "local" then ".#${nodeName}-system" else ".#${nodeName}";
+
   deploymentDefaults = {
     bootstrapImage = "registry.ix.dev/${bootstrapImage.name}:${bootstrapImage.tag}";
     region = "us-west-1";
@@ -273,7 +281,11 @@ let
         target = switchTarget;
         buildOn = switchBuildOn;
         buildVm = deploy.switch.buildVm or null;
-        sourceInstallable = deploy.switch.sourceInstallable or ".#${name}-system";
+        # Remote switches default to the bare `.#<node>` so the native multi-VM
+        # `ix up` can derive each VM name from the attr; local switches keep the
+        # `.#<node>-system` package alias (see `defaultSourceInstallable`).
+        sourceInstallable =
+          deploy.switch.sourceInstallable or (defaultSourceInstallable name switchBuildOn);
         overrideInputs = deploy.switch.overrideInputs or { };
       };
       inherit (deploy) bootstrapImage;
@@ -311,9 +323,14 @@ let
 
   # Rename a fleet's external identities without re-evaluating any NixOS
   # closure: only plan data (node names, `dependsOn`, east-west `groups`, the
-  # registry `destination` the replacement image is pushed to) carries the
-  # prefix, while `system`/`switch` targets and the OCI image `source`/
-  # `sourceDrv` keep pointing at the shared base closures. The health-check
+  # registry `destination` the replacement image is pushed to, and the default
+  # `switch.sourceInstallable` attr) carries the prefix, while `system`/`switch`
+  # `target` and the OCI image `source`/`sourceDrv` keep pointing at the shared
+  # base closures. The prefixed `sourceInstallable` (`.#${prefix}${name}`) still
+  # resolves to the shared base closure because `nixosConfigurations.<external>`
+  # is a thin `{ config }` wrapper over the once-evaluated `nodeConfigs.<name>`
+  # (see `resultFor`), so the native multi-VM `ix up` can name the prefixed VM
+  # without a second eval. The health-check
   # runner relies on this so the 10 example fleets are evaluated once per
   # `nix flake check`/`.#packages` eval instead of twice (ENG-2411). The
   # guest-side identity (`networking.hostName`, `ix.image.name`) therefore
@@ -339,6 +356,16 @@ let
             replacementImage = node.replacementImage // {
               destination = prefixName node.replacementImage.destination;
             };
+            # Re-derive only the default installable to the prefixed attr, keyed
+            # on whether the user set `switch.sourceInstallable` in the spec (not
+            # on the rendered string, which an explicit `.#<node>` override would
+            # match). An explicit installable points at a real flake attr and is
+            # left untouched.
+            switch =
+              node.switch
+              // lib.optionalAttrs (!((checkedNodeSpecs.${name}.deployment.switch or { }) ? sourceInstallable)) {
+                sourceInstallable = defaultSourceInstallable (prefixName name) node.switch.buildOn;
+              };
           }
         )
       ) planValue.nodes;
@@ -405,6 +432,14 @@ let
       systemPackages = lib.mapAttrs' (
         name: config: lib.nameValuePair "${externalName name}-system" config.system.build.toplevel
       ) nodeConfigs;
+      # Each node's NixOS system under its bare external name, so `ix up .#<node>`
+      # (and the native multi-VM `ix up .#a .#b --build-vm <builder>`) resolves
+      # `nixosConfigurations.<node>.config.system.build.toplevel`. `nodeConfigs`
+      # is already the evaluated `config` (`evalImageConfig` returns `.config`),
+      # so the `{ config }` wrapper reuses that closure with no second eval; this
+      # is the same closure `systemPackages.<node>-system` points at. Merge this
+      # into a flake's top-level `nixosConfigurations`.
+      nixosConfigurations = externalKeyed (lib.mapAttrs (_name: config: { inherit config; }) nodeConfigs);
       # Prepend `newPrefix` to every external name; the underlying NixOS
       # closures stay shared with the unprefixed fleet (see
       # `prefixedPlanValue` above).
