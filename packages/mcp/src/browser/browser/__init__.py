@@ -307,7 +307,15 @@ async def _resource_html(endpoint: str = DEFAULT_ENDPOINT) -> str:
             )
         else:
             pg = pages[-1]
-            png = await pg.screenshot(scale="css")
+            # scale="device" (native pixels), NOT "css": capturing at CSS scale
+            # makes Playwright push an Emulation.setDeviceMetricsOverride (to
+            # divide by the display's devicePixelRatio) for each shot and clear
+            # it after, and on a HiDPI/Retina screen that override+clear forces a
+            # full relayout -- a visible flicker of the live window every tick of
+            # this passive ~1.5s capture loop. Device scale needs no override, so
+            # no flicker; the result is downscaled to _RESOURCE_MAX_DIM below
+            # anyway, so the larger raw capture costs nothing in the card.
+            png = await pg.screenshot(scale="device")
             data, mime = _encode_shot(png, max_dim=_RESOURCE_MAX_DIM, fmt="jpeg", quality=55)
             note = f"{await pg.title()} \u2014 {pg.url}"
             data_uri = f"data:{mime};base64," + _base64.b64encode(data).decode("ascii")

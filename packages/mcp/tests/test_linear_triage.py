@@ -501,3 +501,137 @@ class TestIssueSearchWire:
         assert len(received) == 1
         assert "searchIssues" in received[0]["query"]
         assert received[0]["variables"] == {"term": "some term", "first": 5}
+
+
+# ---------------------------------------------------------------------------
+# Team key -> UUID resolution (issue_create / project_create)
+# ---------------------------------------------------------------------------
+
+
+class TestTeamResolution:
+    """issue_create/project_create must send a team UUID, resolving a key first.
+
+    Linear's IssueCreateInput.teamId / ProjectCreateInput.teamIds reject a
+    human key like "ENG" with an opaque "Argument Validation Error", so the
+    module resolves key -> UUID via a TeamByKey query (cached) before mutating.
+    """
+
+    @staticmethod
+    def _wire(handler):
+        """Install a MockTransport handler + fake api key; return a restore fn."""
+        import httpx
+
+        orig_client, orig_key = linear._client, linear._api_key
+        linear._client = lambda **kw: httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), **kw
+        )
+        linear._api_key = lambda: "test-key"
+        linear._team_id_cache.clear()
+
+        def restore():
+            linear._client, linear._api_key = orig_client, orig_key
+            linear._team_id_cache.clear()
+
+        return restore
+
+    def test_key_resolved_to_uuid_and_cached(self):
+        """A key triggers one TeamByKey lookup; the UUID is reused on later calls."""
+        import json
+        import httpx
+
+        received: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            received.append(body)
+            if "TeamByKey" in body["query"]:
+                return httpx.Response(
+                    200,
+                    json={"data": {"teams": {"nodes": [{"id": "team-uuid-eng", "key": "ENG"}]}}},
+                )
+            return httpx.Response(
+                200,
+                json={"data": {"issueCreate": {"success": True, "issue": {"id": "i1", "identifier": "ENG-1", "title": "t", "url": "u", "state": None, "team": None}}}},
+            )
+
+        restore = self._wire(handler)
+        try:
+            run(linear.issue_create("ENG", "first"))
+            run(linear.issue_create("ENG", "second"))
+        finally:
+            restore()
+
+        lookups = [b for b in received if "TeamByKey" in b["query"]]
+        teamids = [b["variables"]["input"]["teamId"] for b in received if "IssueCreate" in b["query"]]
+        assert len(lookups) == 1, "key resolution must be cached, not re-queried"
+        assert teamids == ["team-uuid-eng", "team-uuid-eng"]
+
+    def test_uuid_passes_through_without_lookup(self):
+        """A teamId already in UUID form is sent as-is, no TeamByKey query."""
+        import json
+        import httpx
+
+        uuid = "550e8400-e29b-41d4-a716-446655440000"
+        received: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            received.append(body)
+            return httpx.Response(
+                200,
+                json={"data": {"issueCreate": {"success": True, "issue": {"id": "i1", "identifier": "ENG-1", "title": "t", "url": "u", "state": None, "team": None}}}},
+            )
+
+        restore = self._wire(handler)
+        try:
+            run(linear.issue_create(uuid, "x"))
+        finally:
+            restore()
+
+        assert not any("TeamByKey" in b["query"] for b in received)
+        teamids = [b["variables"]["input"]["teamId"] for b in received if "IssueCreate" in b["query"]]
+        assert teamids == [uuid]
+
+    def test_unknown_key_raises_linear_error(self):
+        """A key with no matching team surfaces a clear LinearError."""
+        import httpx
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": {"teams": {"nodes": []}}})
+
+        restore = self._wire(handler)
+        try:
+            with pytest.raises(linear.LinearError):
+                run(linear.issue_create("NOPE", "x"))
+        finally:
+            restore()
+
+    def test_project_create_resolves_each_team(self):
+        """project_create resolves every team key in its list to a UUID."""
+        import json
+        import httpx
+
+        received: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            received.append(body)
+            if "TeamByKey" in body["query"]:
+                key = body["variables"]["key"]
+                return httpx.Response(
+                    200,
+                    json={"data": {"teams": {"nodes": [{"id": f"uuid-{key}", "key": key}]}}},
+                )
+            return httpx.Response(
+                200,
+                json={"data": {"projectCreate": {"success": True, "project": {"id": "p1", "name": "n", "url": "u", "state": None, "teams": {"nodes": []}}}}},
+            )
+
+        restore = self._wire(handler)
+        try:
+            run(linear.project_create("Proj", ["ENG", "ADM"]))
+        finally:
+            restore()
+
+        team_ids = [b["variables"]["input"]["teamIds"] for b in received if "ProjectCreate" in b["query"]]
+        assert team_ids == [["uuid-ENG", "uuid-ADM"]]

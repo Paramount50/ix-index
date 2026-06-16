@@ -3837,10 +3837,13 @@ let
     class _FakePage:
         url = "https://example.com/"
 
+        last_screenshot_kw = {}
+
         async def title(self):
             return "Example"
 
         async def screenshot(self, **_kw):
+            _FakePage.last_screenshot_kw = _kw
             return b"NOT-A-REAL-PNG"  # _encode_shot tolerates non-images
 
     class _FakeCtx:
@@ -3866,6 +3869,11 @@ let
     browser._resource_html_cache.clear()
     _h = _aio.run(browser._resource_html(EP))
     assert "<img" in _h and "example.com" in _h, _h[:200]
+
+    # Passive capture uses device scale, never css: css scale makes Playwright
+    # push a per-shot DPR Emulation override that relayouts and visibly flickers
+    # the live HiDPI window on every ~1.5s tick of this loop.
+    assert _FakePage.last_screenshot_kw.get("scale") == "device", _FakePage.last_screenshot_kw
 
     # Throttled: a call within the TTL reuses the cache even though the tab list
     # changed underneath it (the screenshot is the expensive part).

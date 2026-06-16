@@ -39,6 +39,7 @@ so every code path is exercisable with no network.
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 __all__ = [
@@ -129,6 +130,46 @@ async def _gql(
     if body.get("errors"):
         raise LinearError(body["errors"])
     return body.get("data", {})
+
+
+# A Linear UUID: 8-4-4-4-12 lowercase hex. Team keys ("ENG") never match this,
+# so it is a safe, network-free way to tell "already a UUID" from "a key to
+# resolve". Resolved keys are cached for the process lifetime -- a team's UUID
+# never changes, and this keeps a fan-out of issue_create calls to one lookup.
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE
+)
+_team_id_cache: dict[str, str] = {}
+
+_TEAM_BY_KEY_QUERY = """
+query TeamByKey($key: String!) {
+  teams(filter: { key: { eq: $key } }, first: 1) {
+    nodes { id key }
+  }
+}
+"""
+
+
+async def _resolve_team_id(team: str) -> str:
+    """Resolve a team key (e.g. ``"ENG"``) to its UUID; pass a UUID through as-is.
+
+    Linear's ``IssueCreateInput.teamId`` and ``ProjectCreateInput.teamIds`` take
+    team UUIDs, not the human-facing key, and reject a key with an opaque
+    "Argument Validation Error". Callers naturally reach for the key, so resolve
+    it here. Raises :class:`LinearError` if no team has that key.
+    """
+    if _UUID_RE.match(team):
+        return team
+    cached = _team_id_cache.get(team)
+    if cached is not None:
+        return cached
+    data = await _gql(_TEAM_BY_KEY_QUERY, {"key": team})
+    nodes = data["teams"]["nodes"]
+    if not nodes:
+        raise LinearError([{"message": f"no Linear team with key {team!r}"}])
+    tid = nodes[0]["id"]
+    _team_id_cache[team] = tid
+    return tid
 
 
 # ---------------------------------------------------------------------------
@@ -240,7 +281,11 @@ async def issue_create(team: str, title: str, **fields: Any) -> dict[str, Any]:
 
     Returns the created issue dict.  Raises :class:`LinearError` on errors.
     """
-    input_vars: dict[str, Any] = {"teamId": team, "title": title, **fields}
+    input_vars: dict[str, Any] = {
+        "teamId": await _resolve_team_id(team),
+        "title": title,
+        **fields,
+    }
     data = await _gql(_ISSUE_CREATE_MUTATION, {"input": input_vars})
     return data["issueCreate"]["issue"]
 
@@ -283,7 +328,11 @@ async def project_create(
 
     Returns the created project dict.  Raises :class:`LinearError` on errors.
     """
-    input_vars: dict[str, Any] = {"name": name, "teamIds": teams, **fields}
+    input_vars: dict[str, Any] = {
+        "name": name,
+        "teamIds": [await _resolve_team_id(t) for t in teams],
+        **fields,
+    }
     data = await _gql(_PROJECT_CREATE_MUTATION, {"input": input_vars})
     return data["projectCreate"]["project"]
 
