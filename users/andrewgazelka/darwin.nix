@@ -31,6 +31,7 @@
       "helium-browser"
       "linear"
       "lm-studio"
+      "mullvad-vpn"
       "notion"
       "obs"
       "obsidian"
