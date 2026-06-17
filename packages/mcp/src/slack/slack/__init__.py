@@ -44,7 +44,7 @@ import pathlib
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 
@@ -109,7 +109,7 @@ _NOISE_SUBTYPES = frozenset(
 )
 
 # Fixed schemas so empty results stay typed.
-_CHANNELS_SCHEMA: dict[str, pl.DataType] = {
+_CHANNELS_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "id": pl.Utf8,
     "name": pl.Utf8,
     "is_private": pl.Boolean,
@@ -119,14 +119,14 @@ _CHANNELS_SCHEMA: dict[str, pl.DataType] = {
     "purpose": pl.Utf8,
 }
 
-_DMS_SCHEMA: dict[str, pl.DataType] = {
+_DMS_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "id": pl.Utf8,
     "user_id": pl.Utf8,
     "user": pl.Utf8,
     "real_name": pl.Utf8,
 }
 
-_MESSAGES_SCHEMA: dict[str, pl.DataType] = {
+_MESSAGES_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "ts": pl.Utf8,
     "user": pl.Utf8,
     "text": pl.Utf8,
@@ -135,7 +135,7 @@ _MESSAGES_SCHEMA: dict[str, pl.DataType] = {
     "reactions": pl.Int64,
 }
 
-_THREAD_SCHEMA: dict[str, pl.DataType] = {
+_THREAD_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "ts": pl.Utf8,
     "user": pl.Utf8,
     "text": pl.Utf8,
@@ -143,7 +143,7 @@ _THREAD_SCHEMA: dict[str, pl.DataType] = {
     "reply_count": pl.Int64,
 }
 
-_SEARCH_SCHEMA: dict[str, pl.DataType] = {
+_SEARCH_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "ts": pl.Utf8,
     "channel_id": pl.Utf8,
     "channel_name": pl.Utf8,
@@ -201,7 +201,7 @@ def _token() -> str:
     )
 
 
-def _api_call(method: str, token: str, params: dict[str, Any] | None = None) -> dict:
+def _api_call(method: str, token: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
     """Call a Slack Web API method and return the decoded JSON response.
 
     Every call is a form POST with the token in an ``Authorization: Bearer``
@@ -230,7 +230,7 @@ def _api_call(method: str, token: str, params: dict[str, Any] | None = None) -> 
     except urllib.error.URLError as exc:
         raise SlackError(f"Slack API request failed for {method}: {exc.reason}") from exc
 
-    data = json.loads(raw)
+    data: dict[str, Any] = json.loads(raw)
     if not data.get("ok"):
         error = data.get("error", "unknown_error")
         if error in ("invalid_auth", "not_authed", "token_revoked", "token_expired"):
@@ -254,7 +254,7 @@ def _api_call(method: str, token: str, params: dict[str, Any] | None = None) -> 
     return data
 
 
-def login(token: str) -> dict:
+def login(token: str) -> dict[str, Any]:
     """Store a Slack token for this user.
 
     Writes ``token`` to ``~/.config/slack/token`` with mode 0600 so only this
@@ -281,7 +281,7 @@ def login(token: str) -> dict:
     return {"configured": True, "path": str(_TOKEN_FILE)}
 
 
-def logout() -> dict:
+def logout() -> dict[str, Any]:
     """Remove the stored Slack token file.
 
     Idempotent: returns ``{"signed_out": True, "removed": bool}`` whether or not
@@ -292,7 +292,7 @@ def logout() -> dict:
     return {"signed_out": True, "removed": removed}
 
 
-def status() -> dict:
+def status() -> dict[str, Any]:
     """Whether this session has a Slack token configured, and as whom.
 
     Returns ``{"configured": bool, "team": str | None, "user": str | None}``
@@ -328,7 +328,7 @@ def _users_map(token: str) -> dict[str, dict[str, str]]:
             params["cursor"] = cursor
         data = _api_call("users.list", token, params)
         for u in data.get("members", []):
-            prof = u.get("profile") or {}
+            prof: dict[str, Any] = u.get("profile") or {}
             out[u.get("id", "")] = {
                 "name": u.get("name", "") or "",
                 "real_name": (prof.get("real_name") or u.get("real_name") or ""),
@@ -356,14 +356,14 @@ def _resolve_user(name_or_id: str, token: str) -> str:
             params["cursor"] = cursor
         data = _api_call("users.list", token, params)
         for u in data.get("members", []):
-            prof = u.get("profile") or {}
+            prof: dict[str, Any] = u.get("profile") or {}
             names = {
                 (u.get("name") or "").lower(),
                 (prof.get("display_name") or "").lower(),
                 (prof.get("real_name") or "").lower(),
             }
             if want and want in names:
-                return u["id"]
+                return cast(str, u["id"])
         cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
         if not cursor:
             break
@@ -376,7 +376,7 @@ def _resolve_user(name_or_id: str, token: str) -> str:
 def _open_im(user_id: str, token: str) -> str:
     """Return the DM channel ID for ``user_id`` (opening it if needed)."""
     data = _api_call("conversations.open", token, {"users": user_id})
-    return (data.get("channel") or {}).get("id", "")
+    return cast(str, (data.get("channel") or {}).get("id", ""))
 
 
 def _resolve_channel_by_name(name: str, token: str) -> str | None:
@@ -394,7 +394,7 @@ def _resolve_channel_by_name(name: str, token: str) -> str | None:
         data = _api_call("conversations.list", token, params)
         for ch in data.get("channels", []):
             if ch.get("name", "").lower() == want:
-                return ch["id"]
+                return cast("str | None", ch["id"])
         cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
         if not cursor:
             break
@@ -456,7 +456,7 @@ async def channels(
     _require_incognito()
     token = _token()
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     cursor: str | None = None
     while len(rows) < limit:
         params: dict[str, Any] = {
@@ -511,7 +511,7 @@ async def dms(*, limit: int = 100) -> pl.DataFrame:
     except SlackError:
         umap = {}
 
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     cursor: str | None = None
     while len(rows) < limit:
         params: dict[str, Any] = {"types": "im", "limit": min(200, limit - len(rows))}
@@ -574,7 +574,7 @@ async def messages(
         token,
         {"channel": channel_id, "limit": min(limit, 1000)},
     )
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for msg in data.get("messages", []):
         sub = msg.get("subtype") or ""
         if not include_noise and sub in _NOISE_SUBTYPES:
@@ -627,7 +627,7 @@ async def thread(
         token,
         {"channel": channel_id, "ts": ts, "limit": min(limit, 1000)},
     )
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     # No noise filter here (unlike messages()): a thread's replies are content by
     # definition and rarely carry channel-membership subtypes, so keep them all.
     for msg in data.get("messages", []):
@@ -650,7 +650,7 @@ async def thread(
     )
 
 
-async def send(channel: str, text: str) -> dict:
+async def send(channel: str, text: str) -> dict[str, Any]:
     """Post ``text`` to ``channel`` and return Slack's response metadata.
 
     ``channel`` is resolved like :func:`messages` (channel, ``@user``, or id).
@@ -690,9 +690,9 @@ async def search(
         {"query": query, "count": min(limit, 100), "sort": "timestamp"},
     )
     matches = (data.get("messages") or {}).get("matches", [])
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for msg in matches:
-        channel = msg.get("channel") or {}
+        channel: dict[str, Any] = msg.get("channel") or {}
         is_dict = isinstance(channel, dict)
         rows.append(
             {

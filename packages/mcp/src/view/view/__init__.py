@@ -30,6 +30,7 @@ import os
 import pathlib
 import subprocess
 from datetime import datetime
+from typing import Any
 
 import polars as pl
 
@@ -161,7 +162,7 @@ def _code_css() -> str:
     so without the override it would vanish white-on-white. Chrome rules
     (background, line numbers) are dropped so tokens sit on the container box."""
     try:
-        from pygments.formatters import HtmlFormatter
+        from pygments.formatters.html import HtmlFormatter
     except Exception:
         return ""
     sel = f".{_CODE_CLASS}"
@@ -200,7 +201,7 @@ def _code_css() -> str:
     )
 
 
-def _nested_table(headers, rows, *, key_col=False) -> str:
+def _nested_table(headers: list[str] | None, rows: list[list[str]], *, key_col: bool = False) -> str:
     """A small bordered inline table for a nested Struct/List value.
 
     nushell-style: nested data renders as a real boxed sub-table rather than a
@@ -242,7 +243,7 @@ def _nested_table(headers, rows, *, key_col=False) -> str:
 _MAX_NESTED_ROWS = 50
 
 
-def _fmt_nested(value, dtype) -> str | None:
+def _fmt_nested(value: Any, dtype: pl.DataType | pl.datatypes.DataTypeClass) -> str | None:  # noqa: ANN401 -- a dynamic polars cell value
     """Render a Struct/List/Array cell as a nested table; None if not nested."""
     if isinstance(dtype, pl.Struct):
         if value is None:
@@ -284,7 +285,7 @@ def _fmt_nested(value, dtype) -> str | None:
     return None
 
 
-def _fmt_cell(value, dtype) -> tuple[str, str]:
+def _fmt_cell(value: Any, dtype: pl.DataType | pl.datatypes.DataTypeClass) -> tuple[str, str]:  # noqa: ANN401 -- a dynamic polars cell value
     """Render one cell to (html, align), colored and aligned by dtype."""
     nested = _fmt_nested(value, dtype)
     if nested is not None:
@@ -399,8 +400,9 @@ _EXT_LANG = {
 
 def _highlight(text: str, lang: str | None, start_line: int) -> str:
     from pygments import highlight
-    from pygments.formatters import HtmlFormatter
-    from pygments.lexers import TextLexer, get_lexer_by_name, guess_lexer
+    from pygments.formatters.html import HtmlFormatter
+    from pygments.lexers import get_lexer_by_name, guess_lexer
+    from pygments.lexers.special import TextLexer
 
     lexer = None
     if lang:
@@ -423,7 +425,7 @@ def _highlight(text: str, lang: str | None, start_line: int) -> str:
         linenostart=start_line,
         nowrap=False,
     )
-    return highlight(text, lexer, formatter)
+    return str(highlight(text, lexer, formatter))
 
 
 class Code:
@@ -472,7 +474,7 @@ def _lang_for(path: pathlib.Path) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
-def ls(path: str | os.PathLike = ".", *, all: bool = False) -> "pl.DataFrame":
+def ls(path: str | os.PathLike[str] = ".", *, all: bool = False) -> "pl.DataFrame":
     """A directory listing as a DataFrame (name, kind, size, modified, ignored).
 
     Dirs sort first, then by name. Hidden entries are skipped unless ``all``.
@@ -522,7 +524,7 @@ def ls(path: str | os.PathLike = ".", *, all: bool = False) -> "pl.DataFrame":
 
 
 def tree(
-    path: str | os.PathLike = ".", depth: int = 2, *, all: bool = False
+    path: str | os.PathLike[str] = ".", depth: int = 2, *, all: bool = False
 ) -> "pl.DataFrame":
     """A recursive listing to ``depth`` as a DataFrame (depth, name, path, kind).
 
@@ -535,7 +537,7 @@ def tree(
     ``all=True`` to include hidden + ignored entries and walk everything.
     """
     root = pathlib.Path(path)
-    rows = []
+    rows: list[dict[str, Any]] = []
 
     def walk(d: pathlib.Path, level: int) -> None:
         if level > depth:
@@ -593,7 +595,7 @@ def tree(
 
 
 def cat(
-    path: str | os.PathLike,
+    path: str | os.PathLike[str],
     lines: tuple[int, int] | None = None,
     *,
     lang: str | None = None,
@@ -613,19 +615,19 @@ def cat(
     return Code(text, lang or _lang_for(p), title=str(p), start_line=start)
 
 
-def read(*args, **kwargs) -> Code:
+def read(*args: Any, **kwargs: Any) -> Code:  # noqa: ANN401 -- forwarded verbatim to cat()
     """Alias for :func:`cat`."""
     return cat(*args, **kwargs)
 
 
-def head(path: str | os.PathLike, n: int = 20, *, lang: str | None = None) -> Code:
+def head(path: str | os.PathLike[str], n: int = 20, *, lang: str | None = None) -> Code:
     """The first ``n`` lines of a file as a :class:`Code` view."""
     p = pathlib.Path(path)
     sliced = p.read_text(errors="replace").splitlines()[:n]
     return Code("\n".join(sliced), lang or _lang_for(p), title=str(p), start_line=1)
 
 
-def tail(path: str | os.PathLike, n: int = 20, *, lang: str | None = None) -> Code:
+def tail(path: str | os.PathLike[str], n: int = 20, *, lang: str | None = None) -> Code:
     """The last ``n`` lines of a file as a :class:`Code` view."""
     p = pathlib.Path(path)
     all_lines = p.read_text(errors="replace").splitlines()
@@ -635,7 +637,7 @@ def tail(path: str | os.PathLike, n: int = 20, *, lang: str | None = None) -> Co
     )
 
 
-def json(obj, *, title: str | None = None) -> Code:
+def json(obj: object, *, title: str | None = None) -> Code:
     """Pretty-print JSON as a highlighted :class:`Code` view.
 
     ``obj`` may be a path to a ``.json`` file, a JSON string, or any
@@ -654,11 +656,11 @@ def json(obj, *, title: str | None = None) -> Code:
 
 
 def diff(
-    a, b, *, a_name: str = "a", b_name: str = "b"
+    a: str | os.PathLike[str], b: str | os.PathLike[str], *, a_name: str = "a", b_name: str = "b"
 ) -> Code:
     """A unified diff of two texts or files as a highlighted :class:`Code` view."""
 
-    def _text(x, name):
+    def _text(x: str | os.PathLike[str], name: str) -> tuple[str, str]:
         if isinstance(x, (str, os.PathLike)) and pathlib.Path(x).exists():
             return pathlib.Path(x).read_text(errors="replace"), str(x)
         return str(x), name
@@ -672,7 +674,7 @@ def diff(
 
 
 def edit(
-    path: str | os.PathLike,
+    path: str | os.PathLike[str],
     old: str,
     new: str,
     *,
@@ -713,7 +715,7 @@ def edit(
     return Code("\n".join(hunks), "diff", title=f"{label} {p}")
 
 
-def img(path: str | os.PathLike):
+def img(path: str | os.PathLike[str]) -> Any:  # noqa: ANN401 -- returns a PIL.Image (untyped)
     """Open an image file for inline display (returns a ``PIL.Image``)."""
     from PIL import Image
 

@@ -995,6 +995,8 @@ let
     "nox_autotriage"
     "linear"
     "google_auth"
+    "slack"
+    "view"
   ];
   strictTypecheck =
     let
@@ -1017,11 +1019,13 @@ let
       ''
         cp -r ${ixNotebookMcpSource} ix_notebook_mcp
         cp -r ${./src} src
+        cp ${./zuban.ini} zuban.ini
         chmod -R u+w ix_notebook_mcp src
 
         export MYPYPATH=${lib.escapeShellArg mypypath}:.
         echo "zuban check --strict over: ${toString strictGreenModules}"
         zuban check --strict \
+          --config-file zuban.ini \
           --python-executable ${mcpPython.interpreter} \
           --python-version ${pkgs.python3.pythonVersion} \
           --platform linux \
