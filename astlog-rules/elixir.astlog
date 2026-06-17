@@ -127,7 +127,10 @@
 ;; for a deliberately-undocumented internal module. The moduledoc belongs to its
 ;; NEAREST enclosing module via the same `nearest-mod` machinery as the
 ;; struct/spec rules, so a nested module's moduledoc does not exempt its parent.
-;; (Credo.Check.Readability.ModuleDoc, on by default in stock Credo.)
+;; (Credo.Check.Readability.ModuleDoc, on by default in stock Credo.) Deliberately
+;; stricter than Credo here: there is no `ignore_names` exemption for
+;; `*Controller`/`*Live`/`*Test`/`Endpoint` etc., so a Phoenix or generated module
+;; opts out with an explicit `@moduledoc false` rather than a name convention.
 (rule (moduledoc-attr a)
   (match elixir "(unary_operator (call (identifier) @i)) @a")
   (text i "moduledoc"))
