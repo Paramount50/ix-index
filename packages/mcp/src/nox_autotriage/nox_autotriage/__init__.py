@@ -16,8 +16,10 @@ Typical usage::
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
+import pathlib
 from typing import Any
 
 from linear.triage import Finding, TriageConfig, ModuleLinearPort, triage
@@ -141,10 +143,10 @@ def config_from_env() -> TriageConfig:
     max_new_raw = os.environ.get("TRIAGE_MAX_NEW_PER_RUN", "10").strip()
     try:
         max_new = int(max_new_raw)
-    except ValueError:
+    except ValueError as exc:
         raise RuntimeError(
             f"TRIAGE_MAX_NEW_PER_RUN must be an integer, got {max_new_raw!r}"
-        )
+        ) from exc
 
     return TriageConfig(
         team_id=team_id,
@@ -164,8 +166,9 @@ async def run(report_path: str, *, dry_run: bool) -> dict[str, Any]:
 
     Returns a plain dict with keys: filed, updated, deferred, dry_run.
     """
-    with open(report_path) as fh:
-        report = json.load(fh)
+    report = await asyncio.to_thread(
+        lambda: json.loads(pathlib.Path(report_path).read_text())
+    )
 
     findings = findings_from_conformance(report)
     cfg = config_from_env()

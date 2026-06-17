@@ -75,31 +75,31 @@ from .cluster import (
 __version__ = "0.1.0"
 
 __all__ = [
-    # SSH shell fan-out (this module)
-    "scan",
-    "read_ndjson",
-    "read_csv",
-    "read_parquet",
-    "read_text",
-    "ndjson_parser",
-    "csv_parser",
-    "parquet_parser",
-    "text_parser",
-    "FleetError",
-    "HostSpec",
-    # Cluster surface (cluster.py)
-    "connect",
-    "nodes",
-    "run",
-    "submit",
-    "get",
-    "put",
-    "in_kernel",
-    "spark",
-    "up",
-    "ClusterError",
     "EXEC_PORT",
     "SPARK_CONNECT_PORT",
+    # Cluster surface (cluster.py)
+    "ClusterError",
+    "FleetError",
+    "HostSpec",
+    "connect",
+    # SSH shell fan-out (this module)
+    "csv_parser",
+    "get",
+    "in_kernel",
+    "ndjson_parser",
+    "nodes",
+    "parquet_parser",
+    "put",
+    "read_csv",
+    "read_ndjson",
+    "read_parquet",
+    "read_text",
+    "run",
+    "scan",
+    "spark",
+    "submit",
+    "text_parser",
+    "up",
 ]
 
 # A parser turns one host's raw stdout bytes into a DataFrame. Kept as a plain
@@ -114,7 +114,7 @@ HostSpec = "str | Mapping[str, Any]"
 # Default identity. The fleet is reached with this key already; resolve it once
 # here rather than relying on an ssh-agent that a non-interactive kernel may not
 # have. A missing file is simply not passed, so agent/other auth still works.
-_DEFAULT_KEY = Path(os.path.expanduser("~/.ssh/id_ed25519"))
+_DEFAULT_KEY = Path("~/.ssh/id_ed25519").expanduser()
 
 
 class FleetError(Exception):
@@ -249,7 +249,7 @@ async def scan(
     tag_host: bool = True,
     username: str | None = None,
     on_error: str = "collect",
-    **connect_kwargs: Any,
+    **connect_kwargs: Any,  # noqa: ANN401 -- passed through to asyncssh.connect
 ) -> pl.DataFrame:
     """Run ``command`` on every host in parallel and combine into one frame.
 
@@ -312,7 +312,7 @@ async def scan(
 
     frames: list[pl.DataFrame] = []
     failures: dict[str, str] = {}
-    for (label, _opts), res in zip(normalized, results):
+    for (label, _opts), res in zip(normalized, results, strict=False):
         if isinstance(res, BaseException):
             failures[label] = f"{type(res).__name__}: {res}"
             continue
@@ -349,7 +349,7 @@ async def read_ndjson(
     remote_path: str,
     *,
     filter_cmd: str | None = None,
-    **kw: Any,
+    **kw: Any,  # noqa: ANN401 -- forwarded to scan/asyncssh.connect
 ) -> pl.DataFrame:
     """Read an NDJSON file from every host into one frame.
 
@@ -368,7 +368,7 @@ async def read_csv(
     remote_path: str,
     *,
     filter_cmd: str | None = None,
-    **kw: Any,
+    **kw: Any,  # noqa: ANN401 -- forwarded to scan/asyncssh.connect
 ) -> pl.DataFrame:
     """Read a CSV file from every host into one frame.
 
@@ -384,7 +384,7 @@ async def read_parquet(
     remote_path: str,
     *,
     use_sftp: bool = False,
-    **kw: Any,
+    **kw: Any,  # noqa: ANN401 -- forwarded to scan/asyncssh.connect
 ) -> pl.DataFrame:
     """Read a Parquet file from every host into one frame.
 
@@ -410,10 +410,8 @@ async def read_parquet(
     ]
 
     async def fetch(label: str, opts: dict[str, Any]) -> bytes:
-        async with sem, asyncssh.connect(**opts) as conn:
-            async with conn.start_sftp_client() as sftp:
-                async with sftp.open(remote_path, "rb") as fh:
-                    return await fh.read()
+        async with sem, asyncssh.connect(**opts) as conn, conn.start_sftp_client() as sftp, sftp.open(remote_path, "rb") as fh:
+            return await fh.read()
 
     results = await asyncio.gather(
         *(fetch(label, opts) for label, opts in normalized),
@@ -421,7 +419,7 @@ async def read_parquet(
     )
     frames: list[pl.DataFrame] = []
     failures: dict[str, str] = {}
-    for (label, _opts), res in zip(normalized, results):
+    for (label, _opts), res in zip(normalized, results, strict=False):
         if isinstance(res, BaseException):
             failures[label] = f"{type(res).__name__}: {res}"
             continue
@@ -446,7 +444,7 @@ async def read_text(
     remote_path: str,
     *,
     filter_cmd: str | None = None,
-    **kw: Any,
+    **kw: Any,  # noqa: ANN401 -- forwarded to scan/asyncssh.connect
 ) -> pl.DataFrame:
     """Read an unstructured file from every host as one row per line.
 

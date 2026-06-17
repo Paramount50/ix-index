@@ -82,6 +82,7 @@ provisioned bundle and exercise ``key``/``type_``/``click``/``press_down``/
 
 from __future__ import annotations
 
+import contextlib
 import os
 import pathlib
 import select
@@ -228,6 +229,7 @@ def stage_binary(
 def provision(
     bundle: str | os.PathLike,
     user: str,
+    *,
     autologin: bool = False,
     password: str = "",
     timeout: float = 300,
@@ -311,10 +313,8 @@ def _write_bundle_login(bundle: str | os.PathLike, user: str, password: str) -> 
     finally:
         # If the file pre-existed with looser bits, O_CREAT did not change them;
         # narrow them now.
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            pathlib.Path(path).chmod(0o600)
 
 
 def _bundle_login(bundle: str | os.PathLike | None) -> dict[str, str] | None:
@@ -446,14 +446,14 @@ def screenshot_many(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             key: pool.submit(screenshot, bundle, seconds, timeout, shares)
-            for key, bundle in zip(keys, bundles)
+            for key, bundle in zip(keys, bundles, strict=False)
         }
         # Resolve every future (each owns a process) before re-raising, so a
         # failure in one guest does not leak the others.
         for key, future in futures.items():
             try:
                 results[key] = future.result()
-            except BaseException as exc:
+            except BaseException as exc:  # noqa: PERF203 -- must drain all futures before re-raising so no thread leaks
                 if error is None:
                     error = exc
     if error is not None:
@@ -498,12 +498,13 @@ def _writable_disk(disk: str | os.PathLike, staging_dir: str) -> str:
         subprocess.run(["cp", "-c", src, dst], check=True, capture_output=True)
     except (subprocess.CalledProcessError, FileNotFoundError, OSError):
         shutil.copyfile(src, dst)
-    os.chmod(dst, 0o644)
+    pathlib.Path(dst).chmod(0o644)
     return dst
 
 
 def boot_linux(
     disk: str | os.PathLike,
+    *,
     gpu: bool = False,
     cpus: int = 2,
     memory_mib: int = 1024,
@@ -764,10 +765,8 @@ class Driver:
         finally:
             for stream in (proc.stdin, proc.stdout):
                 if stream is not None:
-                    try:
+                    with contextlib.suppress(OSError):
                         stream.close()
-                    except OSError:
-                        pass
 
     @property
     def is_alive(self) -> bool:
@@ -779,7 +778,7 @@ class Driver:
     def title(self) -> str:
         """A short label for the dashboard sidebar."""
         target = self._bundle or self._disk or "guest"
-        return f"vm \u00b7 {os.path.basename(str(target))}"
+        return f"vm \u00b7 {pathlib.Path(str(target)).name}"
 
     def send(self, command: str) -> str:
         """Write one ``command`` line, flush, and return its one-line ack.
@@ -916,7 +915,7 @@ class Driver:
             self._size = (w, h)
         return self._size
 
-    def show_cursor(self, on: bool = True) -> str:
+    def show_cursor(self, *, on: bool = True) -> str:
         """Toggle drawing a pointer marker into subsequent :meth:`shot`s. Off by
         default, so a plain ``shot`` stays a faithful framebuffer capture."""
         return self.send(f"cursor-show {'on' if on else 'off'}")

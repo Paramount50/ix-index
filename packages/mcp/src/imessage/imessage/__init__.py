@@ -57,6 +57,7 @@ import sqlite3
 import subprocess
 import sys
 from collections.abc import Iterable
+from pathlib import Path
 from datetime import datetime, timezone
 
 import polars as pl
@@ -81,7 +82,7 @@ if sys.platform != "darwin":
 # The standard location of the Messages SQLite database. Reading it needs Full
 # Disk Access for the host process; opened read-only + immutable so a live
 # Messages app writing to it cannot block or be disturbed by our reads.
-CHAT_DB = os.path.expanduser("~/Library/Messages/chat.db")
+CHAT_DB = str(Path("~/Library/Messages/chat.db").expanduser())
 
 # Core Data / Apple epoch: 2001-01-01 UTC, in nanoseconds since the Unix epoch.
 # `message.date` is nanoseconds since this point on modern macOS (it was *seconds*
@@ -102,7 +103,7 @@ def _connect(path: str) -> sqlite3.Connection:
     Access grant, so say so rather than surface a bare sqlite error.
     """
 
-    if not os.path.exists(path):
+    if not Path(path).exists():
         raise FileNotFoundError(
             f"imessage: no database at {path!r}. On macOS this lives under your "
             "home Library; pass an explicit `db=` path if it has moved."
@@ -178,12 +179,10 @@ def _contact_db() -> str | None:
     keeps a top-level database; the most recently modified one is the live store.
     """
 
-    import glob
-
-    root = os.path.expanduser("~/Library/Application Support/AddressBook")
-    candidates = glob.glob(os.path.join(root, "AddressBook-v22.abcddb"))
-    candidates += glob.glob(os.path.join(root, "Sources/*/AddressBook-v22.abcddb"))
-    candidates = [p for p in candidates if os.path.exists(p)]
+    root = Path("~/Library/Application Support/AddressBook").expanduser()
+    candidates = [str(p) for p in root.glob("AddressBook-v22.abcddb")]
+    candidates += [str(p) for p in root.glob("Sources/*/AddressBook-v22.abcddb")]
+    candidates = [p for p in candidates if Path(p).exists()]
     if not candidates:
         return None
     return max(candidates, key=os.path.getmtime)
@@ -420,24 +419,23 @@ def messages(
             params.append(_apple_ns(until))
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         optional_cols = _optional_columns(con)
-        sql = f"""
-            SELECT m.ROWID AS rowid, m.guid AS guid, m.date AS date, m.text AS text,
-                   m.attributedBody AS attributed_body,
-                   m.is_from_me AS is_from_me, m.is_read AS is_read,
-                   m.service AS service, h.id AS handle,
-                   {optional_cols},
-                   c.ROWID AS chat_id, c.display_name AS chat_name,
-                   c.chat_identifier AS chat_identifier,
-                   (SELECT COUNT(*) FROM message_attachment_join maj
-                    WHERE maj.message_id = m.ROWID) AS n_attachments
-            FROM message m
-            LEFT JOIN handle h ON m.handle_id = h.ROWID
-            LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-            LEFT JOIN chat c ON c.ROWID = cmj.chat_id
-            {where}
-            ORDER BY m.date DESC
-            LIMIT ?
-        """
+        _select = (
+            "SELECT m.ROWID AS rowid, m.guid AS guid, m.date AS date, m.text AS text,"  # noqa: S608 -- optional_cols is sqlite_master column names (never user input); all values use ? params
+            " m.attributedBody AS attributed_body,"
+            " m.is_from_me AS is_from_me, m.is_read AS is_read,"
+            f" m.service AS service, h.id AS handle, {optional_cols},"
+            " c.ROWID AS chat_id, c.display_name AS chat_name,"
+            " c.chat_identifier AS chat_identifier,"
+            " (SELECT COUNT(*) FROM message_attachment_join maj"
+            "  WHERE maj.message_id = m.ROWID) AS n_attachments"
+        )
+        sql = (
+            f"{_select} FROM message m"
+            " LEFT JOIN handle h ON m.handle_id = h.ROWID"
+            " LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID"
+            " LEFT JOIN chat c ON c.ROWID = cmj.chat_id"
+            f" {where} ORDER BY m.date DESC LIMIT ?"
+        )
         rows = con.execute(sql, [*params, int(limit)]).fetchall()
         reply_to = _resolve_reply_targets(con, rows)
     finally:
@@ -495,7 +493,7 @@ def _resolve_reply_targets(
     placeholders = ",".join("?" * len(wanted))
     resolved: dict[str, tuple[int, str | None]] = {}
     for guid, rowid, text, ab in con.execute(
-        f"SELECT guid, ROWID, text, attributedBody FROM message WHERE guid IN ({placeholders})",
+        f"SELECT guid, ROWID, text, attributedBody FROM message WHERE guid IN ({placeholders})",  # noqa: S608 -- placeholders is "?" * len(wanted), never user input
         list(wanted),
     ):
         resolved[guid] = (rowid, text if text is not None else _decode_attributed_body(ab))
@@ -592,6 +590,7 @@ def send(to: str, text: str, *, service: str = "iMessage", timeout: float = 30.0
         capture_output=True,
         text=True,
         timeout=timeout,
+        check=False,
     )
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip() or "unknown error"
@@ -675,8 +674,8 @@ def _labeled(values: Iterable[str | tuple[str, str]] | None, default_label: str)
     """Normalize ``["+1..."]`` / ``[("work", "+1...")]`` to JXA label/value dicts."""
 
     out = []
-    for value in values or ():
-        label, value = value if isinstance(value, tuple) else (default_label, value)
+    for item in values or ():
+        label, value = item if isinstance(item, tuple) else (default_label, item)
         out.append({"label": _LABELS.get(label.lower(), label), "value": value})
     return out
 
@@ -713,6 +712,7 @@ def _run_contacts_script(spec: dict, timeout: float) -> str:
         capture_output=True,
         text=True,
         timeout=timeout,
+        check=False,
     )
     if proc.returncode != 0:
         detail = proc.stderr.strip() or proc.stdout.strip() or "unknown error"

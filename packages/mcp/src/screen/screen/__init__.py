@@ -283,7 +283,7 @@ def capture(region: Rect | str | None = None, *, app: str | None = None) -> Imag
     return _cgimage_to_pil(image)
 
 
-def capture_ndarray(region: Rect | str | None = None, *, app: str | None = None):
+def capture_ndarray(region: Rect | str | None = None, *, app: str | None = None) -> object:
     """Capture as an `(H, W, 3)` uint8 NumPy array (RGB).
 
     Convenience for pixel math and image diffing; wraps `capture()` (same
@@ -413,7 +413,7 @@ def _modifier_flags(modifiers: tuple[str, ...]) -> int:
     return flags
 
 
-def _post_key(keycode: int, down: bool, flags: int) -> None:
+def _post_key(keycode: int, down: bool, flags: int) -> None:  # noqa: FBT001 -- private helper; callers always pass literal True/False
     event = Quartz.CGEventCreateKeyboardEvent(None, keycode, down)
     if flags:
         Quartz.CGEventSetFlags(event, flags)
@@ -452,8 +452,8 @@ def press(name: str, *modifiers: str) -> None:
     _require_accessibility()
     keycode = _resolve_key(name)
     flags = _modifier_flags(modifiers)
-    _post_key(keycode, True, flags)
-    _post_key(keycode, False, flags)
+    _post_key(keycode, True, flags)  # noqa: FBT003 -- bool literal is the CGEvent down/up semantic, not a flag
+    _post_key(keycode, False, flags)  # noqa: FBT003
 
 
 def key_down(name: str, *modifiers: str) -> None:
@@ -461,14 +461,14 @@ def key_down(name: str, *modifiers: str) -> None:
     `key_up`. Requires Accessibility permission."""
 
     _require_accessibility()
-    _post_key(_resolve_key(name), True, _modifier_flags(modifiers))
+    _post_key(_resolve_key(name), True, _modifier_flags(modifiers))  # noqa: FBT003 -- bool literal is CGEvent down/up semantic
 
 
 def key_up(name: str, *modifiers: str) -> None:
     """Release a key held with `key_down`. Requires Accessibility permission."""
 
     _require_accessibility()
-    _post_key(_resolve_key(name), False, _modifier_flags(modifiers))
+    _post_key(_resolve_key(name), False, _modifier_flags(modifiers))  # noqa: FBT003 -- bool literal is CGEvent down/up semantic
 
 
 @dataclass(frozen=True, slots=True)
@@ -482,7 +482,7 @@ class App:
     active: bool
 
 
-def _workspace():
+def _workspace() -> object:
     """The shared NSWorkspace. AppKit is imported lazily so the common
     capture/input paths do not pay for it and a stripped environment fails only
     when app control is actually used."""
@@ -492,7 +492,7 @@ def _workspace():
     return NSWorkspace.sharedWorkspace()
 
 
-def _as_app(running) -> App:
+def _as_app(running: object) -> App:
     return App(
         running.localizedName(),
         running.bundleIdentifier(),
@@ -501,7 +501,7 @@ def _as_app(running) -> App:
     )
 
 
-def _find_running(app: str):
+def _find_running(app: str) -> object:
     """The running application whose bundle id or display name matches ``app``
     (case-insensitive), or None. App control acts on a running instance, so this
     is how a name/bundle-id argument resolves to one."""

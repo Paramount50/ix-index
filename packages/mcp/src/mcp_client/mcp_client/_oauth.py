@@ -27,6 +27,7 @@ flow when the server answers 401, so attaching it to a public server is free.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -143,12 +144,10 @@ def _write_private(path: Path, payload: dict[str, Any]) -> None:
         with os.fdopen(fd, "w") as fh:
             json.dump(payload, fh, indent=2)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            Path(tmp).unlink()
         raise
-    os.replace(tmp, path)
+    Path(tmp).replace(path)
 
 
 class FileTokenStorage:
@@ -180,10 +179,8 @@ class FileTokenStorage:
 
     def clear(self) -> None:
         """Forget the cached grant (next connect re-runs the browser flow)."""
-        try:
+        with contextlib.suppress(FileNotFoundError):
             self.path.unlink()
-        except FileNotFoundError:
-            pass
 
     # -- TokenStorage protocol --
 
@@ -319,13 +316,13 @@ class _LoopbackListener:
             state = (params.get("state") or [None])[0]
             self._result.set_result((code, state))
             await self._respond(writer, "200 OK", _SUCCESS_PAGE, html=True)
-        except Exception:
+        except Exception:  # noqa: S110 -- HTTP callback handler; any error drops the connection cleanly
             pass
         finally:
             try:
                 writer.close()
                 await writer.wait_closed()
-            except Exception:
+            except Exception:  # noqa: S110 -- best-effort writer teardown; connection may already be gone
                 pass
 
     @staticmethod
@@ -371,10 +368,8 @@ class _LoopbackListener:
     async def close(self) -> None:
         if self._server is not None:
             self._server.close()
-            try:
+            with contextlib.suppress(Exception):
                 await self._server.wait_closed()
-            except Exception:
-                pass
             self._server = None
 
 
@@ -421,7 +416,7 @@ class _RestoringOAuthProvider(OAuthClientProvider):
     expiry up front and refresh silently instead.
     """
 
-    def __init__(self, *args: Any, file_storage: FileTokenStorage, **kwargs: Any):
+    def __init__(self, *args: Any, file_storage: FileTokenStorage, **kwargs: Any) -> None:  # noqa: ANN401 -- forwards OAuthClientProvider *args/**kwargs
         super().__init__(*args, **kwargs)
         self._file_storage = file_storage
 
@@ -463,7 +458,7 @@ async def oauth_transport(
     flow_timeout: float = 300.0,
     storage: FileTokenStorage | None = None,
     redirect_handler: Callable[..., Any] | None = None,
-):
+) -> Any:  # noqa: ANN401 -- yields whatever the transport CM yields
     """Run an MCP transport with interactive OAuth attached.
 
     ``make_transport`` is called with an :class:`OAuthClientProvider` (an

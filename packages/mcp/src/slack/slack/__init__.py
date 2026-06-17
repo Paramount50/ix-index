@@ -242,7 +242,7 @@ def _api_call(method: str, token: str, params: dict[str, Any] | None = None) -> 
     a ``missing_scope`` error is rewritten to name the scope to add.
     """
     body = urllib.parse.urlencode(params or {}).encode("utf-8")
-    req = urllib.request.Request(
+    req = urllib.request.Request(  # noqa: S310 -- URL always https://slack.com/api/*, not user-supplied
         f"{_API_BASE}/{method}",
         data=body,
         headers={
@@ -498,18 +498,18 @@ async def channels(
         if cursor:
             params["cursor"] = cursor
         data = _api_call("conversations.list", token, params)
-        for ch in data.get("channels", []):
-            rows.append(
-                {
-                    "id": ch.get("id", ""),
-                    "name": ch.get("name", ""),
-                    "is_private": bool(ch.get("is_private")),
-                    "is_member": bool(ch.get("is_member")),
-                    "num_members": int(ch.get("num_members") or 0),
-                    "topic": (ch.get("topic") or {}).get("value", "") or "",
-                    "purpose": (ch.get("purpose") or {}).get("value", "") or "",
-                }
-            )
+        rows.extend(
+            {
+                "id": ch.get("id", ""),
+                "name": ch.get("name", ""),
+                "is_private": bool(ch.get("is_private")),
+                "is_member": bool(ch.get("is_member")),
+                "num_members": int(ch.get("num_members") or 0),
+                "topic": (ch.get("topic") or {}).get("value", "") or "",
+                "purpose": (ch.get("purpose") or {}).get("value", "") or "",
+            }
+            for ch in data.get("channels", [])
+        )
         cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
         if not cursor:
             break

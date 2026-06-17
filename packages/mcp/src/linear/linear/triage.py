@@ -142,11 +142,10 @@ def _normalize(s: str) -> str:
     s = re.sub(r"/nix/store/[a-z0-9]{32}-", "/nix/store/<hash>-", s)
     s = re.sub(r"nox-conformance-store-\d+", "nox-conformance-store-<pid>", s)
     s = re.sub(r":\d+:\d+", ":<lc>", s)
-    s = re.sub(r"/tmp/[^\s:'\"]+", "/tmp/<tmp>", s)
+    s = re.sub(r"/tmp/[^\s:'\"]+", "/tmp/<tmp>", s)  # noqa: S108 -- pattern only matches temp path strings in log text, never opens any file
     s = re.sub(r"\bpid \d+", "pid <pid>", s)
     # Collapse whitespace (tabs, newlines, multiple spaces).
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
+    return re.sub(r"\s+", " ", s).strip()
 
 
 #: Number of hex characters returned by :func:`fingerprint`.  The full

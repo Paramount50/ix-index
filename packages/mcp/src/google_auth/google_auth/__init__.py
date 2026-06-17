@@ -180,6 +180,7 @@ def _mint() -> MintedToken:
         capture_output=True,
         text=True,
         timeout=_MINT_TIMEOUT,
+        check=False,
     )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip()
@@ -275,9 +276,7 @@ def status() -> dict[str, Any]:
 
         gmail_client = build("gmail", "v1", credentials=_credentials_from(data), cache_discovery=False)
         email = gmail_client.users().getProfile(userId="me").execute().get("emailAddress")
-    except Exception:
-        # An older grant without a Gmail scope (or a transient API error) still
-        # counts as signed in; we just cannot name the account.
+    except Exception:  # noqa: S110 -- older grant without Gmail scope or transient API error; still signed in
         pass
     return {"signed_in": True, "email": email, "scopes": data.scopes or []}
 
@@ -295,6 +294,7 @@ def logout() -> dict[str, Any]:
         capture_output=True,
         text=True,
         timeout=_MINT_TIMEOUT,
+        check=False,
     )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout).strip()
@@ -305,7 +305,7 @@ def logout() -> dict[str, Any]:
         return {"signed_out": True, "removed": []}
 
 
-def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict[str, Any]]:
+def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict[str, Any]]:  # noqa: FBT001 -- internal helper, bool arg is intentional
     """Drive `gcal auth --json` to completion synchronously; return (url, result).
 
     Runs on a worker thread (see `login`), so blocking here never stalls the
@@ -346,10 +346,9 @@ def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict[str
     if open_browser:
         # Best effort: a headless host has no browser, and the caller still gets
         # auth_url back to open by hand.
-        try:
+        import contextlib
+        with contextlib.suppress(Exception):
             webbrowser.open(auth_url)
-        except Exception:
-            pass
 
     try:
         proc.wait(timeout=timeout)
@@ -359,7 +358,7 @@ def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict[str
         raise GoogleAuthError(
             f"timed out after {timeout:.0f}s waiting for you to finish signing in. "
             f"Open {auth_url} and consent, then try again."
-        )
+        ) from None
 
     # The process has exited, so draining its pipes to EOF is safe and bounded.
     out_rest = proc.stdout.read()
@@ -395,13 +394,11 @@ async def login(*, open_browser: bool = True, timeout: float = _LOGIN_TIMEOUT) -
     # run it on a worker thread to keep the kernel's event loop responsive.
     auth_url, result = await asyncio.to_thread(_consent_blocking, open_browser, timeout)
     email = None
-    try:
+    import contextlib
+    with contextlib.suppress(Exception):
         email = await asyncio.to_thread(
             lambda: gmail().users().getProfile(userId="me").execute().get("emailAddress")
         )
-    except Exception:
-        # The grant is stored and valid; we just could not name the account.
-        pass
     return {
         "signed_in": True,
         "email": email,

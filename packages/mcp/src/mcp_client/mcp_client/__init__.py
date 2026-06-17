@@ -133,7 +133,7 @@ class ToolResult(_ResultBase):
                     import base64
 
                     images.append(base64.b64decode(block.data))
-                except Exception:
+                except Exception:  # noqa: S110 -- malformed image block: skip silently, text still delivered
                     pass
         self.text = "\n".join(texts)
 
@@ -182,7 +182,7 @@ class Server:
     cell calls a method.
     """
 
-    def __init__(self, key: str, transport_factory, label: str) -> None:
+    def __init__(self, key: str, transport_factory: object, label: str) -> None:
         self._key = key
         self._transport_factory = transport_factory
         self.label = label
@@ -202,7 +202,7 @@ class Server:
     async def _open(self) -> Server:
         self._task = asyncio.create_task(self._run(), name=f"mcp:{self.label}")
         ready = asyncio.create_task(self._ready.wait())
-        done, _ = await asyncio.wait(
+        _done, _ = await asyncio.wait(
             {ready, self._task}, return_when=asyncio.FIRST_COMPLETED
         )
         if not self._ready.is_set():
@@ -258,7 +258,7 @@ class Server:
                 if not fut.done():
                     fut.set_exception(self._error or MCPError(f"{self.label}: closed"))
 
-    async def _submit(self, fn):
+    async def _submit(self, fn: object) -> object:
         if self._closed.is_set():
             raise MCPError(f"{self.label}: server is closed")
         fut: asyncio.Future = asyncio.get_event_loop().create_future()
@@ -279,7 +279,7 @@ class Server:
     async def __aenter__(self) -> Server:
         return self
 
-    async def __aexit__(self, *exc) -> None:
+    async def __aexit__(self, *exc: object) -> None:
         await self.close()
 
     # -- catalog --
@@ -310,7 +310,7 @@ class Server:
     # -- calls --
 
     async def call(
-        self, tool: str, arguments: dict | None = None, /, **kwargs
+        self, tool: str, arguments: dict | None = None, /, **kwargs: object
     ) -> ToolResult:
         """Call ``tool`` with keyword arguments (or a single ``arguments`` dict).
 
@@ -325,26 +325,26 @@ class Server:
                 f"{self.label}: no tool {tool!r}; available: {', '.join(sorted(known)) or '(none)'}"
             )
 
-        async def _do(session: ClientSession):
+        async def _do(session: ClientSession) -> object:
             return await session.call_tool(tool, args)
 
         result = await self._submit(_do)
         return ToolResult(tool, result)
 
-    async def read(self, uri: str):
+    async def read(self, uri: str) -> object:
         """Read a resource by URI; returns the SDK ``ReadResourceResult``."""
 
-        async def _do(session: ClientSession):
+        async def _do(session: ClientSession) -> object:
             return await session.read_resource(uri)
 
         return await self._submit(_do)
 
-    async def prompt(self, name: str, arguments: dict | None = None, /, **kwargs):
+    async def prompt(self, name: str, arguments: dict | None = None, /, **kwargs: object) -> object:
         """Fetch a prompt by name; returns the SDK ``GetPromptResult``."""
         args = dict(arguments or {})
         args.update(kwargs)
 
-        async def _do(session: ClientSession):
+        async def _do(session: ClientSession) -> object:
             return await session.get_prompt(name, args)
 
         return await self._submit(_do)
@@ -378,10 +378,10 @@ class Server:
             f"{name} ({self.info.get('version', '?')}) — {self.tools.height} tools"
         ]
         if self.tools.height:
-            for row in self.tools.iter_rows(named=True):
-                lines.append(
-                    f"  {row['name']}({row.get('params', '')}) — {row.get('summary', '')}"
-                )
+            lines.extend(
+                f"  {row['name']}({row.get('params', '')}) — {row.get('summary', '')}"
+                for row in self.tools.iter_rows(named=True)
+            )
         return "\n".join(lines)
 
     @property
@@ -505,13 +505,13 @@ async def connect(
         url = target
         if transport == "http":
 
-            def base_factory(auth=None, url=url, hdrs=hdrs, timeout=timeout):
+            def base_factory(auth: object = None, url: str = url, hdrs: dict = hdrs, timeout: float = timeout) -> object:
                 return streamablehttp_client(
                     url, headers=hdrs or None, timeout=timeout, auth=auth
                 )
         else:
 
-            def base_factory(auth=None, url=url, hdrs=hdrs):
+            def base_factory(auth: object = None, url: str = url, hdrs: dict = hdrs) -> object:
                 return sse_client(url, headers=hdrs or None, auth=auth)
 
         has_auth_header = any(k.lower() == "authorization" for k in hdrs)
@@ -519,7 +519,7 @@ async def connect(
         if use_oauth:
             from . import _oauth
 
-            def factory(url=url):
+            def factory(url: str = url) -> object:
                 return _oauth.oauth_transport(
                     base_factory,
                     url,
@@ -543,7 +543,7 @@ async def connect(
             raise MCPError("empty stdio command")
         params = StdioServerParameters(command=argv[0], args=argv[1:], env=env, cwd=cwd)
 
-        def factory(params=params):
+        def factory(params: StdioServerParameters = params) -> object:
             return stdio_client(params)
 
         label = name or " ".join(argv)

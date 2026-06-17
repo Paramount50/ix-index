@@ -44,6 +44,7 @@ import asyncio
 import json
 import os
 import shutil
+from pathlib import Path
 from typing import Any
 from collections.abc import Callable, Sequence
 
@@ -82,7 +83,7 @@ class ClusterError(Exception):
 # --- Ray bootstrap ---------------------------------------------------------
 
 
-def connect(address: str | None = None, *, local: bool = False, **kw: Any) -> None:
+def connect(address: str | None = None, *, local: bool = False, **kw: Any) -> None:  # noqa: ANN401 -- forwarded to ray.init
     """Connect this session's kernel to the fleet's Ray cluster (idempotent).
 
     Target resolution, in order: an explicit ``address``; else
@@ -100,7 +101,7 @@ def connect(address: str | None = None, *, local: bool = False, **kw: Any) -> No
 
     if ray.is_initialized():
         return
-    common = dict(logging_level="error", configure_logging=False, ignore_reinit_error=True)
+    common = {"logging_level": "error", "configure_logging": False, "ignore_reinit_error": True}
     common.update(kw)
     if local:
         ray.init(**common)
@@ -123,12 +124,17 @@ def connect(address: str | None = None, *, local: bool = False, **kw: Any) -> No
 # --- Discovery -------------------------------------------------------------
 
 
-async def _tailscale_status() -> dict | None:
-    """``tailscale status --json`` off the event loop, or None if unavailable."""
-    binary = shutil.which("tailscale") or next(
-        (p for p in ("/usr/local/bin/tailscale", "/usr/bin/tailscale") if os.path.exists(p)),
+def _find_tailscale() -> str | None:
+    """Return the path to the tailscale binary, or None if not found."""
+    return shutil.which("tailscale") or next(
+        (p for p in ("/usr/local/bin/tailscale", "/usr/bin/tailscale") if Path(p).exists()),
         None,
     )
+
+
+async def _tailscale_status() -> dict | None:
+    """``tailscale status --json`` off the event loop, or None if unavailable."""
+    binary = await asyncio.to_thread(_find_tailscale)
     if not binary:
         return None
     try:
@@ -250,7 +256,7 @@ def _node_label(rn: dict) -> str:
     return rn.get("NodeManagerHostname") or rn.get("NodeManagerAddress") or rn.get("NodeID", "?")
 
 
-def _resolve_ray_targets(on: Any) -> list[tuple[str, str | None]]:
+def _resolve_ray_targets(on: Any) -> list[tuple[str, str | None]]:  # noqa: ANN401 -- on accepts str/"all"/list
     """Resolve ``on`` to a list of ``(label, node_id)``.
 
     ``node_id`` is ``None`` to mean "let Ray place it anywhere". ``on`` accepts:
@@ -278,7 +284,7 @@ def _resolve_ray_targets(on: Any) -> list[tuple[str, str | None]]:
     return targets
 
 
-def _remote(fn: Callable, node_id: str | None, options: dict) -> Any:
+def _remote(fn: Callable, node_id: str | None, options: dict) -> Any:  # noqa: ANN401 -- returns Ray remote fn wrapper
     import ray
     from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
 
@@ -291,7 +297,7 @@ def _remote(fn: Callable, node_id: str | None, options: dict) -> Any:
     return remote_fn.options(**opts) if opts else remote_fn
 
 
-def submit(fn: Callable, *args: Any, on: Any = "any", **kwargs: Any):
+def submit(fn: Callable, *args: Any, on: Any = "any", **kwargs: Any) -> Any:  # noqa: ANN401 -- cluster fan-out: args/results are caller-defined
     """Schedule ``fn`` on the cluster and return Ray object reference(s) now.
 
     The reference is a future *and* a handle into the object store; pass it to
@@ -313,7 +319,7 @@ def submit(fn: Callable, *args: Any, on: Any = "any", **kwargs: Any):
     return refs
 
 
-async def get(refs: Any) -> Any:
+async def get(refs: Any) -> Any:  # noqa: ANN401 -- Ray object refs: shape mirrors input
     """Await Ray object reference(s) without blocking the kernel's event loop.
 
     Accepts a single ref, a list, or the ``{label: ref}`` dict :func:`submit`
@@ -322,13 +328,13 @@ async def get(refs: Any) -> Any:
     """
     if isinstance(refs, dict):
         values = await asyncio.gather(*refs.values(), return_exceptions=True)
-        return dict(zip(refs.keys(), values))
+        return dict(zip(refs.keys(), values, strict=False))
     if isinstance(refs, (list, tuple)):
         return await asyncio.gather(*refs, return_exceptions=True)
     return await refs
 
 
-def put(obj: Any):
+def put(obj: Any) -> Any:  # noqa: ANN401 -- returns Ray ObjectRef, type unknown at call site
     """Place ``obj`` in the cluster object store and return its reference.
 
     Useful to hand one large input to many tasks: ``put`` it once, pass the ref
@@ -342,7 +348,7 @@ def put(obj: Any):
     return ray.put(obj)
 
 
-async def run(fn: Callable, *args: Any, on: Any = "all", **kwargs: Any):
+async def run(fn: Callable, *args: Any, on: Any = "all", **kwargs: Any) -> Any:  # noqa: ANN401 -- cluster fan-out: args/results are caller-defined
     """Run ``fn`` on the cluster and return the gathered results eagerly.
 
     The common case: ``await fleet.run(get_hostname, on="all")`` does it
@@ -369,12 +375,12 @@ def _exec_token() -> str | None:
     if token:
         return token.strip()
     path = os.environ.get("IX_MCP_EXEC_TOKEN_FILE")
-    if path and os.path.exists(path):
-        return open(path).read().strip()
+    if path and Path(path).exists():
+        return Path(path).read_text().strip()
     return None
 
 
-async def _http_targets(on: Any) -> list[tuple[str, str]]:
+async def _http_targets(on: Any) -> list[tuple[str, str]]:  # noqa: ANN401 -- on accepts str/"all"/list
     """Resolve ``on`` to ``(label, base_url)`` for the ``/api/exec`` endpoint."""
     df = await nodes()
     rows = df.filter(pl.col("tailscale_ip").is_not_null()).to_dicts()
@@ -396,7 +402,7 @@ async def _http_targets(on: Any) -> list[tuple[str, str]]:
     return out
 
 
-async def in_kernel(on: Any, code: str, *, budget: float = 15.0) -> pl.DataFrame:
+async def in_kernel(on: Any, code: str, *, budget: float = 15.0) -> pl.DataFrame:  # noqa: ANN401 -- on accepts str/"all"/list
     """Run ``code`` in the *live* ix-mcp kernel of one or more nodes.
 
     Unlike a Ray task (a fresh worker), this reaches each node's existing
@@ -479,7 +485,7 @@ async def _resolve_host(host: str) -> str:
     raise ClusterError(f"no node matches {host!r}; see `await fleet.nodes()`")
 
 
-async def spark(master: str | None = None, **config: Any):
+async def spark(master: str | None = None, **config: Any) -> Any:  # noqa: ANN401 -- returns SparkSession, optional dep
     """Open a SparkSession on the fleet's Spark cluster via Spark Connect.
 
     The complement to Ray: Ray (:func:`run`) runs distributed *Python*; Spark is
@@ -515,7 +521,7 @@ async def spark(master: str | None = None, **config: Any):
         )
     url = f"sc://{await _resolve_host(host)}:{SPARK_CONNECT_PORT}"
 
-    def _build():
+    def _build() -> Any:  # noqa: ANN401 -- returns SparkSession, optional dep
         builder = SparkSession.builder.remote(url)
         for key, value in config.items():
             builder = builder.config(key, value)
@@ -528,7 +534,7 @@ async def spark(master: str | None = None, **config: Any):
 # --- Manual bring-up (dev / ad-hoc; production uses the NixOS service) ------
 
 
-async def up(*, head: bool = False, address: str | None = None, **kw: Any) -> str:
+async def up(*, head: bool = False, address: str | None = None, **kw: Any) -> str:  # noqa: ANN401 -- kw forwarded to ray start
     """Start a Ray daemon on THIS host via ``ray start`` (returns its output).
 
     For dev or an ad-hoc cluster; on the fleet the NixOS service does this at

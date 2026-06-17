@@ -42,8 +42,8 @@ def main(argv: list[str] | None = None) -> None:
 
     out_file = os.environ.get("SYMPHONY_OUTPUT_FILE", "")
     if out_file:
-        with open(out_file, "w") as fh:
-            fh.write(output)
+        from pathlib import Path
+        Path(out_file).write_text(output)
 
 
 if __name__ == "__main__":

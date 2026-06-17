@@ -78,11 +78,13 @@ from __future__ import annotations
 
 import asyncio as _asyncio
 import base64 as _base64
+import contextlib
 import html as _html
 import os as _os
 import sys as _sys
 import time as _time
 import urllib.parse as _urlparse
+from pathlib import Path
 
 __all__ = [
     "DEFAULT_APP",
@@ -122,7 +124,7 @@ _playwright = None
 _browsers: dict = {}
 
 
-async def _ensure_playwright():
+async def _ensure_playwright() -> None:
     global _playwright
     if _playwright is None:
         from playwright.async_api import async_playwright
@@ -143,7 +145,7 @@ def _default_user_data_dir(app: str) -> str:
     """A dedicated, module-owned profile dir for a launched browser, so it runs as
     its own instance without touching the user's everyday session."""
     slug = "".join(c if c.isalnum() else "-" for c in app.lower()).strip("-")
-    return _os.path.expanduser(f"~/.cdp-{slug}-profile")
+    return str(Path(f"~/.cdp-{slug}-profile").expanduser())
 
 
 def _launch_argv(app: str, port: int, user_data_dir: str) -> list[str]:
@@ -174,13 +176,13 @@ async def _cdp_ready(endpoint: str, *, timeout: float) -> bool:
     # a minimal sandbox like the Nix build sandbox that variable points at a path
     # that does not exist, so construction aborts with FileNotFoundError before
     # the probe ever runs.
-    async with httpx.AsyncClient(verify=False) as client:
+    async with httpx.AsyncClient(verify=False) as client:  # noqa: S501 -- local-only CDP probe, never TLS; see comment above
         while _asyncio.get_running_loop().time() < deadline:
             try:
                 resp = await client.get(f"{endpoint}/json/version", timeout=1.0)
                 if resp.status_code == 200:
                     return True
-            except Exception:
+            except Exception:  # noqa: S110 -- best-effort probe; any error means CDP not ready yet
                 pass
             await _asyncio.sleep(0.25)
     return False
@@ -192,7 +194,7 @@ async def get_or_create_browser(
     app: str = DEFAULT_APP,
     user_data_dir: str | None = None,
     timeout: float = 30.0,
-):
+) -> object:
     """Connect to a browser already listening on ``endpoint``, or launch a real,
     **visible** (never headless) browser there and connect to it. Returns the live
     Playwright ``Browser``.
@@ -215,7 +217,7 @@ async def get_or_create_browser(
         pass
     port = _port_of(endpoint)
     udd = user_data_dir or _default_user_data_dir(app)
-    _os.makedirs(udd, exist_ok=True)
+    await _asyncio.to_thread(Path(udd).mkdir, parents=True, exist_ok=True)
     argv = _launch_argv(app, port, udd)
     # Detach into its own session: `open` returns at once, and a directly-exec'd
     # browser must outlive this call. Output is discarded so it never holds a pipe.
@@ -238,7 +240,7 @@ async def get_or_create_browser(
     return await connect(endpoint)
 
 
-async def connect(endpoint: str = DEFAULT_ENDPOINT):
+async def connect(endpoint: str = DEFAULT_ENDPOINT) -> object:
     """Connect to a running browser's CDP endpoint (or reuse the cached connection)
     and return the Playwright ``Browser``. ``endpoint`` is the DevTools HTTP URL
     ``http://host:port`` -- the default is the standard CDP port 9222.
@@ -344,7 +346,7 @@ async def _resource_html(endpoint: str = DEFAULT_ENDPOINT) -> str:
     return html
 
 
-def _register_resource(endpoint: str = DEFAULT_ENDPOINT):
+def _register_resource(endpoint: str = DEFAULT_ENDPOINT) -> object | None:
     """Publish the browser at ``endpoint`` as a live dashboard resource, when running
     inside the kernel. Decoupled on purpose: outside the kernel (a test, a plain
     interpreter) the runtime is absent and this is a silent no-op, so ``connect``
@@ -366,14 +368,14 @@ def _register_resource(endpoint: str = DEFAULT_ENDPOINT):
     )
 
 
-async def context(endpoint: str = DEFAULT_ENDPOINT):
+async def context(endpoint: str = DEFAULT_ENDPOINT) -> object:
     """The browser's first existing context (its running profile), creating one only
     if the browser exposes none."""
     b = await connect(endpoint)
     return b.contexts[0] if b.contexts else await b.new_context()
 
 
-async def page(*, endpoint: str = DEFAULT_ENDPOINT, new: bool = False):
+async def page(*, endpoint: str = DEFAULT_ENDPOINT, new: bool = False) -> object:
     """A Playwright ``Page`` on the running browser: the front (most recent) tab by
     default, or a fresh tab with ``new=True``. Hand it to the full Playwright API."""
     ctx = await context(endpoint)
@@ -389,7 +391,7 @@ async def goto(
     new: bool = False,
     wait_until: str = "load",
     timeout: float = 30000,
-):
+) -> object:
     """Navigate a tab to ``url`` and return its ``Page``. Reuses the front tab unless
     ``new=True``. ``wait_until`` is Playwright's load state (``load`` /
     ``domcontentloaded`` / ``networkidle``); ``timeout`` is in milliseconds."""
@@ -447,7 +449,7 @@ def _encode_shot(png: bytes, *, max_dim: int, fmt: str, quality: int) -> tuple[b
 
 
 async def shot(
-    target=None,
+    target: object = None,
     *,
     endpoint: str = DEFAULT_ENDPOINT,
     full_page: bool = False,
@@ -456,7 +458,7 @@ async def shot(
     max_dim: int | None = None,
     format: str = "jpeg",
     quality: int = 72,
-):
+) -> object:
     """Screenshot a ``Page`` (or the front tab when ``target`` is None) and return a
     :class:`Result`: the human sees the image, the model gets the image plus the
     page's title and url. End a cell with it to render the screenshot.
@@ -489,10 +491,8 @@ async def shot(
     if scale not in ("css", "device"):
         raise ValueError(f"scale must be 'css' or 'device', got {scale!r}")
     pg = target if target is not None else await page(endpoint=endpoint)
-    try:
+    with contextlib.suppress(Exception):
         await pg.bring_to_front()
-    except Exception:
-        pass
     try:
         png = await pg.screenshot(full_page=full_page, scale=scale)
     except Exception as exc:
@@ -517,7 +517,7 @@ async def shot(
         return data
 
 
-async def read(target=None, *, endpoint: str = DEFAULT_ENDPOINT, max_chars: int = 8000):
+async def read(target: object = None, *, endpoint: str = DEFAULT_ENDPOINT, max_chars: int = 8000) -> object:
     """A cheap, text-first readout of a page (or the front tab when ``target`` is
     None): its title/url, the visible text, and the interactive elements (links,
     buttons, fields) with their role and accessible name -- an accessibility-style
@@ -768,7 +768,7 @@ _VDOM_JS = r"""
 """
 
 
-def _walk_assign(nodes, _counter=None, _depth=0, _out=None):
+def _walk_assign(nodes: list, _counter: list | None = None, _depth: int = 0, _out: list | None = None) -> list:
     """Number the kept (non-group) nodes in document order and flatten the tree.
 
     Refs are 1-based and stable within one snapshot, so `[12]` in the rendered
@@ -821,7 +821,7 @@ class Vdom:
     # the rest. The full map is always in `.df` / `.json`; this only caps the glance.
     RENDER_LIMIT = 200
 
-    def __init__(self, raw: dict):
+    def __init__(self, raw: dict) -> None:
         self.url: str = raw.get("url", "")
         self.title: str = raw.get("title", "")
         self.viewport: dict = raw.get("viewport", {})
@@ -833,7 +833,7 @@ class Vdom:
     def json(self) -> list:
         """The clean DOM as a nested list of plain dicts (JSON-serializable)."""
 
-        def strip(nodes):
+        def strip(nodes: list) -> list:
             out = []
             for n in nodes:
                 d = _node_public(n)
@@ -844,7 +844,7 @@ class Vdom:
         return strip(self.nodes)
 
     @property
-    def df(self):
+    def df(self) -> object:
         """Every kept node as a polars frame -- the full, untruncated page map:
         one row per node with its ref, role, name, geometry and CSS selector."""
         import polars as pl
@@ -874,7 +874,7 @@ class Vdom:
         return pl.DataFrame(rows, schema=schema) if rows else pl.DataFrame(schema=schema)
 
     @property
-    def interactive(self):
+    def interactive(self) -> object:
         """Just the actionable nodes (links, buttons, fields, ...) as a polars frame."""
         return self.df.filter(__import__("polars").col("interactive"))
 
@@ -889,7 +889,7 @@ class Vdom:
     def _lines(self) -> list[str]:
         lines: list[str] = []
 
-        def emit(nodes, depth):
+        def emit(nodes: list, depth: int) -> None:
             for n in nodes:
                 pad = "  " * depth
                 if n.get("group"):
@@ -922,19 +922,17 @@ class Vdom:
             f"\u00b7 viewport {self.viewport.get('w')}x{self.viewport.get('h')}"
         )
         lines = self._lines()
-        body = lines if limit <= 0 or len(lines) <= limit else lines[:limit] + [
+        body = lines if limit <= 0 or len(lines) <= limit else [*lines[:limit], (
             f"\u2026 +{len(lines) - limit} more lines \u2014 see .df for the full map, "
             f"or re-run with interactive_only=True / viewport_only=True"
-        ]
+        )]
         return head + "\n" + "\n".join(body)
 
     def __repr__(self) -> str:
         return self.text()
 
     def _repr_html_(self) -> str:
-        rows = []
-        for ln in self.text().split("\n")[1:]:  # skip the header line; shown separately
-            rows.append(_html.escape(ln))
+        rows = [_html.escape(ln) for ln in self.text().split("\n")[1:]]  # skip the header line; shown separately
         title = _html.escape(self.title or "(untitled)")
         n_real = sum(1 for n in self.flat if not n.get("group"))
         n_int = sum(1 for n in self.flat if n.get("interactive"))
@@ -953,13 +951,13 @@ class Vdom:
 
 
 async def vdom(
-    target=None,
+    target: object = None,
     *,
     endpoint: str = DEFAULT_ENDPOINT,
     interactive_only: bool = False,
     viewport_only: bool = False,
     max_text: int = 120,
-):
+) -> Vdom:
     """A clean, filtered :class:`Vdom` of a page -- the recommended way to read a
     page's structure and decide what to act on, without a screenshot.
 
@@ -1002,7 +1000,7 @@ def _target_closed(exc: Exception) -> bool:
     return isinstance(exc, TargetClosedError) or "has been closed" in str(exc)
 
 
-async def close(endpoint: str | None = None):
+async def close(endpoint: str | None = None) -> None:
     """Disconnect a cached CDP connection (or all of them) and stop the Playwright
     driver once none remain. This closes the *connection*, not the browser itself."""
     global _playwright
@@ -1010,10 +1008,8 @@ async def close(endpoint: str | None = None):
     for ep in targets:
         b = _browsers.pop(ep, None)
         if b is not None:
-            try:
+            with contextlib.suppress(Exception):  # best-effort teardown; any error means already closed
                 await b.close()
-            except Exception:
-                pass
     if not _browsers and _playwright is not None:
         try:
             await _playwright.stop()
