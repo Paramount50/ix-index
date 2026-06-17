@@ -5,6 +5,7 @@
 {
   nixpkgs,
   ix,
+  paths,
 }:
 let
   inherit (nixpkgs) lib;
@@ -15,26 +16,34 @@ let
   # VM boot smoke test for the minecraft-blocks Paper plugin (ENG-2186). Not
   # part of the `eval` aggregate: it boots a qemu VM, so it is its own check
   # (`checks.<system>.minecraft-blocks-vm`).
-  minecraftBlocksVmTest = import ./minecraft-blocks-vm.nix { inherit lib pkgs ix; };
+  minecraftBlocksVmTest = import ./minecraft-blocks-vm.nix {
+    inherit
+      lib
+      pkgs
+      ix
+      paths
+      ;
+  };
   # Public Rust SDK: validates the prebuilt, R2-hosted ix-sdk-wire artifact
   # pins. The old end-to-end link proof needs a matching published rustc
   # dependency closure before it can be a reliable CI gate.
-  sdkRust = import ../sdk/rust { inherit lib pkgs ix; };
-  packageRegistry = import ../packages/registry.nix {
+  sdkRust = import (paths.root + "/sdk/rust") { inherit lib pkgs ix; };
+  packageRegistry = import (paths.packagesRoot + "/registry.nix") {
     inherit lib;
-    root = ../packages;
+    root = paths.packagesRoot;
+    inherit (ix.lists) findDuplicates;
   };
   missingPackageMetadata = map (
-    dir: lib.removePrefix "${builtins.toString ../packages}/" (builtins.toString dir)
+    dir: lib.removePrefix "${builtins.toString paths.packagesRoot}/" (builtins.toString dir)
   ) packageRegistry.packageDirsWithoutMetadata;
 
-  versions = import ../images/games/minecraft/versions.nix {
+  versions = import (paths.images + "/games/minecraft/versions.nix") {
     inherit lib;
     inherit (ix) artifacts;
   };
   defaultMinecraftVersion = versions.default;
   defaultMinecraftModule = versions.${defaultMinecraftVersion};
-  rustToolchainFile = lib.importTOML ../rust-toolchain.toml;
+  rustToolchainFile = lib.importTOML (paths.root + "/rust-toolchain.toml");
   rustPinnedNightlyDate = lib.removePrefix "nightly-" rustToolchainFile.toolchain.channel;
 
   # Thin wrapper to keep call sites as plain lists; delegates to ix.evalImageConfig
@@ -51,7 +60,7 @@ let
   standaloneJvmProfile = lib.nixosSystem {
     inherit (pkgs.stdenv.hostPlatform) system;
     modules = [
-      ../modules/profiles/jvm
+      (paths.modules + "/profiles/jvm")
       {
         nixpkgs.pkgs = plainPkgs;
         system.stateVersion = "25.05";
@@ -73,7 +82,7 @@ let
   minecraft =
     let
       config = evalConfig [
-        ../images/games/minecraft
+        (paths.images + "/games/minecraft")
         defaultMinecraftModule
       ];
     in
@@ -92,7 +101,7 @@ let
       paper =
         let
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             versions."1.21.11-paper"
           ];
         in
@@ -116,7 +125,7 @@ let
       rcon =
         let
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             defaultMinecraftModule
             {
               services.minecraft.rcon.enable = true;
@@ -131,7 +140,7 @@ let
           openFirewall =
             let
               config = evalConfig [
-                ../images/games/minecraft
+                (paths.images + "/games/minecraft")
                 defaultMinecraftModule
                 {
                   services.minecraft.rcon = {
@@ -151,7 +160,7 @@ let
       worldBorder =
         let
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             defaultMinecraftModule
             {
               services.minecraft.worldBorder = {
@@ -174,7 +183,7 @@ let
       paperPlugins =
         let
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             versions."26.1.2-paper"
             {
               services.minecraft.plugins = {
@@ -199,7 +208,7 @@ let
       nestedProperties =
         let
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             defaultMinecraftModule
             {
               services.minecraft.properties = {
@@ -222,7 +231,7 @@ let
         let
           json = pkgs.formats.json { };
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             defaultMinecraftModule
             {
               services.minecraft = {
@@ -348,7 +357,7 @@ let
         let
           tags = ix.minecraft.nbt;
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             defaultMinecraftModule
             {
               services.minecraft = {
@@ -409,7 +418,7 @@ let
       datapacks =
         let
           config = evalConfig [
-            ../images/games/minecraft
+            (paths.images + "/games/minecraft")
             defaultMinecraftModule
             {
               services.minecraft = {
@@ -453,7 +462,7 @@ let
 
   bedrock =
     let
-      config = evalConfig [ ../images/games/minecraft-bedrock ];
+      config = evalConfig [ (paths.images + "/games/minecraft-bedrock") ];
     in
     {
       inherit config;
@@ -470,7 +479,7 @@ let
 
   remoteDesktop =
     let
-      config = evalConfig [ ../images/desktop/remote-desktop ];
+      config = evalConfig [ (paths.images + "/desktop/remote-desktop") ];
     in
     {
       inherit config;
@@ -521,7 +530,7 @@ let
 
   kernelDev =
     let
-      config = evalConfig [ ../images/dev/kernel-dev ];
+      config = evalConfig [ (paths.images + "/dev/kernel-dev") ];
     in
     {
       inherit config;
@@ -533,7 +542,7 @@ let
 
   developmentBase =
     let
-      config = evalConfig [ ../images/dev/development-base ];
+      config = evalConfig [ (paths.images + "/dev/development-base") ];
     in
     {
       inherit config;
@@ -544,7 +553,7 @@ let
 
   symphonyCodex =
     let
-      config = evalConfig [ ../images/dev/symphony-codex ];
+      config = evalConfig [ (paths.images + "/dev/symphony-codex") ];
     in
     {
       inherit config;
@@ -1781,7 +1790,7 @@ let
 
   factionsExample =
     let
-      fleet = import ../examples/minecraft/factions {
+      fleet = import (paths.examples + "/minecraft/factions") {
         index = {
           lib = ix;
         };
@@ -1802,7 +1811,7 @@ let
 
   survivalExample =
     let
-      fleet = import ../examples/minecraft/survival {
+      fleet = import (paths.examples + "/minecraft/survival") {
         index = {
           lib = ix;
         };
@@ -1827,7 +1836,7 @@ let
 
   dailyScraperExample =
     let
-      fleet = import ../examples/python-daily-scraper {
+      fleet = import (paths.examples + "/python-daily-scraper") {
         index = {
           lib = ix;
         };
@@ -1843,7 +1852,7 @@ let
 
   nginxLifecycleExample =
     let
-      fleet = import ../examples/nginx-lifecycle {
+      fleet = import (paths.examples + "/nginx-lifecycle") {
         index = {
           lib = ix;
         };
@@ -1858,7 +1867,7 @@ let
 
   s3StorageExample =
     let
-      fleet = import ../examples/s3-storage {
+      fleet = import (paths.examples + "/s3-storage") {
         index = {
           lib = ix;
         };
@@ -1873,7 +1882,7 @@ let
 
   observabilityStackExample =
     let
-      fleet = import ../examples/observability-stack {
+      fleet = import (paths.examples + "/observability-stack") {
         index = {
           lib = ix;
         };
@@ -1915,7 +1924,7 @@ let
   dailyScraperS3 =
     let
       config = evalConfig [
-        ../examples/python-daily-scraper/service.nix
+        (paths.examples + "/python-daily-scraper/service.nix")
         {
           _module.args.dailyScraper = {
             s3 = {
@@ -2017,7 +2026,7 @@ let
     ];
 
   minecraftUnsafeManagedPathFailures = failedAssertionsFor [
-    ../images/games/minecraft
+    (paths.images + "/games/minecraft")
     defaultMinecraftModule
     {
       services.minecraft = {
@@ -2226,7 +2235,7 @@ let
       portClaim = noYourkitConfig.ix.networking.portClaims.minestom-yourkit or null;
     };
 
-  nomadSecretRefsExample = import ../examples/nomad-secret-refs/example.nix {
+  nomadSecretRefsExample = import (paths.examples + "/nomad-secret-refs/example.nix") {
     index = {
       lib = ix;
     };
@@ -2234,7 +2243,7 @@ let
 
   minecraftBlocksExample =
     let
-      fleet = import ../examples/minecraft-blocks {
+      fleet = import (paths.examples + "/minecraft-blocks") {
         index = {
           lib = ix;
         };
@@ -2242,8 +2251,8 @@ let
       # The buildable artifacts (plugin jar, integration check) built directly
       # so the integration check can be pulled into the `eval` aggregate via
       # `helperScript`.
-      packages = import ../examples/minecraft-blocks/packages.nix { inherit ix pkgs; };
-      schema = import ../examples/minecraft-blocks/schema.nix { inherit lib; };
+      packages = import (paths.examples + "/minecraft-blocks/packages.nix") { inherit ix pkgs; };
+      schema = import (paths.examples + "/minecraft-blocks/schema.nix") { inherit lib; };
     in
     {
       inherit fleet packages schema;
@@ -3003,7 +3012,7 @@ let
       }
       {
         # The example supplies a configFile, so it must clear that gate.
-        assertion = failedAssertionsFor [ ../examples/s3-storage/service.nix ] == [ ];
+        assertion = failedAssertionsFor [ (paths.examples + "/s3-storage/service.nix") ] == [ ];
         message = "s3-storage example should satisfy the ix-seaweedfs credentials assertion";
       }
     ];
@@ -3273,9 +3282,9 @@ let
           && lib.hasInfix "services.minecraft.configFiles./absolute/bad.toml" msg
           && lib.hasInfix "services.minecraft.serverFiles.plugins/../bukkit.yml" msg
           && lib.hasInfix "services.minecraft.serverFiles.$(bad).json" msg
-          && lib.hasInfix "services.minecraft.datapacks.bad.fileName=../bad" msg
+          && lib.hasInfix "services.minecraft.datapacks.bad.fileName=(paths.root + " /bad ")" msg
           && lib.hasInfix "services.minecraft.datapacks.bad.files.data/../bad.json" msg
-          && lib.hasInfix "services.minecraft world directory ../bad-world" msg;
+          && lib.hasInfix "services.minecraft world directory (paths.root + " /bad-world ")" msg;
         message = "minecraft managed file options should reject unsafe relative paths at eval time";
       }
       {
@@ -4497,7 +4506,7 @@ let
           let
             bootstrap =
               (ix.evalImageConfig {
-                modules = [ ../images/system/test-cluster-bootstrap ];
+                modules = [ (paths.images + "/system/test-cluster-bootstrap") ];
               }).ix.image;
           in
           fleetPlan.web.bootstrapImage == "registry.ix.dev/${bootstrap.name}:${bootstrap.tag}";
@@ -4847,8 +4856,8 @@ let
     grep -q 'idempotent_total=2977' ${minecraftBlocksExample.packages.loadFixtures}/result
     grep -qE 'pk_granules=[0-9]+ skip_granules=[0-9]+' ${minecraftBlocksExample.packages.loadFixtures}/result
     test -s ${minecraftBlocksExample.packages.loadFixtures}/events.jsonl
-    test "$(wc -l < ${../examples/minecraft-blocks/fixtures.jsonl})" = "2977"
-    grep -q '"block_type":"minecraft:stone"' ${../examples/minecraft-blocks/fixtures.jsonl}
+    test "$(wc -l < ${(paths.examples + "/minecraft-blocks/fixtures.jsonl")})" = "2977"
+    grep -q '"block_type":"minecraft:stone"' ${(paths.examples + "/minecraft-blocks/fixtures.jsonl")}
     # The query tool reads with FINAL so counts are exact under the idempotent
     # ReplacingMergeTree (merge-time dedup forced at read), not only after a
     # background merge. Grep the rendered helper for the FINAL table reference.

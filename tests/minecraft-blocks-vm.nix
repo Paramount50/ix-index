@@ -29,9 +29,10 @@
   lib,
   pkgs,
   ix,
+  paths,
 }:
 let
-  packages = import ../examples/minecraft-blocks/packages.nix { inherit ix pkgs; };
+  packages = import (paths.examples + "/minecraft-blocks/packages.nix") { inherit ix pkgs; };
 
   # The producer pins this Minecraft version (examples/minecraft-blocks).
   version = "26.1.2";
@@ -49,7 +50,7 @@ let
   # The default JRE the minecraft module launches the server with; the patch
   # step uses the same one so the class-file versions paperclip sees at build
   # time match what the VM runs.
-  jvmVersion = import ../lib/languages/jvm-defaults.nix;
+  jvmVersion = ix.languages.java.defaultJvmVersion;
   jre = pkgs."temurin-jre-bin-${jvmVersion}";
 
   # Run the paperclip bootstrap offline at build time: seed the cache with the
@@ -119,16 +120,16 @@ pkgs.testers.runNixOSTest {
         # loader's `enable` flag to pick the dropin dir, and the paper loader
         # reads `services.velocity` for proxy-forwarding defaults, so the
         # sibling modules must be present even though only paper is enabled.
-        ../modules/services/minecraft
-        ../modules/services/minecraft/fabric
-        ../modules/services/minecraft/folia
-        ../modules/services/minecraft/neoforge
-        ../modules/services/minecraft/paper
-        ../modules/services/minecraft/purpur
-        ../modules/services/minecraft/spigot
-        ../modules/services/minecraft/sponge
-        ../modules/services/minecraft/vanilla
-        ../modules/services/velocity
+        (paths.modules + "/services/minecraft")
+        (paths.modules + "/services/minecraft/fabric")
+        (paths.modules + "/services/minecraft/folia")
+        (paths.modules + "/services/minecraft/neoforge")
+        (paths.modules + "/services/minecraft/paper")
+        (paths.modules + "/services/minecraft/purpur")
+        (paths.modules + "/services/minecraft/spigot")
+        (paths.modules + "/services/minecraft/sponge")
+        (paths.modules + "/services/minecraft/vanilla")
+        (paths.modules + "/services/velocity")
 
         # The `ix.*` cross-module surface the minecraft module writes to is
         # declared by the image platform module (lib/image/platform.nix),
