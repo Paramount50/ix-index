@@ -1,6 +1,6 @@
 # claude-code
 
-`packages/claude-code` repackages
+`packages/agent/claude-code` repackages
 [Claude Code](https://www.anthropic.com/claude-code), Anthropic's agentic coding
 CLI, as a prebuilt-binary install with a thick layer of baked-in fleet defaults.
 The upstream artifact is a Bun single-file executable pinned per platform; this
@@ -12,33 +12,33 @@ The injection is done through the shared `config-launch` launcher
 (`packages/config-launch`), the same mechanism [codex](../codex/overview.md)
 uses: the wrapper bakes a launch-spec JSON and points `config-launch` at it via
 a `makeBinaryWrapper` `--set IX_LAUNCH_SPEC`
-(`packages/claude-code/default.nix:451-459`).
+(`packages/agent/claude-code/default.nix:451-459`).
 
 ## Version pin and provenance
 
 `manifest.json` holds `version` and per-platform `{ slug, hash }`, read with
-`lib.importJSON` and never hand-edited (`packages/claude-code/default.nix:128-129`;
+`lib.importJSON` and never hand-edited (`packages/agent/claude-code/default.nix:128-129`;
 `manifest.json` currently pins `2.1.170` for four platforms). The binary is
 `fetchurl`ed from the Anthropic-branded CDN with the GCS bucket as a hash-pinned
-mirror (`packages/claude-code/default.nix:402-408`).
+mirror (`packages/agent/claude-code/default.nix:402-408`).
 
 - Bump: `nix run .#claude-code.updateScript -- [version]`. The updater
   (`update.nix`) refetches Anthropic's per-version manifest, converts its hex
   checksums to SRI, and rewrites `manifest.json`
-  (`packages/claude-code/update.nix:33-67`).
+  (`packages/agent/claude-code/update.nix:33-67`).
 - Fails closed on provenance: the updater verifies the manifest's detached GPG
   signature against the pinned release key (`release-signing-key.asc`,
   fingerprint `31DD DE24 ... 1A7E CACE`) in an isolated `GNUPGHOME` and aborts
   if `gpg --verify` is non-zero, so a spoofed manifest cannot inject hashes for
-  attacker-controlled binaries (`packages/claude-code/update.nix:1-8`, `43-52`).
+  attacker-controlled binaries (`packages/agent/claude-code/update.nix:1-8`, `43-52`).
 - Pin is by raw version, not the npm `latest` tag, because Anthropic ships to
   the `next` prerelease tag days before promoting to `latest`
-  (`packages/claude-code/default.nix:121-127`).
+  (`packages/agent/claude-code/default.nix:121-127`).
 
 ## Baked defaults
 
 All flag/env/PATH/settings injection is declared as data in `launchSpec`
-(`packages/claude-code/default.nix:375-391`) and applied by `config-launch`.
+(`packages/agent/claude-code/default.nix:375-391`) and applied by `config-launch`.
 
 ### Forced env (always set)
 
@@ -172,7 +172,7 @@ and on Linux the sandbox helpers `bubblewrap` and `socat`.
   (`default.nix:464-480`).
 - Flake output: `nix run .#claude-code` / `nix build .#claude-code`, plus
   `pkgs.claude-code` (overlay). `package.nix` sets `packageSet`, `flake`,
-  `overlay`, `updateScript` all `true` (`packages/claude-code/package.nix`).
+  `overlay`, `updateScript` all `true` (`packages/agent/claude-code/package.nix`).
   Note: the overlay build gets `repoPackages = { }`, so it drops sibling-
   dependent defaults (the `index` MCP server, the search-gated prompt-priors
   hook) and omits `passthru.updateScript`; the full-featured build is the flake

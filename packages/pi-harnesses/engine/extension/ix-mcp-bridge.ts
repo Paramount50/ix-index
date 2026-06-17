@@ -10,7 +10,7 @@ import { buildMcpEnv } from "./env.js";
 // launches Pi with --no-builtin-tools, so these bridged tools are the ONLY tools
 // the model sees: shell, file IO and HTTP all happen inside the shared IPython
 // kernel via `python_exec`. This reproduces the Claude `restrictToTools` posture
-// (index/packages/claude-code/default.nix) on Pi, except Pi makes the built-ins
+// (index/packages/agent/claude-code/default.nix) on Pi, except Pi makes the built-ins
 // genuinely absent rather than merely denied.
 //
 // Each Pi run spawns its own `ix-mcp serve`, so it gets its own kernel. Shared

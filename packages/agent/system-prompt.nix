@@ -1,7 +1,8 @@
 { lib }:
 # House rules appended to Claude Code's stock system prompt (see the
-# `appendSystemPrompt` argument in ./default.nix for how this string is baked
-# into the wrapper). Authored as one paragraph per list element and joined with
+# `appendSystemPrompt` argument in ./claude-code/default.nix for how this string
+# is baked into the wrapper, surfaced as `systemPrompt` by ./common.nix).
+# Authored as one paragraph per list element and joined with
 # blank lines, so a rule reads as a self-contained line of source instead of
 # buried in a wall of indented-string prose.
 lib.concatStringsSep "\n\n" [

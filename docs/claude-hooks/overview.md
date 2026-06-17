@@ -2,7 +2,7 @@
 
 `packages/claude-hooks` is one compiled binary with three Claude Code hook
 subcommands, replacing the old hand-rolled `writeShellScript` hooks in
-`packages/claude-code`. The governing rule: every hook fails OPEN and SILENT.
+`packages/agent/claude-code`. The governing rule: every hook fails OPEN and SILENT.
 Any missing input, parse error, or kill-switch returns with no stdout, because a
 noisy or broken hook is strictly worse than no hook
 (`src/main.rs:1-10`).
@@ -43,7 +43,7 @@ out-of-band (ENG-2708); this hook only cats it.
 Denies a file-edit tool call whose TARGET path resolves into a protected primary
 checkout, so the agent is pushed to work in a dedicated worktree
 (`worktree_guard`, `src/main.rs:151-220`). Matcher in claude-code is
-`Edit|MultiEdit|Write|NotebookEdit` (`packages/claude-code/default.nix:258`).
+`Edit|MultiEdit|Write|NotebookEdit` (`packages/agent/claude-code/default.nix:258`).
 
 Flow:
 
@@ -104,10 +104,10 @@ projection so the model can discount stale content. In claude-code this hook (an
 `default.nix` selects the `claude-hooks` binary with
 `ix.cargoUnit.selectBinaryWithTests` (flake output `claude-hooks`,
 `package.nix`). The claude-code layer re-wraps it in
-`packages/claude-code/hooks.nix`: `makeBinaryWrapper` sets `IX_GIT`,
+`packages/agent/claude-code/hooks.nix`: `makeBinaryWrapper` sets `IX_GIT`,
 `IX_DEFAULT_PRIMARY_CHECKOUTS`, and (conditionally) `IX_SEARCH`, then registers
 the three subcommands as hook commands in the generated settings JSON
-(`packages/claude-code/default.nix:244-285`) with generous per-hook timeouts (5s,
+(`packages/agent/claude-code/default.nix:244-285`) with generous per-hook timeouts (5s,
 10s, 5s) that sit well past the fail-open budgets. `install-check.nix` asserts
 the fail-open behavior, the digest cap, and the guard deny/allow paths.
 

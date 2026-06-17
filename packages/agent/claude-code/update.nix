@@ -17,7 +17,7 @@ writeNushellApplication {
     nix
     gnupg
   ];
-  meta.description = "Refresh packages/claude-code/manifest.json to a signed Claude Code release";
+  meta.description = "Refresh packages/agent/claude-code/manifest.json to a signed Claude Code release";
   text = ''
     const base = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases"
     const signing_key = "${./release-signing-key.asc}"
@@ -61,7 +61,7 @@ writeNushellApplication {
             $acc | insert $row.system { slug: $row.slug, hash: $sri }
           }
       )
-      let out = "packages/claude-code/manifest.json"
+      let out = "packages/agent/claude-code/manifest.json"
       { version: $v, platforms: $platforms } | to json --indent 2 | save --force $out
       print $"updated ($out) to ($v); signature verified"
     }

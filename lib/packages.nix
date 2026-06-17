@@ -39,7 +39,7 @@ let
     entry:
     let
       # `repoPackages` is the package set itself (a lazy fix-point), so an
-      # entry can depend on a sibling by id (e.g. packages/claude-code reads
+      # entry can depend on a sibling by id (e.g. packages/agent/claude-code reads
       # `repoPackages.mcp`). Threaded under one name rather than merged flat
       # into autoArgs: a flat merge would let ids that shadow nixpkgs attrs
       # (`btop`, `kitty`, ...) hijack other packages' arguments, and a

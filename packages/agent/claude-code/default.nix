@@ -87,11 +87,9 @@
   #    exa "https://mcp.exa.ai/mcp?exaApiKey=..."`), which merges alongside and
   #    is preferred over baking a secret into the world-readable store.
   # `{ }` bakes no flag.
-  mcpServers ? ix.mcp.toClaudeJson (
-    ix.mcp.houseServers {
-      indexCommand = if repoPackages ? mcp then lib.getExe repoPackages.mcp else null;
-    }
-  ),
+  mcpServers ?
+    ix.mcp.toClaudeJson
+      (import ../common.nix { inherit lib ix repoPackages; }).houseServers,
 
   # Text APPENDED to Claude Code's stock system prompt. The string is
   # materialized to a store file and baked into the wrapper as
@@ -105,11 +103,11 @@
   # `--append-system-prompt`/`--append-system-prompt-file` on the CLI still
   # wins (single-value options are last-wins), and a caller who really wants a
   # wholesale replacement can still pass `--system-prompt[-file]`. Defaults to
-  # the house prompt in ./system-prompt.nix (the shokunin craft ethos plus the
-  # pre-v1 backward-compatibility engineering rule, plus a preference for working
-  # in git worktrees); set to `null` to bake no flag and ship the stock prompt
-  # alone.
-  appendSystemPrompt ? import ./system-prompt.nix { inherit lib; },
+  # the shared house prompt (`systemPrompt` in ../common.nix, authored in
+  # ../system-prompt.nix: the shokunin craft ethos plus the pre-v1
+  # backward-compatibility engineering rule, plus a preference for working in git
+  # worktrees); set to `null` to bake no flag and ship the stock prompt alone.
+  appendSystemPrompt ? (import ../common.nix { inherit lib ix repoPackages; }).systemPrompt,
 
   # Only the flake package set injects the Nushell writer; the overlay eval
   # context does not. The updater is a maintainer-facing flake output, so the

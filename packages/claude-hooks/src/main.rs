@@ -1,6 +1,6 @@
 //! Claude Code hook commands, one compiled binary with three subcommands that
 //! replace the old hand-rolled `writeShellScript` hooks in
-//! `packages/claude-code`. Every hook fails OPEN and SILENT: any missing input,
+//! `packages/agent/claude-code`. Every hook fails OPEN and SILENT: any missing input,
 //! parse error, or kill-switch returns with no stdout, because a noisy or broken
 //! hook is strictly worse than no hook.
 //!

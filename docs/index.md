@@ -22,13 +22,13 @@ From-source documentation for the packages in the `index` repo (a shared, open-s
 | [build-version](build-version/overview.md) | `packages/build-version` is a tiny library crate that formats a binary's `--version` line from build metadata a Nix wrapper stamps into the environment, so every ix tool reports its revis... |
 | [chrome-vm](chrome-vm/overview.md) | `packages/chrome-vm` runs headless Chromium inside a real Linux VM on a macOS host and gives the screenshot back, in one command. |
 | [chrome-vm-image](chrome-vm-image/overview.md) | `packages/chrome-vm-image` is the raw EFI-bootable aarch64 NixOS disk image that the chrome-vm demo boots under vmkit/libkrun. |
-| [claude-code](claude-code/overview.md) | `packages/claude-code` repackages Claude Code, Anthropic's agentic coding CLI, as a prebuilt-binary install with a thick layer of baked-in fleet defaults. |
-| [claude-hooks](claude-hooks/overview.md) | `packages/claude-hooks` is one compiled binary with three Claude Code hook subcommands, replacing the old hand-rolled `writeShellScript` hooks in `packages/claude-code`. |
+| [claude-code](claude-code/overview.md) | `packages/agent/claude-code` repackages Claude Code, Anthropic's agentic coding CLI, as a prebuilt-binary install with a thick layer of baked-in fleet defaults. |
+| [claude-hooks](claude-hooks/overview.md) | `packages/claude-hooks` is one compiled binary with three Claude Code hook subcommands, replacing the old hand-rolled `writeShellScript` hooks in `packages/agent/claude-code`. |
 | [claude-stories](claude-stories/overview.md) | `packages/claude-stories` puts an Instagram-style row of "stories" in the Claude Code status line: each teammate's avatar (initials in a gradient ring) and what they are working on right... |
 | [clone-detect](clone-detect/overview.md) | `packages/clone-detect` finds duplicated code across a tree. |
 | [code-highlight](code-highlight/overview.md) | `packages/code-highlight` is a tree-sitter syntax highlighter that renders a source string (or a line range) as ANSI-colored terminal text. |
 | [code-tokenizer](code-tokenizer/overview.md) | `packages/code-tokenizer` is a tantivy tokenizer that splits identifiers the way a code reviewer reads them: on `camelCase`, `snake_case`, `kebab-case`, and any non-alphanumeric run. |
-| [codex](codex/overview.md) | `packages/codex` repackages the OpenAI Codex CLI (the nixpkgs `codex` package) with baked-in `-c` config defaults. |
+| [codex](codex/overview.md) | `packages/agent/codex` repackages the OpenAI Codex CLI (the nixpkgs `codex` package) with baked-in `-c` config defaults. |
 | [config-launch](config-launch/overview.md) | `packages/config-launch` is a spec-driven exec launcher: it reads a JSON spec, sets environment variables and `PATH`, injects CLI flags (static, argv-conditional, and config-file-gated `-... |
 | [cuda-hello](cuda-hello/overview.md) | `packages/cuda-hello` is a minimal CUDA kernel written in pure, idiomatic Rust and compiled to PTX with cuda-oxide, NVIDIA's experimental Rust-to-CUDA codegen backend. |
 | [dag-runner](dag-runner/overview.md) | `packages/dag-runner` is a tiny task runner: it takes a JSON DAG of shell commands, runs each node as soon as its dependencies finish (so graph shape, not fixed "levels", determines paral... |
