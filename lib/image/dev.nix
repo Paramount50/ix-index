@@ -33,14 +33,14 @@
   evalImageConfig,
 }:
 let
-  inherit (import ../dev/shared-mount.nix { inherit lib; }) serverModule clientModule;
-  inherit (import ../dev/identity.nix { inherit lib; }) bindModule sourceNode sourceServerSeed;
+  inherit (import (paths.root + "/lib/dev/shared-mount.nix") { inherit lib; }) serverModule clientModule;
+  inherit (import (paths.root + "/lib/dev/identity.nix") { inherit lib; }) bindModule sourceNode sourceServerSeed;
 
-  # Plain option/agent modules (paths, resolved relative to this file). The
-  # probe needs only the `ix.dev` declarations (`optionsModule`); the agent
-  # layer is added to per-node `defaults`.
-  optionsModule = ../dev/options.nix;
-  agentsModule = ../dev/agents.nix;
+  # Plain option/agent modules (root-anchored paths). The probe needs only the
+  # `ix.dev` declarations (`optionsModule`); the agent layer is added to
+  # per-node `defaults`.
+  optionsModule = paths.root + "/lib/dev/options.nix";
+  agentsModule = paths.root + "/lib/dev/agents.nix";
 
   # On-disk export path on the elected server, and the internal SMB share name.
   shareDir = "/var/lib/ix-dev-share";

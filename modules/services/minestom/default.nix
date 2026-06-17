@@ -18,7 +18,7 @@ let
     types
     ;
   cfg = config.services.minestom;
-  defaultJvmVersion = import ../../../lib/languages/jvm-defaults.nix;
+  defaultJvmVersion = ix.languages.java.defaultJvmVersion;
   yourkit = ix.languages.java.yourkit;
 
   dataDir = "/var/lib/minestom";

@@ -16,7 +16,7 @@ let
     ;
 
   cfg = config.services.velocity;
-  defaultJvmVersion = import ../../../lib/languages/jvm-defaults.nix;
+  defaultJvmVersion = ix.languages.java.defaultJvmVersion;
   yourkit = ix.languages.java.yourkit;
   dataDir = "/var/lib/velocity";
   java = lib.getExe' cfg.javaPackage "java";

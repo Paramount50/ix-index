@@ -6,6 +6,7 @@
   rustWorkspaceFor,
   clippy-fork,
   repoRoot,
+  lists,
 }:
 let
   inherit (builtins) toString;
@@ -19,7 +20,7 @@ let
   rustFor =
     pkgs:
     import ./build.nix {
-      inherit lib pkgs;
+      inherit lib pkgs lists;
       # llm-clippy bootstraps before cargoUnit / rustWorkspace exist, so the
       # `ix` closure it receives carries only `buildRustPackage`.
       # `buildIxRustTool` adds the richer surface for packages that need it.

@@ -81,7 +81,7 @@ let
   # outside `modules/` on purpose: it is a home-manager module, not a NixOS
   # module, so it must not be swept into `nixosModules` above. Exposed to
   # consumers as `homeModules.portable-services` from the flake.
-  portableServices = import ./services/portable-services.nix { inherit lib; };
+  portableServices = import ./services/portable-services.nix { inherit lib deepMerge; };
 
   # Declarative-but-writable JSON config files (last-applied 3-way merge for
   # files an app rewrites at runtime). Also a home-manager module, not a NixOS
@@ -157,6 +157,7 @@ let
         writePythonApplication
         rustWorkspaceFor
         clippy-fork
+        lists
         ;
       repoRoot = paths.root;
     })
@@ -276,7 +277,7 @@ let
   */
   minecraft = {
     nbt = import ./minecraft/nbt.nix;
-    dimensionType = import ./minecraft/dimension-type.nix { inherit lib; };
+    dimensionType = import ./minecraft/dimension-type.nix { inherit lib deepMerge; };
   };
 
   /**
@@ -360,8 +361,10 @@ let
       packageRegistry
       cargoUnitFor
       buildSvelteSite
+      buildLibghosttyVt
       ghostty
       writeNushellApplication
+      writeBashApplication
       macosSdk
       appleSdkToolchain
       ;

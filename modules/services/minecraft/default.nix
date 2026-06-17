@@ -25,7 +25,7 @@ let
     types
     ;
   cfg = config.services.minecraft;
-  defaultJvmVersion = import ../../../lib/languages/jvm-defaults.nix;
+  defaultJvmVersion = ix.languages.java.defaultJvmVersion;
 
   dataDir = "/var/lib/minecraft";
   managedRoot = "/etc/minecraft";

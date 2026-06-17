@@ -4,8 +4,10 @@
   packageRegistry,
   cargoUnitFor,
   buildSvelteSite,
+  buildLibghosttyVt,
   ghostty,
   writeNushellApplication,
+  writeBashApplication,
   # Cross-compilation leaves, threaded in so `unitsFor { target }` can build a
   # second unit graph for a non-host triple without `workspace.nix` having
   # to reach back into the assembled `ix` surface.
@@ -23,11 +25,9 @@ let
   # build script's own link-search does not propagate to the final per-unit
   # link in this graph; see the alsa note below for the same shape). The dylib
   # dir is also a runtime input for the ix-vt tests, which dlopen it.
-  libghosttyVt =
-    (import ../build/libghostty-vt.nix { inherit lib writeNushellApplication; }) workspacePkgs
-      {
-        ghosttySource = ghostty;
-      };
+  libghosttyVt = buildLibghosttyVt workspacePkgs {
+    ghosttySource = ghostty;
+  };
   ghosttyLibDir = "${libghosttyVt}/lib";
 
   # The dashboard's single-page UI (Svelte/Vite, one self-contained index.html).
@@ -166,7 +166,7 @@ let
         if target != null && lib.hasSuffix "-apple-darwin" target then
           appleSdkToolchain {
             appleSdk = macosSdk { pkgs = workspacePkgs; };
-            inherit lib target;
+            inherit lib target writeBashApplication;
             pkgs = workspacePkgs;
           }
         else

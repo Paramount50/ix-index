@@ -47,7 +47,7 @@ let
   # The repo's default JVM major (OpenJDK 25), which is what the Paper API and
   # the Minecraft server runtime target. Compiling against an older JDK fails on
   # the API jar's newer class-file version, so match it from the one source.
-  jvmVersion = import ../../lib/languages/jvm-defaults.nix;
+  jvmVersion = ix.languages.java.defaultJvmVersion;
   pluginJdk = ix.languages.java.jdk pkgs {
     version = jvmVersion;
     distribution = "openjdk";

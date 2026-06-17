@@ -7,6 +7,8 @@
   lib,
   pkgs,
   writePythonApplication,
+  # List helpers, threaded in rather than imported across dirs.
+  lists,
 }:
 let
   inherit (builtins)
@@ -26,7 +28,7 @@ let
     subtractLists
     ;
 
-  inherit (import ../util/lists.nix { inherit lib; }) findDuplicatesBy;
+  inherit (lists) findDuplicatesBy;
 
   joinLines = join "\n";
 

@@ -10,7 +10,7 @@
   ...
 }:
 let
-  defaultJvmVersion = import ../../../../lib/languages/jvm-defaults.nix;
+  defaultJvmVersion = ix.languages.java.defaultJvmVersion;
 in
 ix.mkMinecraftLoader {
   inherit ix config lib;

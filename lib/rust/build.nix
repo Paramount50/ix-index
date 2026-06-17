@@ -4,6 +4,7 @@
   clippyPackage ? pkgs.clippy,
   rustToolchain,
   writePythonApplication,
+  lists,
 }:
 let
   inherit (builtins) removeAttrs;
@@ -19,6 +20,7 @@ let
       clippyPackage
       rustToolchain
       writePythonApplication
+      lists
       ;
   };
   inherit (resolve)

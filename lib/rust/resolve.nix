@@ -9,11 +9,12 @@
   clippyPackage,
   rustToolchain,
   writePythonApplication,
+  lists,
 }:
 let
   inherit (builtins) baseNameOf toString;
 
-  vendorLib = import ./vendor.nix { inherit lib pkgs writePythonApplication; };
+  vendorLib = import ./vendor.nix { inherit lib pkgs writePythonApplication lists; };
 
   policyLib = import ./policy.nix {
     inherit lib pkgs clippyPackage;

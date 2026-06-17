@@ -15,6 +15,9 @@
   lib,
   pkgs,
   target,
+  # Checked-bash writer, threaded in (not imported across dirs) so the cross
+  # wrappers go through the same `bash -n` + shellcheck gate as the rest of the repo.
+  writeBashApplication,
 }:
 let
   supportedTargets = [
@@ -146,8 +149,6 @@ let
 
   # These wrappers must be bash (argv rewriting with arrays, `exec "$@"`), so
   # they use the repo's one checked-bash escape hatch instead of Nushell.
-  inherit (import ../util/writers.nix { inherit lib; }) writeBashApplication;
-
   ccName = "apple-sdk-cc-${target}";
   cxxName = "apple-sdk-cxx-${target}";
   linkerName = "apple-sdk-linker-${target}";

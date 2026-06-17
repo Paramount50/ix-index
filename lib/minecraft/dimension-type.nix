@@ -1,6 +1,6 @@
-{ lib }:
+{ lib, deepMerge }:
 let
-  inherit (import ../util/deep-merge.nix { inherit lib; }) rhs;
+  inherit (deepMerge) rhs;
 
   defaults = import ./dimension-type-defaults.nix;
   bases = lib.attrNames defaults;

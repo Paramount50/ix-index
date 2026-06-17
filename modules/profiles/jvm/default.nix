@@ -7,13 +7,14 @@
 # maven, gradle}`) stay separate — this profile is the runtime side.
 {
   config,
+  ix,
   lib,
   pkgs,
   ...
 }:
 let
   cfg = config.ix.profiles.jvm;
-  defaultJvmVersion = import ../../../lib/languages/jvm-defaults.nix;
+  defaultJvmVersion = ix.languages.java.defaultJvmVersion;
   defaultJrePackageName = "temurin-jre-bin-${defaultJvmVersion}";
 in
 {

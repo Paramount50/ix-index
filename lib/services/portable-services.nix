@@ -20,14 +20,14 @@
 # a fully-defaulted spec so they can be golden-tested without evaluating a
 # whole home-manager configuration. The home-manager module is a thin
 # platform-dispatching wrapper around them.
-{ lib }:
+{ lib, deepMerge }:
 let
   inherit (lib)
     types
     mkOption
     optionalAttrs
     ;
-  inherit (import ../util/deep-merge.nix { inherit lib; }) rhs;
+  inherit (deepMerge) rhs;
 
   /**
     Submodule type for a single portable service.
