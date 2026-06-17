@@ -40,7 +40,10 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    import httpx
 
 __all__ = [
     "issue",
@@ -95,7 +98,7 @@ def _api_key() -> str:
 #
 # Production code calls _client() each time so that a key set after import
 # (common in notebooks) is always picked up.
-def _client(**kwargs: Any):  # noqa: ANN201
+def _client(**kwargs: Any) -> "httpx.AsyncClient":  # noqa: ANN401 -- forwarded verbatim to httpx.AsyncClient
     """Return a fresh ``httpx.AsyncClient`` wired for the Linear GraphQL API.
 
     Keyword arguments are forwarded to the constructor, letting callers (and
@@ -175,7 +178,7 @@ async def _gql(
                 await asyncio.sleep(_GQL_RETRY_BACKOFFS_S[attempt])
                 continue
             raise LinearError(body["errors"])
-        return body.get("data", {})
+        return cast("dict[str, Any]", body.get("data", {}))
 
     raise RuntimeError("unreachable: _gql retry loop exited without return or raise")
 
@@ -217,7 +220,7 @@ async def _resolve_team_id(team: str) -> str:
         raise LinearError([{"message": f"no Linear team with key {team!r}"}])
     tid = nodes[0]["id"]
     _team_id_cache[team] = tid
-    return tid
+    return cast(str, tid)
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +264,7 @@ async def issue(id: str) -> dict[str, Any]:
     ``httpx.HTTPStatusError`` on network errors.
     """
     data = await _gql(_ISSUE_QUERY, {"id": id})
-    return data["issue"]
+    return cast("dict[str, Any]", data["issue"])
 
 
 _ISSUE_UPDATE_MUTATION = """
@@ -279,7 +282,7 @@ mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
 """
 
 
-async def issue_update(id: str, **fields: Any) -> dict[str, Any]:
+async def issue_update(id: str, **fields: object) -> dict[str, Any]:
     """Update fields on a Linear issue.
 
     ``id`` is the issue UUID or identifier (e.g. ``"ENG-123"``).
@@ -294,7 +297,7 @@ async def issue_update(id: str, **fields: Any) -> dict[str, Any]:
     ``state``).  Raises :class:`LinearError` on GraphQL errors.
     """
     data = await _gql(_ISSUE_UPDATE_MUTATION, {"id": id, "input": fields})
-    return data["issueUpdate"]["issue"]
+    return cast("dict[str, Any]", data["issueUpdate"]["issue"])
 
 
 _ISSUE_CREATE_MUTATION = """
@@ -314,7 +317,7 @@ mutation IssueCreate($input: IssueCreateInput!) {
 """
 
 
-async def issue_create(team: str, title: str, **fields: Any) -> dict[str, Any]:
+async def issue_create(team: str, title: str, **fields: object) -> dict[str, Any]:
     """Create a new Linear issue.
 
     ``team`` is the team key (e.g. ``"ENG"``) or UUID.
@@ -335,7 +338,7 @@ async def issue_create(team: str, title: str, **fields: Any) -> dict[str, Any]:
         **fields,
     }
     data = await _gql(_ISSUE_CREATE_MUTATION, {"input": input_vars})
-    return data["issueCreate"]["issue"]
+    return cast("dict[str, Any]", data["issueCreate"]["issue"])
 
 
 _PROJECT_CREATE_MUTATION = """
@@ -357,7 +360,7 @@ mutation ProjectCreate($input: ProjectCreateInput!) {
 async def project_create(
     name: str,
     teams: list[str],
-    **fields: Any,
+    **fields: object,
 ) -> dict[str, Any]:
     """Create a new Linear project.
 
@@ -382,7 +385,7 @@ async def project_create(
         **fields,
     }
     data = await _gql(_PROJECT_CREATE_MUTATION, {"input": input_vars})
-    return data["projectCreate"]["project"]
+    return cast("dict[str, Any]", data["projectCreate"]["project"])
 
 
 _ISSUE_SEARCH_QUERY = """
@@ -415,7 +418,7 @@ async def issue_search(term: str, first: int = 20) -> list[dict[str, Any]]:
     ``httpx.HTTPStatusError`` on network errors.
     """
     data = await _gql(_ISSUE_SEARCH_QUERY, {"term": term, "first": first})
-    return data["searchIssues"]["nodes"]
+    return cast("list[dict[str, Any]]", data["searchIssues"]["nodes"])
 
 
 _COMMENT_CREATE_MUTATION = """
@@ -443,4 +446,4 @@ async def comment_create(issue_id: str, body: str) -> dict[str, Any]:
     """
     input_vars: dict[str, Any] = {"issueId": issue_id, "body": body}
     data = await _gql(_COMMENT_CREATE_MUTATION, {"input": input_vars})
-    return data["commentCreate"]["comment"]
+    return cast("dict[str, Any]", data["commentCreate"]["comment"])

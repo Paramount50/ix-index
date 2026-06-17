@@ -43,8 +43,12 @@ import json as _json
 import re
 import time
 from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
+
+if TYPE_CHECKING:
+    from ix_notebook_mcp.runtime import Resource
 
 __all__ = ["NixLog", "parse", "run", "build", "attrs", "eval", "ACTIVITY_TYPES", "RESULT_TYPES"]
 
@@ -117,10 +121,12 @@ def _strip(s: object) -> str:
 
 
 def _as_int(v: object) -> int:
-    try:
-        return int(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return 0
+    if isinstance(v, (int, str, bytes)):
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+    return 0
 
 
 class NixLog:
@@ -135,7 +141,7 @@ class NixLog:
     def __init__(self, *, label: str | None = None) -> None:
         self.label = label
         self.lines: list[str] = []
-        self._acts: dict[int, dict] = {}
+        self._acts: dict[int, dict[str, Any]] = {}
         self._order: list[int] = []
         self.error: str | None = None
         self.done = False
@@ -167,7 +173,7 @@ class NixLog:
         if action == "start":
             if aid not in self._acts:
                 self._order.append(aid)
-            fields = o.get("fields") or []
+            fields: list[Any] = o.get("fields") or []
             self._acts[aid] = {
                 "id": aid,
                 "parent": o.get("parent") or 0,
@@ -283,7 +289,7 @@ class NixLog:
 
     def tree(self) -> str:
         """The activity DAG as an indented text tree (``✓`` done, ``▶`` running)."""
-        by_parent: dict[int, list[dict]] = {}
+        by_parent: dict[int, list[dict[str, Any]]] = {}
         for i in self._order:
             r = self._acts[i]
             by_parent.setdefault(r["parent"], []).append(r)
@@ -337,7 +343,7 @@ def parse(source: str | Iterable[str]) -> NixLog:
     return log
 
 
-def _register_live(log: NixLog):
+def _register_live(log: NixLog) -> "Resource | None":
     """Register ``log`` as a live dashboard Resource, if running in a kernel.
 
     Decoupled on purpose: outside the kernel (a test, a plain interpreter) the
@@ -434,14 +440,14 @@ def _current_system() -> str:
     return f"{arch}-{os_name}"
 
 
-def _flake_show_rows(data: dict, system: str) -> list[dict]:
+def _flake_show_rows(data: dict[str, Any], system: str) -> list[dict[str, Any]]:
     """Flatten ``nix flake show --json`` into one row per buildable attribute.
 
     Pure (no subprocess), so it is testable on a captured payload. Systemed
     kinds are filtered to ``system``; an omitted (not-evaluated) system shows up
     as an empty dict and is skipped.
     """
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
 
     def emit(kind: str, attr: str, leaf: object) -> None:
         leaf = leaf if isinstance(leaf, dict) else {}
@@ -529,7 +535,7 @@ async def eval(
     system: str | None = None,
     cwd: str | None = None,
     raw: bool = False,
-):
+) -> Any:  # noqa: ANN401 -- decoded JSON is genuinely dynamic (or a raw str)
     """Evaluate a Nix installable and return the result as a native Python value.
 
     The friction this removes: ``nix eval .#checks.aarch64-linux --apply

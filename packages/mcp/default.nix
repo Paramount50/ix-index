@@ -973,6 +973,65 @@ let
         mkdir -p "$out"
       '';
 
+  # Strict type-check gate (ENG-3131). Mirrors lib/build/uv-application.nix's
+  # zuban+ruff phase, but this package has no uv project (it is plain source
+  # copied into the pinned interpreter), so the check runs directly: `zuban check
+  # --strict` for correctness + `zuban`'s disallow-untyped-defs, and `ruff check
+  # --select ANN` for the explicit-annotation gate the type checker does not own.
+  # `mcpPython` is passed as `--python-executable` so every bundled dependency
+  # (polars, mcp, jupyter, ...) resolves exactly as it does at runtime.
+  #
+  # Scoped, not all-or-nothing: only the modules under `strictGreenModules` are
+  # checked, so a module is migrated by adding its name here once its source is
+  # fully annotated and clean. The whole `src/` tree is on MYPYPATH regardless,
+  # so a checked module's first-party cross-imports (e.g. `x` -> `browser`,
+  # `nox_autotriage` -> `linear`) resolve even before those deps are migrated.
+  # The `ix_notebook_mcp` server package and the remaining `src/*` modules are
+  # added here as they are brought up to strict.
+  strictGreenModules = [
+    "tasks"
+    "x"
+    "nix"
+    "nox_autotriage"
+    "linear"
+    "google_auth"
+  ];
+  strictTypecheck =
+    let
+      # All src module package dirs go on MYPYPATH so first-party cross-imports
+      # resolve; the green subset are the actual check targets.
+      allSrcModules = builtins.attrNames (builtins.readDir ./src);
+      mypypath = lib.concatMapStringsSep ":" (m: "src/${m}") allSrcModules;
+      targets = lib.concatMapStringsSep " " (m: "src/${m}/${m}") strictGreenModules;
+    in
+    pkgs.runCommand "ix-mcp-strict-typecheck"
+      {
+        nativeBuildInputs = [
+          pkgs.zuban
+          pkgs.ruff
+          mcpPython
+        ];
+        strictDeps = true;
+        meta.description = "zuban --strict + ruff ANN over the migrated ix-mcp Python sources";
+      }
+      ''
+        cp -r ${ixNotebookMcpSource} ix_notebook_mcp
+        cp -r ${./src} src
+        chmod -R u+w ix_notebook_mcp src
+
+        export MYPYPATH=${lib.escapeShellArg mypypath}:.
+        echo "zuban check --strict over: ${toString strictGreenModules}"
+        zuban check --strict \
+          --python-executable ${mcpPython.interpreter} \
+          --python-version ${pkgs.python3.pythonVersion} \
+          --platform linux \
+          ${targets}
+        echo "ruff check --select ANN over: ${toString strictGreenModules}"
+        ruff check --select ANN ${targets}
+
+        mkdir -p "$out"
+      '';
+
   tuiBundled = importTest "tui" "import tui; print('tui-ok', tui.__version__)";
   # htpy must import and auto-escape: a `<` in a text node comes out as `&lt;`.
   htpyBundled = importTest "htpy" "import htpy; print('htpy-ok' if '&lt;' in str(htpy.div['<']) else 'htpy-bad')";
@@ -4292,6 +4351,7 @@ package.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
     tests = {
       inherit
+        strictTypecheck
         tuiBundled
         htpyBundled
         searchBundled

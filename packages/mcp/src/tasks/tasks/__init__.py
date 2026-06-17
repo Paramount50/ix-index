@@ -27,7 +27,10 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    import polars as pl
 
 __all__ = [
     "Task",
@@ -305,7 +308,7 @@ def seed(path: str | Path = "tasks.sqlite", count: int = 100, seed: int = 42) ->
     return write(path, generate(count, seed))
 
 
-def frame(source: str | Path | list[Task]):
+def frame(source: str | Path | list[Task]) -> pl.DataFrame:
     """A ``polars.DataFrame`` of tasks with derived status, for the dashboard.
 
     ``source`` is a SQLite path or an already-loaded ``list[Task]``. Rendered as a

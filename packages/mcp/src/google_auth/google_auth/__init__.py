@@ -50,6 +50,7 @@ import json
 import os
 import subprocess
 import webbrowser
+from typing import Any, cast
 
 from google.oauth2.credentials import Credentials
 
@@ -148,7 +149,7 @@ def _signed_out_hint(detail: str) -> str:
     return text or "could not reach Google"
 
 
-def _mint() -> dict:
+def _mint() -> dict[str, Any]:
     """Mint a fresh access token + scopes from the stored grant (`gcal`)."""
     _require_incognito()
     proc = subprocess.run(
@@ -161,7 +162,7 @@ def _mint() -> dict:
         detail = (proc.stderr or proc.stdout).strip()
         raise GoogleAuthError(_signed_out_hint(detail))
     try:
-        return json.loads(proc.stdout)
+        return cast("dict[str, Any]", json.loads(proc.stdout))
     except json.JSONDecodeError as exc:
         # Deliberately omit the body: with `--json` it should be JSON, and on a
         # bug it could contain the access token, which must not land in an error.
@@ -190,7 +191,7 @@ def _refresh_handler(request: object, scopes: object) -> tuple[str, datetime.dat
     return data["access_token"], _expiry(data.get("expires_in"))
 
 
-def _credentials_from(data: dict) -> Credentials:
+def _credentials_from(data: dict[str, Any]) -> Credentials:
     """Wrap an already-minted token as re-minting google-auth credentials."""
     return Credentials(
         token=data["access_token"],
@@ -210,14 +211,14 @@ def credentials() -> Credentials:
     return _credentials_from(_mint())
 
 
-def service(api: str, version: str):
+def service(api: str, version: str) -> Any:  # noqa: ANN401 -- googleapiclient Resource is untyped
     """Build a googleapiclient Resource for `api`/`version` with the grant."""
     from googleapiclient.discovery import build
 
     return build(api, version, credentials=credentials(), cache_discovery=False)
 
 
-def gmail(version: str = "v1"):
+def gmail(version: str = "v1") -> Any:  # noqa: ANN401 -- googleapiclient Resource is untyped
     """A Gmail API client: read, search, and send mail.
 
     `gmail().users().messages().send(userId="me", body=...).execute()` to send;
@@ -226,7 +227,7 @@ def gmail(version: str = "v1"):
     return service("gmail", version)
 
 
-def calendar(version: str = "v3"):
+def calendar(version: str = "v3") -> Any:  # noqa: ANN401 -- googleapiclient Resource is untyped
     """A Google Calendar API client: `calendar().events()`, ...
 
     Run `await login()` first if not signed in.
@@ -234,7 +235,7 @@ def calendar(version: str = "v3"):
     return service("calendar", version)
 
 
-def status() -> dict:
+def status() -> dict[str, Any]:
     """Whether this session can reach Google, and as whom.
 
     Returns ``{"signed_in": bool, "email": str | None, "scopes": list[str]}``
@@ -258,7 +259,7 @@ def status() -> dict:
     return {"signed_in": True, "email": email, "scopes": data.get("scopes") or []}
 
 
-def logout() -> dict:
+def logout() -> dict[str, Any]:
     """Sign out: forget this machine's stored Google grant.
 
     Deletes the local token file so the next call needs a fresh `login()`.
@@ -276,12 +277,12 @@ def logout() -> dict:
         detail = (proc.stderr or proc.stdout).strip()
         raise GoogleAuthError(detail or f"gcal logout exited with status {proc.returncode}")
     try:
-        return json.loads(proc.stdout)
+        return cast("dict[str, Any]", json.loads(proc.stdout))
     except json.JSONDecodeError:
         return {"signed_out": True, "removed": []}
 
 
-def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict]:
+def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict[str, Any]]:
     """Drive `gcal auth --json` to completion synchronously; return (url, result).
 
     Runs on a worker thread (see `login`), so blocking here never stalls the
@@ -299,6 +300,9 @@ def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict]:
         stderr=subprocess.PIPE,
         text=True,
     )
+    # stdout/stderr are PIPEs, so Popen always wires them up (never None).
+    assert proc.stdout is not None
+    assert proc.stderr is not None
 
     # The URL is near-instant (bind a socket, build a string); a watchdog kills
     # gcal if it never arrives, so this readline cannot block forever.
@@ -346,7 +350,7 @@ def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict]:
     return auth_url, {}
 
 
-async def login(*, open_browser: bool = True, timeout: float = _LOGIN_TIMEOUT) -> dict:
+async def login(*, open_browser: bool = True, timeout: float = _LOGIN_TIMEOUT) -> dict[str, Any]:
     """Sign in to Google: open your browser, consent, store the grant.
 
     Drives the installed-app OAuth flow in the bundled `gcal` binary: it prints a

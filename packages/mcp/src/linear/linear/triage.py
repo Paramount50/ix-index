@@ -389,7 +389,7 @@ async def triage(
 
         if marker_match is not None:
             issue_id = marker_match["id"]
-            state = marker_match.get("state") or {}
+            state: dict[str, Any] = marker_match.get("state") or {}
             if _is_open(state):
                 note = (
                     f"Seen again: source={f.source}, kind={f.kind}, key={f.key}"

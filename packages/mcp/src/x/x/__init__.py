@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from typing import Any
 
 import polars as pl
 
@@ -81,7 +82,7 @@ _NAMED = {
 }
 
 # The post schema, fixed so an empty result still has the right columns/dtypes.
-_SCHEMA: dict[str, pl.DataType] = {
+_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "id": pl.Utf8,
     "handle": pl.Utf8,
     "author": pl.Utf8,
@@ -248,7 +249,7 @@ async def posts(
             # post): return an empty, correctly-typed frame rather than raise.
             return pl.DataFrame(schema=_SCHEMA)
 
-        collected: dict[str, dict] = {}
+        collected: dict[str, dict[str, Any]] = {}
         order: list[str] = []
         stable = 0
         max_passes = 60 if scroll else 1
