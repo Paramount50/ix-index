@@ -1,24 +1,34 @@
 from __future__ import annotations
 
-import argparse
 import logging
 import os
 import socket
 from collections import Counter
 from dataclasses import dataclass
-from typing import cast
 
 import ray
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 LOGGER = logging.getLogger("ray_demo")
 
 
-@dataclass(frozen=True)
-class CliArgs:
-    address: str
-    tasks: int
-    min_nodes: int
+class CliArgs(BaseSettings):
+    model_config = SettingsConfigDict(cli_parse_args=True, cli_kebab_case=True)
+
+    address: str = Field(
+        default_factory=lambda: os.environ.get("RAY_ADDRESS", "auto"),
+        description="Ray cluster address. Defaults to $RAY_ADDRESS, else 'auto'.",
+    )
+    tasks: int = Field(
+        default=24,
+        description="Number of remote tasks to fan out.",
+    )
+    min_nodes: int = Field(
+        default=1,
+        description="Fail unless the cluster has at least this many alive nodes.",
+    )
 
 
 @dataclass(frozen=True)
@@ -30,34 +40,7 @@ class Probe:
 
 
 def parse_args() -> CliArgs:
-    parser = argparse.ArgumentParser(
-        prog="ray-demo",
-        description="Fan out tasks across a Ray cluster and report node placement.",
-    )
-    _ = parser.add_argument(
-        "--address",
-        default=os.environ.get("RAY_ADDRESS", "auto"),
-        help="Ray cluster address. Defaults to $RAY_ADDRESS, else 'auto'.",
-    )
-    _ = parser.add_argument(
-        "--tasks",
-        type=int,
-        default=24,
-        help="Number of remote tasks to fan out.",
-    )
-    _ = parser.add_argument(
-        "--min-nodes",
-        type=int,
-        default=1,
-        help="Fail unless the cluster has at least this many alive nodes.",
-    )
-    namespace = parser.parse_args()
-
-    return CliArgs(
-        address=cast(str, namespace.address),
-        tasks=cast(int, namespace.tasks),
-        min_nodes=cast(int, namespace.min_nodes),
-    )
+    return CliArgs()
 
 
 @ray.remote

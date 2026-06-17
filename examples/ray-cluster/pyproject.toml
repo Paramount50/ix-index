@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Example ix Ray cluster driver"
 requires-python = ">=3.13"
 dependencies = [
+    "pydantic-settings>=2,<3",
     "ray>=2.55.0,<3.0.0",
 ]
 
