@@ -34,9 +34,8 @@ defmodule SymphonyElixir.Workspace.RepoCloner do
 
     with :ok <- ensure_absent(target),
          :ok <- run_git_clone(config, repo, target),
-         :ok <- set_origin_url(target, repo),
-         :ok <- create_run_branch(target, branch) do
-      :ok
+         :ok <- set_origin_url(target, repo) do
+      create_run_branch(target, branch)
     end
   end
 

@@ -18,11 +18,12 @@ defmodule SymphonyElixir.Runtime.Supervisor do
   """
 
   use DynamicSupervisor
-  require Logger
 
   alias SymphonyElixir.IR.{RunGraph, Store}
   alias SymphonyElixir.Runtime
   alias SymphonyElixir.Runtime.Placement
+
+  require Logger
 
   @default_engine SymphonyElixir.Runtime.RoomEngineClient
 

@@ -194,9 +194,8 @@ defmodule SymphonyElixir.DSL.Parser do
   # `<name> "<value>"`: a labeled string param such as `label "..."` or
   # `repo "..."`. The label is a bare identifier; the value is a string.
   defp labeled_string(state, label) do
-    with {:ok, _, s1} <- expect_ident_value(state, label),
-         {:ok, value, s2} <- trigger_string(s1, label) do
-      {:ok, value, s2}
+    with {:ok, _, s1} <- expect_ident_value(state, label) do
+      trigger_string(s1, label)
     end
   end
 
@@ -297,19 +296,30 @@ defmodule SymphonyElixir.DSL.Parser do
 
   # --- expressions (effects and pures) -----------------------------------
 
+  @effect_keywords ~w(agent exec subrun when every map)
+
   defp parse_expr(state) do
     case peek(state) do
-      %{type: :keyword, value: "agent"} -> parse_agent(state)
-      %{type: :keyword, value: "exec"} -> parse_exec(state)
-      %{type: :keyword, value: "subrun"} -> parse_subrun(state)
-      %{type: :keyword, value: "when"} -> parse_when(state)
-      %{type: :keyword, value: "every"} -> parse_every(state)
-      %{type: :keyword, value: "map"} -> parse_map(state)
-      %{type: :keyword, value: kw} -> error(state, "unexpected keyword #{inspect(kw)} in expression position", kw)
-      :eof -> error(state, "unexpected end of input where an expression was expected", :eof)
-      other -> error(state, "expected an effect (agent/exec/subrun/when/every/map)", other.value)
+      %{type: :keyword, value: kw} when kw in @effect_keywords ->
+        parse_effect(kw, state)
+
+      %{type: :keyword, value: kw} ->
+        error(state, "unexpected keyword #{inspect(kw)} in expression position", kw)
+
+      :eof ->
+        error(state, "unexpected end of input where an expression was expected", :eof)
+
+      other ->
+        error(state, "expected an effect (agent/exec/subrun/when/every/map)", other.value)
     end
   end
+
+  defp parse_effect("agent", state), do: parse_agent(state)
+  defp parse_effect("exec", state), do: parse_exec(state)
+  defp parse_effect("subrun", state), do: parse_subrun(state)
+  defp parse_effect("when", state), do: parse_when(state)
+  defp parse_effect("every", state), do: parse_every(state)
+  defp parse_effect("map", state), do: parse_map(state)
 
   # Each effect reserves its id before parsing its body, so ids read in
   # source pre-order (a gate's id precedes its child's). The id is stable
@@ -386,15 +396,7 @@ defmodule SymphonyElixir.DSL.Parser do
       %{type: :keyword, value: "skill"} ->
         with {:ok, _, s1} <- expect(state, :keyword, "skill"),
              {:ok, name_tok, s2} <- expect_string(s1) do
-          case peek(s2) do
-            %{type: :lbrace} ->
-              with {:ok, bindings, s3} <- parse_inputs_block(s2) do
-                {:ok, {:skill, name_tok.value, bindings}, s3}
-              end
-
-            _ ->
-              {:ok, {:skill, name_tok.value, %{}}, s2}
-          end
+          parse_skill_bindings(s2, name_tok.value)
         end
 
       %{type: :keyword, value: "inline"} ->
@@ -405,6 +407,18 @@ defmodule SymphonyElixir.DSL.Parser do
 
       other ->
         error(state, "expected a prompt (skill \"name\" or inline \"text\")", token_value(other))
+    end
+  end
+
+  defp parse_skill_bindings(state, name) do
+    case peek(state) do
+      %{type: :lbrace} ->
+        with {:ok, bindings, next} <- parse_inputs_block(state) do
+          {:ok, {:skill, name, bindings}, next}
+        end
+
+      _ ->
+        {:ok, {:skill, name, %{}}, state}
     end
   end
 
@@ -536,6 +550,8 @@ defmodule SymphonyElixir.DSL.Parser do
 
   # --- pure values --------------------------------------------------------
 
+  @keyword_literals %{"true" => true, "false" => false, "null" => nil}
+
   defp parse_pure(state) do
     case peek(state) do
       %{type: :string} = tok ->
@@ -547,14 +563,8 @@ defmodule SymphonyElixir.DSL.Parser do
       %{type: :float, value: f} ->
         {:ok, AST.literal(f), advance(state)}
 
-      %{type: :keyword, value: "true"} ->
-        {:ok, AST.literal(true), advance(state)}
-
-      %{type: :keyword, value: "false"} ->
-        {:ok, AST.literal(false), advance(state)}
-
-      %{type: :keyword, value: "null"} ->
-        {:ok, AST.literal(nil), advance(state)}
+      %{type: :keyword, value: kw} when is_map_key(@keyword_literals, kw) ->
+        {:ok, AST.literal(Map.fetch!(@keyword_literals, kw)), advance(state)}
 
       %{type: :interp, value: path} ->
         {:ok, interp_to_pure(path), advance(state)}

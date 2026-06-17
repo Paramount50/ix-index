@@ -143,6 +143,8 @@ defmodule SymphonyElixir.Config do
 
   @table :symphony_config
 
+  # Intentional flat config snapshot: each field is one resolved env/opt knob.
+  # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
   defstruct [
     :root,
     :workflow_pack,
@@ -305,6 +307,8 @@ defmodule SymphonyElixir.Config do
     {:ok, snapshot}
   end
 
+  # Assembles the ~57-field env snapshot in one pass; each field is one knob.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   defp build_snapshot(opts) do
     root = Keyword.get_lazy(opts, :root, fn -> require_env!("SYMPHONY_ROOT") end)
     root = Path.expand(root)
@@ -638,9 +642,7 @@ defmodule SymphonyElixir.Config do
   defp placement_fallback_env(opts) do
     case Keyword.get(opts, :placement_fallback) || System.get_env("SYMPHONY_PLACEMENT_FALLBACK") do
       value when value in [:host, :remote, :local, :none] -> value
-      nil -> :host
-      "" -> :host
-      "host" -> :host
+      value when value in [nil, "", "host"] -> :host
       "remote" -> :remote
       "local" -> :local
       "none" -> :none

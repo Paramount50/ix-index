@@ -1,7 +1,6 @@
 defmodule SymphonyElixirWeb.IRRunControllerTest do
   use ExUnit.Case, async: false
-  import Plug.Test
-  import Plug.Conn
+  import Plug.{Conn, Test}
 
   alias SymphonyElixir.DSL.{Parser, Schema}
   alias SymphonyElixir.Engine.Envelope

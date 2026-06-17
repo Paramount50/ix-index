@@ -37,10 +37,10 @@ defmodule SymphonyElixir.Runtime.ExecRunner do
   conservative stance of the pre-overhaul exec path.
   """
 
-  require Logger
-
   alias SymphonyElixir.{Config, GithubApp}
   alias SymphonyElixir.IR.Node
+
+  require Logger
 
   # Keep the last 64 KB of combined stdout/stderr on the result: enough to
   # fingerprint a failure, small enough to keep the run file cheap.

@@ -21,8 +21,8 @@ defmodule SymphonyElixirWeb.IRRunsLive do
   use Phoenix.LiveView
 
   alias SymphonyElixir.IR.{Store, View}
-  alias SymphonyElixir.Runtime.Events
   alias SymphonyElixir.{Runtime, WorkflowCatalog}
+  alias SymphonyElixir.Runtime.Events
 
   # The runs table paginates at this many rows per page, navigated via the
   # `?page=N` query param. The full sorted list still loads on every render

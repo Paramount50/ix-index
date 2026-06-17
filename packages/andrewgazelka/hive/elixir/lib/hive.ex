@@ -26,9 +26,12 @@ defmodule Hive do
     # whispers are async casts; let them drain before we read inboxes
     Process.sleep(50)
 
+    # IO.puts is the demo's intended stdout output, not stray debugging.
+    # credo:disable-for-next-line Credo.Check.Refactor.IoPuts
     IO.puts("")
 
     for id <- Enum.sort(Hive.Agent.ids()) do
+      # credo:disable-for-next-line Credo.Check.Refactor.IoPuts
       IO.puts("#{id} inbox: #{inspect(Hive.Agent.inbox(id))}")
     end
 

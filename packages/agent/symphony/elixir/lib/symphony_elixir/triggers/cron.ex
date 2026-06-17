@@ -52,10 +52,11 @@ defmodule SymphonyElixir.Triggers.Cron do
   """
 
   use GenServer
-  require Logger
 
   alias SymphonyElixir.{Config, CronExpression, CronState, WorkflowCatalog}
   alias SymphonyElixir.Runtime.Ingress
+
+  require Logger
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -110,19 +111,23 @@ defmodule SymphonyElixir.Triggers.Cron do
             :ok = CronState.seed_if_unset(entry.name, now)
 
           %DateTime{} = last_fired ->
-            case CronExpression.next_fire_after(parsed, last_fired) do
-              {:ok, next} ->
-                if DateTime.compare(next, now) != :gt do
-                  fire(entry, next, now)
-                end
-
-              {:error, reason} ->
-                Logger.warning("Cron next_fire_after failed for workflow=#{entry.name} schedule=#{entry.trigger.schedule}: #{inspect(reason)}")
-            end
+            maybe_fire_due(entry, parsed, last_fired, now)
         end
 
       {:error, reason} ->
         Logger.warning("Cron schedule unparseable for workflow=#{entry.name} schedule=#{inspect(entry.trigger.schedule)}: #{inspect(reason)}")
+    end
+  end
+
+  defp maybe_fire_due(entry, parsed, last_fired, now) do
+    case CronExpression.next_fire_after(parsed, last_fired) do
+      {:ok, next} ->
+        if DateTime.compare(next, now) != :gt do
+          fire(entry, next, now)
+        end
+
+      {:error, reason} ->
+        Logger.warning("Cron next_fire_after failed for workflow=#{entry.name} schedule=#{entry.trigger.schedule}: #{inspect(reason)}")
     end
   end
 

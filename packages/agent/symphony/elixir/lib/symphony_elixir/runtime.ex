@@ -45,11 +45,12 @@ defmodule SymphonyElixir.Runtime do
   """
 
   use GenServer, restart: :transient
-  require Logger
 
   alias SymphonyElixir.GithubApp
-  alias SymphonyElixir.IR.{Attempt, Graph, Materializer, Node, RunGraph}
+  alias SymphonyElixir.IR.{Attempt, Graph, Materializer, Node, RunGraph, RunNotifier, Store}
   alias SymphonyElixir.Runtime.{Events, ExecRunner, Placement, Recovery, SubrunRunner}
+
+  require Logger
 
   @registry SymphonyElixir.Runtime.Registry
 
@@ -360,23 +361,21 @@ defmodule SymphonyElixir.Runtime do
   end
 
   defp advance_step(state) do
-    cond do
-      Graph.all_terminal?(state.graph) ->
-        finished = finish(state)
-        # A failed run stays alive and idle so the operator surface
-        # (clear_failed, retry_node, rerun) can reach a live process. A
-        # succeeded or cancelled run has nothing left to operate on, so it
-        # stops and frees the process. The supervisor can still resume a
-        # failed run from the store after a restart.
-        if finished.graph.status == :failed do
-          {:noreply, finished}
-        else
-          {:stop, finished}
-        end
-
-      true ->
-        ready = Graph.ready_nodes(state.graph)
-        schedule(state, ready)
+    if Graph.all_terminal?(state.graph) do
+      finished = finish(state)
+      # A failed run stays alive and idle so the operator surface
+      # (clear_failed, retry_node, rerun) can reach a live process. A
+      # succeeded or cancelled run has nothing left to operate on, so it
+      # stops and frees the process. The supervisor can still resume a
+      # failed run from the store after a restart.
+      if finished.graph.status == :failed do
+        {:noreply, finished}
+      else
+        {:stop, finished}
+      end
+    else
+      ready = Graph.ready_nodes(state.graph)
+      schedule(state, ready)
     end
   end
 
@@ -765,7 +764,7 @@ defmodule SymphonyElixir.Runtime do
   # its own failures and the channel/token may be unset.
   defp notify_finished(%RunGraph{} = graph) do
     Task.Supervisor.start_child(SymphonyElixir.TaskSupervisor, fn ->
-      SymphonyElixir.IR.RunNotifier.notify_finished(graph)
+      RunNotifier.notify_finished(graph)
     end)
 
     :ok
@@ -794,7 +793,7 @@ defmodule SymphonyElixir.Runtime do
   # consistent with the event. A failed broadcast (no subscribers, dead
   # PubSub) never blocks the run: the durable state already landed.
   defp persist(%RunGraph{} = graph, state) do
-    case SymphonyElixir.IR.Store.persist(graph, state.store_opts) do
+    case Store.persist(graph, state.store_opts) do
       :ok ->
         Events.broadcast(graph)
         :ok

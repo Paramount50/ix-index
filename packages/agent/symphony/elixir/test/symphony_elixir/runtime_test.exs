@@ -1,14 +1,15 @@
 defmodule SymphonyElixir.RuntimeTest do
   use ExUnit.Case, async: false
 
+  alias SymphonyElixir.DSL.Parser
+  alias SymphonyElixir.Engine.Envelope
+  alias SymphonyElixir.IR.{Attempt, Materializer, Node, RunGraph, Store}
+  alias SymphonyElixir.Runtime
+
   # The #90 crash tests deliberately kill executor tasks, which logs the
   # crash and the deadlock-guard error. Capture it so a passing run stays
   # quiet; a real regression still surfaces through the assertions.
   @moduletag capture_log: true
-
-  alias SymphonyElixir.Engine.Envelope
-  alias SymphonyElixir.IR.{Materializer, Node, RunGraph, Store}
-  alias SymphonyElixir.Runtime
 
   # A fake EngineClient driven by a per-test ETS table mapping a node id
   # to an instruction. The table name is fixed but rows are cleared in
@@ -138,7 +139,7 @@ defmodule SymphonyElixir.RuntimeTest do
   end
 
   defp put_workflow(name, source) do
-    {:ok, ast} = SymphonyElixir.DSL.Parser.parse(source)
+    {:ok, ast} = Parser.parse(source)
     entry = %{name: ast.name || name, ast: ast, trigger: ast.trigger, source: source, hash: :crypto.hash(:sha256, source)}
     :ets.insert(:symphony_workflows, {name, entry})
   end
@@ -166,7 +167,7 @@ defmodule SymphonyElixir.RuntimeTest do
   # placeholder `{:ast, []}` that re-expands to nothing); this gives the
   # supervised run an actual `when`/`every` construct to resolve.
   defp materialized(run_id, source) do
-    {:ok, ast} = SymphonyElixir.DSL.Parser.parse(source)
+    {:ok, ast} = Parser.parse(source)
     {:ok, graph} = Materializer.materialize(run_id, "h", ast)
     graph
   end
@@ -430,7 +431,7 @@ defmodule SymphonyElixir.RuntimeTest do
     test "a persisted :running node makes progress after a simulated restart", %{dir: dir} do
       # Persist a graph as if the BEAM died mid-turn: node `a` is :running
       # with an attempt that opened no thread, and `b` waits on it.
-      attempt = SymphonyElixir.IR.Attempt.start(1, :codex, nil)
+      attempt = Attempt.start(1, :codex, nil)
 
       g =
         graph("run-restart", [
@@ -457,7 +458,7 @@ defmodule SymphonyElixir.RuntimeTest do
     end
 
     test "a persisted :running node with an opened thread strands on restart", %{dir: dir} do
-      attempt = SymphonyElixir.IR.Attempt.start(1, :codex, "thread-x")
+      attempt = Attempt.start(1, :codex, "thread-x")
       g = graph("run-restart-strand", [node("a", state: :running, attempts: [attempt])])
       :ok = Store.persist(g, dir: dir)
 

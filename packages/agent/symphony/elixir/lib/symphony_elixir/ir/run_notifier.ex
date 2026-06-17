@@ -22,12 +22,12 @@ defmodule SymphonyElixir.IR.RunNotifier do
   Non-cron terminal runs always notify.
   """
 
-  require Logger
-
   alias SymphonyElixir.Codex.Provision
   alias SymphonyElixir.Config
   alias SymphonyElixir.IR.RunGraph
   alias SymphonyElixir.Slack.Client, as: SlackClient
+
+  require Logger
 
   @doc """
   Post the terminal summary for `graph`. No-op when the run should not notify

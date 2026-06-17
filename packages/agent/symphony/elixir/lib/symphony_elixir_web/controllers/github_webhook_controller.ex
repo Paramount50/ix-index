@@ -10,10 +10,10 @@ defmodule SymphonyElixirWeb.GithubWebhookController do
 
   use Phoenix.Controller, formats: [:json]
 
-  require Logger
-
   alias SymphonyElixir.Config
   alias SymphonyElixir.Runtime.Ingress
+
+  require Logger
 
   @spec accept(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def accept(conn, params) do

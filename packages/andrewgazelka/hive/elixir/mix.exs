@@ -22,8 +22,10 @@ defmodule Hive.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      # Static-analysis gate, test-only so the `hive` launcher still runs `mix`
+      # offline in :dev with no deps; the sandboxed check runs in :test where
+      # credo is fetched. runtime: false keeps it out of the released app.
+      {:credo, "~> 1.7", only: :test, runtime: false}
     ]
   end
 end

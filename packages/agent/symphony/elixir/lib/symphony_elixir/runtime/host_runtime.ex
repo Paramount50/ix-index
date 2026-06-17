@@ -23,8 +23,8 @@ defmodule SymphonyElixir.Runtime.HostRuntime do
   grant in `modules/services/symphony` scopes to.
   """
 
-  alias SymphonyElixir.{Command, Config}
   alias SymphonyElixir.Codex.Provision
+  alias SymphonyElixir.{Command, Config}
 
   require Logger
 

@@ -40,12 +40,10 @@ defmodule SymphonyElixir.Runtime.SubrunRunner do
   in-memory snapshot, so the mapped result reflects the persisted truth.
   """
 
-  require Logger
-
-  alias SymphonyElixir.Config
+  alias SymphonyElixir.{Config, Runtime, WorkflowCatalog}
   alias SymphonyElixir.IR.{Node, RunGraph, Store}
-  alias SymphonyElixir.Runtime
-  alias SymphonyElixir.WorkflowCatalog
+
+  require Logger
 
   @type result :: {:ok, map(), nil} | {:error, term(), nil}
 

@@ -61,8 +61,8 @@ defmodule SymphonyElixir.Runtime.Placement do
 
   use GenServer
 
-  alias SymphonyElixir.{Command, Config, RepositoryCatalog}
   alias SymphonyElixir.Codex.{Provision, RoomRegistry}
+  alias SymphonyElixir.{Command, Config, RepositoryCatalog}
   alias SymphonyElixir.Runtime.{HostRuntime, RuntimeRegistry, WorkerDispatch}
 
   require Logger
@@ -486,11 +486,13 @@ defmodule SymphonyElixir.Runtime.Placement do
   end
 
   defp setup_workspace(%Config{} = config, driver, vm_name, run_id, opts) do
-    driver.ix_cmd.(config, Provision.shell_args(vm_name, Provision.ix_workspace_script(config, run_id, opts)), @default_setup_timeout_ms)
+    script = Provision.ix_workspace_script(config, run_id, opts)
+    driver.ix_cmd.(config, Provision.shell_args(vm_name, script), @default_setup_timeout_ms)
   end
 
   defp start_room_server(%Config{} = config, driver, vm_name, run_id, opts) do
-    driver.ix_cmd.(config, Provision.shell_args(vm_name, Provision.ix_room_start_script(config, run_id, opts)), @default_setup_timeout_ms)
+    script = Provision.ix_room_start_script(config, run_id, opts)
+    driver.ix_cmd.(config, Provision.shell_args(vm_name, script), @default_setup_timeout_ms)
   end
 
   defp room_url(%Config{ix_room_connect: "port_forward"} = config, driver, %{"name" => vm_name}) do

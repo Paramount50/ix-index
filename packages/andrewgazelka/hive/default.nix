@@ -1,13 +1,16 @@
 # Hive: a tiny fully-connected mesh of agent actors (GenServer + Registry +
 # DynamicSupervisor), moved out of a standalone checkout to exercise the repo's
-# Elixir type-discipline gate. It has no hex dependencies, so unlike
-# packages/agent/symphony there is no fetchMixDeps step: `mix compile` and
-# `mix test` run offline against the source alone.
+# Elixir type-discipline + Credo gates.
 #
 # The required quality lane (compile --warnings-as-errors, which runs Elixir
-# 1.18's set-theoretic type checker, plus format and test) is a sandboxed
-# derivation exposed as `passthru.tests.elixir` and wired into `checks` through
-# lib/per-system.nix, exactly like symphony.
+# 1.18's set-theoretic type checker, plus format, `mix credo --strict` against
+# the shared lib/elixir/credo.exs, and test) is built through the shared
+# ix.buildElixirCheck lane and exposed as `passthru.tests.elixir`, wired into
+# `checks` through lib/per-system.nix, exactly like symphony.
+#
+# credo is the sole hex dep and is test-only (see mix.exs), so the `hive`
+# launcher still runs `mix` offline in :dev with no deps; only the sandboxed
+# check fetches deps, via the fixed-output `mixFodDeps` below.
 {
   lib,
   pkgs,
@@ -26,52 +29,33 @@ let
       ./elixir/lib
       ./elixir/test
       ./elixir/mix.exs
+      ./elixir/mix.lock
       ./elixir/.formatter.exs
     ];
   };
 
-  elixirCheck = pkgs.stdenv.mkDerivation {
+  # Test-env mix deps (credo + its deps) as a fixed-output derivation so the
+  # sandboxed check runs offline. Refresh the hash whenever elixir/mix.lock changes.
+  mixFodDeps = pkgs.beamPackages.fetchMixDeps {
+    pname = "hive-elixir-deps";
+    version = "0.1.0"; # keep in sync with elixir/mix.exs
+    src = lib.fileset.toSource {
+      root = ./elixir;
+      fileset = lib.fileset.unions [
+        ./elixir/mix.exs
+        ./elixir/mix.lock
+      ];
+    };
+    inherit elixir;
+    mixEnv = "test";
+    hash = "sha256-EXaJddUakJETdzPNFWgJRgBWG4VcrP/Z5tOCuE+BXdo=";
+  };
+
+  elixirCheck = ix.buildElixirCheck pkgs {
     pname = "hive-elixir-check";
     version = "0.1.0";
-    inherit src;
-
-    nativeBuildInputs = [
-      erlang
-      elixir
-      pkgs.git
-    ];
-    strictDeps = true;
-
-    env = {
-      MIX_ENV = "test";
-      HEX_OFFLINE = "1";
-      LANG = "C.UTF-8";
-      LC_CTYPE = "C.UTF-8";
-    };
-
-    buildPhase = ''
-      runHook preBuild
-      export MIX_HOME="$TEMPDIR/mix"
-      export HEX_HOME="$TEMPDIR/hex"
-      # --warnings-as-errors makes the 1.18 type checker's findings (and any
-      # other compile warning) fail the build, the actual "type check by default".
-      mix compile --warnings-as-errors
-      runHook postBuild
-    '';
-
-    doCheck = true;
-    checkPhase = ''
-      runHook preCheck
-      mix format --check-formatted
-      mix test
-      runHook postCheck
-    '';
-
-    installPhase = ''
-      runHook preInstall
-      mkdir -p "$out"
-      runHook postInstall
-    '';
+    inherit src elixir erlang;
+    mixDeps = mixFodDeps;
   };
 in
 (writeNushellApplication {

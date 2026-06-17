@@ -119,6 +119,10 @@ let
       inherit lib pkgs;
     };
   buildUvApplication = import ./build/uv-application.nix { inherit uvLockFor ruffAnnArgs; };
+  # Shared Elixir quality lane (compile -Werror + format + credo --strict + test),
+  # injected with the single-source-of-truth strict Credo config so every Elixir
+  # gate enforces the same policy. The Elixir counterpart of buildUvApplication.
+  buildElixirCheck = import ./build/elixir-check.nix { credoConfig = ./elixir/credo.exs; };
   buildPyStrictCheck = import ./build/py-strict-check.nix { inherit lib; };
   buildGradleFatJar = import ./build/gradle-fat-jar.nix { inherit lib; };
   secrets = import ./util/secrets.nix {
@@ -408,6 +412,7 @@ let
       agents
       artifacts
       attrs
+      buildElixirCheck
       buildGradleFatJar
       buildJsSite
       buildLibghosttyVt

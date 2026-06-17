@@ -1,9 +1,9 @@
 defmodule SymphonyElixir.WorkflowCatalogTest do
   use ExUnit.Case, async: false
 
-  @moduletag capture_log: true
-
   alias SymphonyElixir.WorkflowCatalog
+
+  @moduletag capture_log: true
 
   setup do
     dir = Path.join(System.tmp_dir!(), "wf_catalog_#{System.unique_integer([:positive])}")

@@ -17,9 +17,8 @@ defmodule SymphonyElixir.Runtime.Ingress do
   """
 
   alias SymphonyElixir.IR.{Materializer, RunGraph, Store}
-  alias SymphonyElixir.Runtime
+  alias SymphonyElixir.{Runtime, WorkflowCatalog}
   alias SymphonyElixir.Runtime.Trigger
-  alias SymphonyElixir.WorkflowCatalog
 
   @typedoc "A started run: its generated id and the supervised runtime pid."
   @type started :: %{run_id: String.t(), pid: pid()}

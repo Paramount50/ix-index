@@ -8,11 +8,11 @@ defmodule SymphonyElixir.Runtime.DSLWiringTest do
   """
   use ExUnit.Case, async: false
 
-  @moduletag capture_log: true
-
   alias SymphonyElixir.DSL.Parser
   alias SymphonyElixir.IR.{Materializer, Node, Store}
   alias SymphonyElixir.Runtime
+
+  @moduletag capture_log: true
 
   # A fake engine that returns a per-node-id scripted output. The gate's
   # dependency returns `%{"ok" => true}` so the gate opens; every other

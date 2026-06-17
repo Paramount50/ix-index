@@ -1,7 +1,12 @@
 defmodule SymphonyElixir.Command do
   @moduledoc false
 
-  @type result :: {:ok, String.t()} | {:error, {:exit, non_neg_integer(), String.t()} | {:timeout, pos_integer(), String.t()} | {:start_failed, String.t()}}
+  @type result ::
+          {:ok, String.t()}
+          | {:error,
+             {:exit, non_neg_integer(), String.t()}
+             | {:timeout, pos_integer(), String.t()}
+             | {:start_failed, String.t()}}
 
   @spec run(Path.t(), [String.t()], pos_integer()) :: result()
   def run(executable, args, timeout_ms) when is_binary(executable) and is_list(args) and timeout_ms > 0 do

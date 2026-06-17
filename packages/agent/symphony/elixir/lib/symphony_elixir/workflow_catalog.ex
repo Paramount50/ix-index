@@ -29,10 +29,11 @@ defmodule SymphonyElixir.WorkflowCatalog do
   """
 
   use GenServer
-  require Logger
 
   alias SymphonyElixir.Config
   alias SymphonyElixir.DSL.Parser
+
+  require Logger
 
   @table :symphony_workflows
   @errors :symphony_workflow_errors

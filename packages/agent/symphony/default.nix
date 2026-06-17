@@ -71,25 +71,16 @@ let
   # now a sandboxed derivation wired into `checks` through per-system.nix.
   # The advisory lane (dialyzer, sobelow, mix_audit, coveralls) stays a
   # local `mix quality` run; see docs/quality.md.
-  elixirCheck = pkgs.stdenv.mkDerivation {
+  # Built through the shared lane (lib/build/elixir-check.nix) so the policy and
+  # the credo config match every other Elixir package. `mix credo --strict` now
+  # runs against the repo-wide strict config (lib/elixir/credo.exs).
+  elixirCheck = ix.buildElixirCheck pkgs {
     pname = "symphony-elixir-check";
     version = "0.2.0";
-    inherit src;
+    inherit src elixir erlang;
     sourceRoot = "source/elixir";
-
-    nativeBuildInputs = [
-      erlang
-      elixir
-      (pkgs.beamPackages.hex.override { inherit elixir; })
-      pkgs.git
-    ];
-    strictDeps = true;
-
-    env = {
-      MIX_ENV = "test";
-      HEX_OFFLINE = "1";
-      LANG = "C.UTF-8";
-      LC_CTYPE = "C.UTF-8";
+    mixDeps = mixFodDeps;
+    extraEnv = {
       # rebar-built deps (telemetry) make mix install rebar over the network
       # unless the binaries are pinned, same as fetchMixDeps/mixRelease do.
       MIX_REBAR = "${pkgs.beamPackages.rebar}/bin/rebar";
@@ -99,49 +90,13 @@ let
       # loads the NIF.
       LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
     };
-
-    # Same deps wiring as nixpkgs mixRelease: deps come from the fixed-output
-    # fetch, copied writable because deps.compile builds in place. The
-    # elixir_make cache seed short-circuits the lazy_html NIF download (see
+    # The elixir_make cache seed short-circuits the lazy_html NIF download (see
     # lazyHtmlNif above; mix/tasks/compile.elixir_make.ex reuses an existing
     # archive instead of fetching).
-    postUnpack = ''
-      export MIX_HOME="$TEMPDIR/mix"
-      export HEX_HOME="$TEMPDIR/hex"
-      export MIX_DEPS_PATH="$TEMPDIR/deps"
-      cp --no-preserve=mode -R "${mixFodDeps}" "$MIX_DEPS_PATH"
-
+    setupHook = ''
       export ELIXIR_MAKE_CACHE_DIR="$TEMPDIR/elixir-make-cache"
       mkdir -p "$ELIXIR_MAKE_CACHE_DIR"
       cp "${lazyHtmlNif}" "$ELIXIR_MAKE_CACHE_DIR/${lazyHtmlNif.name}"
-    '';
-
-    configurePhase = ''
-      runHook preConfigure
-      mix deps.compile --no-deps-check --skip-umbrella-children
-      ln -s "$MIX_DEPS_PATH" ./deps
-      runHook postConfigure
-    '';
-
-    buildPhase = ''
-      runHook preBuild
-      mix compile --no-deps-check --warnings-as-errors
-      runHook postBuild
-    '';
-
-    doCheck = true;
-    checkPhase = ''
-      runHook preCheck
-      mix format --check-formatted
-      mix credo
-      mix test --no-deps-check
-      runHook postCheck
-    '';
-
-    installPhase = ''
-      runHook preInstall
-      mkdir -p "$out"
-      runHook postInstall
     '';
   };
 in

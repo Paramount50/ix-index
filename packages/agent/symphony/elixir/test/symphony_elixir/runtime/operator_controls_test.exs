@@ -6,11 +6,11 @@ defmodule SymphonyElixir.Runtime.OperatorControlsTest do
   """
   use ExUnit.Case, async: false
 
-  @moduletag capture_log: true
-
   alias SymphonyElixir.Engine.Envelope
   alias SymphonyElixir.IR.{Graph, Node, RunGraph, Store}
   alias SymphonyElixir.Runtime
+
+  @moduletag capture_log: true
 
   defmodule FakeEngine do
     @behaviour SymphonyElixir.Runtime.EngineClient

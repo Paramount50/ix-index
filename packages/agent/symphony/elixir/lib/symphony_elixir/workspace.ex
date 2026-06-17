@@ -50,9 +50,8 @@ defmodule SymphonyElixir.Workspace do
     workspace_path = Path.join(config.workspaces_dir, run_id)
 
     with :ok <- ensure_workspace_absent(workspace_path),
-         {:ok, canonical} <- canonicalize_under_root(workspace_path, config.workspaces_dir),
-         {:ok, primary_checkout} <- RepoCloner.clone_all(config, canonical, run_id) do
-      {:ok, primary_checkout}
+         {:ok, canonical} <- canonicalize_under_root(workspace_path, config.workspaces_dir) do
+      RepoCloner.clone_all(config, canonical, run_id)
     end
   end
 

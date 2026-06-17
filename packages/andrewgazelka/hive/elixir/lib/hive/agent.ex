@@ -104,6 +104,8 @@ defmodule Hive.Agent do
   @impl true
   @spec handle_cast(request(), State.t()) :: {:noreply, State.t()}
   def handle_cast({:message, from_id, payload}, %State{} = state) do
+    # The mesh printing each delivered message to stdout is the demo's whole point.
+    # credo:disable-for-next-line Credo.Check.Refactor.IoPuts
     IO.puts("[#{state.id}] <- #{from_id}: #{inspect(payload)}")
     {:noreply, %State{state | inbox: [{from_id, payload} | state.inbox]}}
   end

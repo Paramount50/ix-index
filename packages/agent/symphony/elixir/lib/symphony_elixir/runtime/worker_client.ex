@@ -16,8 +16,7 @@ defmodule SymphonyElixir.Runtime.WorkerClient do
 
   use Slipstream
 
-  alias SymphonyElixir.Config
-  alias SymphonyElixir.RepositoryCatalog
+  alias SymphonyElixir.{Config, RepositoryCatalog}
   alias SymphonyElixir.Runtime.HostRuntime
 
   require Logger

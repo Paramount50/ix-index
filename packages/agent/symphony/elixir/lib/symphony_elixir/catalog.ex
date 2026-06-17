@@ -22,9 +22,10 @@ defmodule SymphonyElixir.Catalog do
   """
 
   use GenServer
-  require Logger
 
   alias SymphonyElixir.{Config, Skill}
+
+  require Logger
 
   @table :symphony_catalog
 

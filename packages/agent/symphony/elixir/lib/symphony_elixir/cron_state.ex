@@ -27,9 +27,10 @@ defmodule SymphonyElixir.CronState do
   """
 
   use GenServer
-  require Logger
 
   alias SymphonyElixir.Config
+
+  require Logger
 
   @table :symphony_cron_state
 
@@ -99,12 +100,7 @@ defmodule SymphonyElixir.CronState do
       {:ok, raw} ->
         case Jason.decode(raw) do
           {:ok, %{} = map} ->
-            Enum.each(map, fn {name, iso} ->
-              case iso |> to_string() |> DateTime.from_iso8601() do
-                {:ok, dt, _} -> :ets.insert(@table, {name, dt})
-                _ -> Logger.warning("CronState dropped invalid timestamp for #{name}: #{inspect(iso)}")
-              end
-            end)
+            Enum.each(map, &insert_entry/1)
 
           {:ok, other} ->
             Logger.warning("CronState file at #{path} is not a JSON object, ignoring: #{inspect(other)}")
@@ -121,6 +117,13 @@ defmodule SymphonyElixir.CronState do
     end
   end
 
+  defp insert_entry({name, iso}) do
+    case iso |> to_string() |> DateTime.from_iso8601() do
+      {:ok, dt, _} -> :ets.insert(@table, {name, dt})
+      _ -> Logger.warning("CronState dropped invalid timestamp for #{name}: #{inspect(iso)}")
+    end
+  end
+
   defp write_to_disk(path) do
     payload =
       @table
@@ -130,9 +133,8 @@ defmodule SymphonyElixir.CronState do
     with {:ok, encoded} <- Jason.encode(payload, pretty: true),
          :ok <- File.mkdir_p(Path.dirname(path)),
          tmp = path <> ".tmp",
-         :ok <- File.write(tmp, encoded),
-         :ok <- File.rename(tmp, path) do
-      :ok
+         :ok <- File.write(tmp, encoded) do
+      File.rename(tmp, path)
     end
   end
 end

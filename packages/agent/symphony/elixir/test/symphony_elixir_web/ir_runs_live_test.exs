@@ -6,14 +6,13 @@ defmodule SymphonyElixirWeb.IRRunsLiveTest do
 
   use ExUnit.Case, async: false
 
-  import Phoenix.ConnTest
-  import Phoenix.LiveViewTest
-
-  @endpoint SymphonyElixirWeb.Endpoint
+  import Phoenix.{ConnTest, LiveViewTest}
 
   alias SymphonyElixir.Engine.Envelope
   alias SymphonyElixir.IR.{Node, RunGraph, Store}
   alias SymphonyElixir.Runtime
+
+  @endpoint SymphonyElixirWeb.Endpoint
 
   # A fake EngineClient that blocks indefinitely (sleep_forever) so the run
   # stays :running while the test exercises operator actions. Using async:
@@ -189,7 +188,7 @@ defmodule SymphonyElixirWeb.IRRunsLiveTest do
     # Use the default store dir so the Runtime, the LiveView, and the
     # assertion all read/write the same location. Clean up this run's file
     # after the test.
-    default_ir_dir = SymphonyElixir.IR.Store.dir()
+    default_ir_dir = Store.dir()
     File.mkdir_p!(default_ir_dir)
     on_exit(fn -> File.rm!(Path.join(default_ir_dir, run_id <> ".json")) end)
 

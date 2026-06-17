@@ -3,16 +3,17 @@ defmodule SymphonyElixirWeb.SlackEventsController do
 
   use Phoenix.Controller, formats: [:json]
 
-  require Logger
-
   alias SymphonyElixir.{Config, Slack, WorkflowCatalog}
   alias SymphonyElixir.Runtime.Ingress
 
+  require Logger
+
   @spec accept(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def accept(conn, %{"type" => "url_verification", "challenge" => challenge}) do
-    with :ok <- verify_signature(conn) do
-      json(conn, %{challenge: challenge})
-    else
+    case verify_signature(conn) do
+      :ok ->
+        json(conn, %{challenge: challenge})
+
       {:error, status, reason} ->
         conn |> put_status(status) |> json(%{error: reason})
     end
@@ -20,9 +21,10 @@ defmodule SymphonyElixirWeb.SlackEventsController do
 
   @spec accept(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def accept(conn, %{"event" => %{"type" => "app_mention"} = event}) do
-    with :ok <- verify_signature(conn) do
-      json(conn, handle_app_mention(event))
-    else
+    case verify_signature(conn) do
+      :ok ->
+        json(conn, handle_app_mention(event))
+
       {:error, status, reason} ->
         Logger.warning("Slack event rejected: #{reason}")
         conn |> put_status(status) |> json(%{error: reason})
@@ -31,9 +33,10 @@ defmodule SymphonyElixirWeb.SlackEventsController do
 
   @spec accept(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def accept(conn, _params) do
-    with :ok <- verify_signature(conn) do
-      json(conn, %{ok: true, ignored: true})
-    else
+    case verify_signature(conn) do
+      :ok ->
+        json(conn, %{ok: true, ignored: true})
+
       {:error, status, reason} ->
         conn |> put_status(status) |> json(%{error: reason})
     end

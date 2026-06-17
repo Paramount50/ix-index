@@ -187,6 +187,8 @@ defmodule SymphonyElixirWeb.Components.IRGraph do
           nodes: [map()],
           edges: [map()]
         }
+  # Layered graph layout: inherently branchy positioning math, not business logic.
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   def layout(nodes, trigger, placement) when is_list(nodes) do
     # Build a node-id to deps map and compute layer assignments.
     deps_map = Map.new(nodes, fn n -> {n["id"], n["deps"] || []} end)
@@ -482,8 +484,7 @@ defmodule SymphonyElixirWeb.Components.IRGraph do
     location = location_line(env["location"], placement)
 
     [engine_model, effort, permissions, location]
-    |> Enum.filter(&is_binary/1)
-    |> Enum.reject(&(&1 == ""))
+    |> Enum.filter(fn value -> is_binary(value) and value != "" end)
   end
 
   defp detail_lines(%{"kind" => "gate"}, _placement), do: ["gate"]

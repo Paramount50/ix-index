@@ -20,8 +20,9 @@ defmodule SymphonyElixir.Slack.Client do
   for completed huddles lives in `SymphonyElixir.Triggers.Slack`.
   """
 
-  require Logger
   alias SymphonyElixir.Config
+
+  require Logger
 
   @page_size 100
 

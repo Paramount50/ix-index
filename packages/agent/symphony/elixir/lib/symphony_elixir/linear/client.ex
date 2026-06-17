@@ -12,8 +12,9 @@ defmodule SymphonyElixir.Linear.Client do
   `{:error, :missing_linear_api_token}`.
   """
 
-  require Logger
   alias SymphonyElixir.{Config, Linear.Issue}
+
+  require Logger
 
   @issue_page_size 50
 
@@ -80,8 +81,7 @@ defmodule SymphonyElixir.Linear.Client do
           new_issues =
             nodes
             |> Enum.map(&normalize_issue/1)
-            |> Enum.reject(&is_nil/1)
-            |> Enum.filter(fn issue -> label in issue.labels end)
+            |> Enum.filter(fn issue -> not is_nil(issue) and label in issue.labels end)
 
           next_acc = acc ++ new_issues
 

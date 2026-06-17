@@ -15,10 +15,11 @@ defmodule SymphonyElixir.Triggers.Slack do
   """
 
   use GenServer
-  require Logger
 
   alias SymphonyElixir.{Config, Slack.Client, WorkflowCatalog}
   alias SymphonyElixir.Runtime.Ingress
+
+  require Logger
 
   @history_window_seconds 86_400 * 2
 

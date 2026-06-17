@@ -1023,15 +1023,17 @@ let
               '';
           run-records-session = repoPackages.run.passthru.tests.recordsSession;
           # Symphony's required quality lane (compile -Werror, mix format,
-          # credo, mix test) as a sandboxed derivation; see
-          # packages/agent/symphony/default.nix. The advisory lane (dialyzer,
-          # sobelow, deps.audit) stays a local `mix quality` run.
+          # `mix credo --strict`, mix test), built through the shared
+          # ix.buildElixirCheck lane against the repo-wide strict Credo config
+          # (lib/elixir/credo.exs); see packages/agent/symphony/default.nix. The
+          # advisory lane (dialyzer, sobelow, deps.audit) stays a local
+          # `mix quality` run.
           symphony-elixir = repoPackages.symphony.passthru.tests.elixir;
-          # The experimental hive package's type-check lane: `mix compile
-          # --warnings-as-errors` (which runs Elixir 1.18's set-theoretic type
-          # checker) plus format and test, as a sandboxed derivation. The
-          # "type check by default" half of the Elixir gate; the lint half is
-          # astlog-rules/elixir.astlog. See packages/andrewgazelka/hive/default.nix.
+          # hive's quality lane through the same shared ix.buildElixirCheck:
+          # `mix compile --warnings-as-errors` (Elixir 1.18's set-theoretic type
+          # checker) plus format, `mix credo --strict`, and test. The lint half
+          # is also astlog-rules/elixir.astlog. See
+          # packages/andrewgazelka/hive/default.nix.
           hive-elixir = repoPackages.hive.passthru.tests.elixir;
           # Deterministic alloc-count gate for indexbench: runs the counting-
           # allocator demo bench once through `indexbench assert` and fails if its

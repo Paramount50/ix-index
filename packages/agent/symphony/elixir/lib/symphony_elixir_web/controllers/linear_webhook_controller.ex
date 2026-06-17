@@ -32,17 +32,18 @@ defmodule SymphonyElixirWeb.LinearWebhookController do
 
   use Phoenix.Controller, formats: [:json]
 
-  require Logger
-
   alias SymphonyElixir.Config
   alias SymphonyElixir.Runtime.Ingress
 
+  require Logger
+
   @spec accept(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def accept(conn, params) do
-    with :ok <- verify_signature(conn) do
-      handle_event(params)
-      json(conn, %{ok: true})
-    else
+    case verify_signature(conn) do
+      :ok ->
+        handle_event(params)
+        json(conn, %{ok: true})
+
       {:error, status, reason} ->
         Logger.warning("Linear webhook rejected: #{reason}")
 

@@ -7,8 +7,9 @@ defmodule SymphonyElixirWeb.WorkflowsLiveTest do
 
   use ExUnit.Case, async: false
 
-  import Phoenix.ConnTest
-  import Phoenix.LiveViewTest
+  import Phoenix.{ConnTest, LiveViewTest}
+
+  alias SymphonyElixir.DSL.Parser
 
   @endpoint SymphonyElixirWeb.Endpoint
 
@@ -32,7 +33,7 @@ defmodule SymphonyElixirWeb.WorkflowsLiveTest do
   defp insert_workflow(name, sym_source) do
     raw = sym_source
     hash = :crypto.hash(:sha256, raw)
-    {:ok, ast} = SymphonyElixir.DSL.Parser.parse(raw, file: "#{name}.sym")
+    {:ok, ast} = Parser.parse(raw, file: "#{name}.sym")
     entry = %{name: name, ast: ast, trigger: ast.trigger, source: raw, hash: hash}
     :ets.insert(:symphony_workflows, {name, entry})
     entry

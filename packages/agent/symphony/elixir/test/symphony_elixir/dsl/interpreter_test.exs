@@ -1,8 +1,7 @@
 defmodule SymphonyElixir.DSL.InterpreterTest do
   use ExUnit.Case, async: true
 
-  alias SymphonyElixir.DSL.Interpreter
-  alias SymphonyElixir.DSL.Parser
+  alias SymphonyElixir.DSL.{Interpreter, Parser}
   alias SymphonyElixir.IR.Node
 
   defp parse!(source) do

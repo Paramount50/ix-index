@@ -24,11 +24,11 @@ defmodule SymphonyElixir.IR.Store do
   contract restart correctness rests on.
   """
 
-  require Logger
-
   alias SymphonyElixir.Config
   alias SymphonyElixir.Engine.Envelope
   alias SymphonyElixir.IR.{Attempt, Node, RunGraph}
+
+  require Logger
 
   @doc "Directory holding IR run files. Defaults to `Config.get().runs_dir/ir`."
   @spec dir(keyword()) :: Path.t()
@@ -85,9 +85,8 @@ defmodule SymphonyElixir.IR.Store do
     tmp = path <> ".tmp"
 
     with {:ok, encoded} <- Jason.encode(encode(graph), pretty: true),
-         :ok <- File.write(tmp, encoded),
-         :ok <- File.rename(tmp, path) do
-      :ok
+         :ok <- File.write(tmp, encoded) do
+      File.rename(tmp, path)
     end
   end
 
@@ -118,9 +117,8 @@ defmodule SymphonyElixir.IR.Store do
 
   defp read(path) do
     with {:ok, raw} <- File.read(path),
-         {:ok, decoded} <- Jason.decode(raw),
-         {:ok, graph} <- decode(decoded) do
-      {:ok, graph}
+         {:ok, decoded} <- Jason.decode(raw) do
+      decode(decoded)
     end
   rescue
     # Any raise inside decode (an enum string outside its set, a corrupt

@@ -89,7 +89,8 @@ defmodule SymphonyElixir.Statistics do
 
     with token when is_binary(token) <- config.github_token,
          query when is_binary(query) <- config.github_stats_query,
-         {:ok, body} <- github_graphql(token, @github_query, %{query: query, first: @github_page_size, after: after_cursor}) do
+         vars = %{query: query, first: @github_page_size, after: after_cursor},
+         {:ok, body} <- github_graphql(token, @github_query, vars) do
       case body do
         %{"data" => %{"search" => %{"nodes" => nodes, "pageInfo" => page_info}}} ->
           prs = Enum.map(nodes, &github_pr/1)
@@ -111,9 +112,10 @@ defmodule SymphonyElixir.Statistics do
       end
     else
       nil ->
-        cond do
-          is_nil(Config.get().github_token) -> {:error, :missing_github_token}
-          true -> {:error, :missing_github_stats_query}
+        if is_nil(Config.get().github_token) do
+          {:error, :missing_github_token}
+        else
+          {:error, :missing_github_stats_query}
         end
 
       {:error, reason} ->
@@ -172,12 +174,18 @@ defmodule SymphonyElixir.Statistics do
   defp fetch_linear_issue_chunk(identifiers) do
     query = linear_issue_query(identifiers)
 
-    with {:ok, %{"data" => data}} <- Linear.Client.graphql(query, %{}) do
-      {:ok, data |> Map.values() |> Enum.map(&linear_person/1) |> Enum.reject(&is_nil/1)}
-    else
-      {:ok, %{"errors" => errors}} -> {:error, {:linear_graphql_errors, errors}}
-      {:ok, other} -> {:error, {:linear_unknown_payload, other}}
-      {:error, reason} -> {:error, reason}
+    case Linear.Client.graphql(query, %{}) do
+      {:ok, %{"data" => data}} ->
+        {:ok, data |> Map.values() |> Enum.map(&linear_person/1) |> Enum.reject(&is_nil/1)}
+
+      {:ok, %{"errors" => errors}} ->
+        {:error, {:linear_graphql_errors, errors}}
+
+      {:ok, other} ->
+        {:error, {:linear_unknown_payload, other}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

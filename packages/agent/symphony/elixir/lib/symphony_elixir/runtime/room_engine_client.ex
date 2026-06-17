@@ -40,11 +40,11 @@ defmodule SymphonyElixir.Runtime.RoomEngineClient do
   @behaviour SymphonyElixir.Runtime.EngineClient
 
   alias SymphonyElixir.{Catalog, Prompt}
-  alias SymphonyElixir.Engine.Client
+  alias SymphonyElixir.Engine.{Client, Envelope}
   alias SymphonyElixir.IR.Node
 
   @impl true
-  def run_node(%Node{kind: :agent, envelope: envelope} = node, run_opts) when not is_nil(envelope) do
+  def run_node(%Node{kind: :agent, envelope: %Envelope{} = envelope} = node, run_opts) do
     with {:ok, body} <- resolve_prompt(node.prompt_ref, run_opts),
          {:ok, cwd} <- fetch_cwd(run_opts) do
       prompt = append_input_block(body, Map.get(run_opts, :trigger))
