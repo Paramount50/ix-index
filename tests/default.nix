@@ -28,6 +28,10 @@ let
   # pins. The old end-to-end link proof needs a matching published rustc
   # dependency closure before it can be a reliable CI gate.
   sdkRust = import (paths.root + "/sdk/rust") { inherit lib pkgs ix; };
+  # Public Python SDK: strict zuban + ruff ANN gate over the shipped ix_sdk
+  # sources (ENG-3131). setuptools-built, so it has no pyChecker knob; the check
+  # derivation runs the same strict gates as buildUvApplication's zuban mode.
+  sdkPython = import (paths.root + "/sdk/python") { inherit lib pkgs; };
   packageRegistry = import (paths.packagesRoot + "/registry.nix") {
     inherit lib;
     root = paths.packagesRoot;
@@ -5166,6 +5170,8 @@ in
   cargoUnitPrebuiltLibrary = cargoUnitPrebuiltTest;
   # Validate the current R2 publication and local prebuilt-unit wrapper.
   sdkRustPrebuilt = sdkRust.artifactCheck;
+  # Strict type + annotation gate over the public ix-sdk Python sources.
+  sdkPythonStrict = sdkPython.strictCheck;
   portableServices = portableServicesTest;
   minecraftBlocksVm = minecraftBlocksVmTest;
 

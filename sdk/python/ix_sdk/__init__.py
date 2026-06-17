@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import abc
 import asyncio
+import collections.abc
 import dataclasses
 import io
 import os
@@ -9,6 +10,7 @@ import pathlib
 import signal
 import posixpath
 import sys
+import types
 import typing
 
 from ._ix_sdk import Branch as _RawBranch
@@ -262,16 +264,13 @@ class _VmBytesBuffer(io.BytesIO):
         self._open_mode = open_mode
         self._file_mode = file_mode
         self._dirty = False
+        # io.IOBase types name/mode as settable attributes; expose them as plain
+        # attributes (matching _AsyncTextFileContext) rather than read-only
+        # properties, which would be an incompatible override.
+        self.name = path
+        self.mode = open_mode.raw
         if open_mode.append:
             self.seek(0, io.SEEK_END)
-
-    @property
-    def mode(self) -> str:
-        return self._open_mode.raw
-
-    @property
-    def name(self) -> str:
-        return self._path
 
     def readable(self) -> bool:
         return self._open_mode.readable
@@ -279,7 +278,7 @@ class _VmBytesBuffer(io.BytesIO):
     def writable(self) -> bool:
         return self._open_mode.writable
 
-    def write(self, data: bytes | bytearray | memoryview) -> int:  # pyright: ignore[reportIncompatibleMethodOverride]
+    def write(self, data: collections.abc.Buffer) -> int:
         if self._open_mode.append:
             self.seek(0, io.SEEK_END)
         self._dirty = True
@@ -309,7 +308,7 @@ class _AsyncFileContext:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: typing.Any,
+        traceback: types.TracebackType | None,
     ) -> None:
         await self._buf.aflush()
         self._buf.close()
@@ -331,7 +330,7 @@ class _AsyncTextFileContext:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: typing.Any,
+        traceback: types.TracebackType | None,
     ) -> None:
         self._wrapper.flush()
         await self._buf.aflush()
@@ -538,7 +537,7 @@ class StreamConnection:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: typing.Any,
+        traceback: types.TracebackType | None,
     ) -> None:
         await self.close()
 
@@ -725,7 +724,7 @@ class Branch:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: typing.Any,
+        traceback: types.TracebackType | None,
     ) -> None:
         await self.delete()
 
@@ -738,7 +737,11 @@ class Branch:
 class _ProgressBase(abc.ABC):
     """Base class for progress handles with streaming events."""
 
-    _stream: typing.Any
+    # The native progress streams (CreateProgressStream/StartProgressStream/
+    # ForkProgressStream) all yield `_NativeProgressEvent | _RawBranch`; we read
+    # them through the async-iterator protocol, so type the field by that
+    # protocol rather than naming each concrete native stream class.
+    _stream: typing.AsyncIterator[_NativeProgressEvent | _RawBranch]
     _result: "Branch | None"
     _exhausted: bool
 
@@ -756,27 +759,35 @@ class _ProgressBase(abc.ABC):
         raise StopAsyncIteration
 
     @abc.abstractmethod
-    def _wrap_result(self, item: typing.Any) -> "Branch": ...
+    def _wrap_result(self, item: _RawBranch) -> "Branch": ...
 
     async def _drain(self) -> "Branch":
-        if self._result is not None:
-            return self._result
-        async for _ in self:
-            pass
-        assert self._result is not None
-        return self._result
+        # Iterating self drives __anext__, which stores the terminal branch in
+        # self._result before raising StopAsyncIteration. The attribute is set
+        # by a different method, so re-read it after draining rather than
+        # relying on flow narrowing from the guard above.
+        if self._result is None:
+            async for _ in self:
+                pass
+        result = self._result
+        assert result is not None, "progress stream ended without a result"
+        return result
 
 
 class _Progress(_ProgressBase):
     """Concrete progress handle. Iterate for events, then call `.branch()`."""
 
-    def __init__(self, stream: typing.Any, client: "Client") -> None:
+    def __init__(
+        self,
+        stream: typing.AsyncIterator[_NativeProgressEvent | _RawBranch],
+        client: "Client",
+    ) -> None:
         self._stream = stream
         self._client = client
         self._result: Branch | None = None
         self._exhausted = False
 
-    def _wrap_result(self, item: typing.Any) -> Branch:
+    def _wrap_result(self, item: _RawBranch) -> Branch:
         return Branch(item, self._client)
 
     async def branch(self) -> "Branch":
@@ -1100,15 +1111,18 @@ class _VMContext:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: typing.Any,
+        traceback: types.TracebackType | None,
     ) -> None:
         assert self._vm is not None
         await _await_shielded_to_completion(self._vm.close())
 
 
+_ShieldedT = typing.TypeVar("_ShieldedT")
+
+
 async def _await_shielded_to_completion(
-    awaitable: typing.Awaitable[typing.Any],
-) -> typing.Any:
+    awaitable: typing.Awaitable[_ShieldedT],
+) -> _ShieldedT:
     task = asyncio.ensure_future(awaitable)
     try:
         return await asyncio.shield(task)
@@ -1283,7 +1297,7 @@ class VM:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        traceback: typing.Any,
+        traceback: types.TracebackType | None,
     ) -> None:
         await _await_shielded_to_completion(self.close())
 
