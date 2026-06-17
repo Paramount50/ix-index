@@ -31,7 +31,7 @@ let
   # Public Python SDK: strict zuban + ruff ANN gate over the shipped ix_sdk
   # sources (ENG-3131). setuptools-built, so it has no pyChecker knob; the check
   # derivation runs the same strict gates as buildUvApplication's zuban mode.
-  sdkPython = import (paths.root + "/sdk/python") { inherit lib pkgs; };
+  sdkPython = import (paths.root + "/sdk/python") { inherit lib pkgs ix; };
   packageRegistry = import (paths.packagesRoot + "/registry.nix") {
     inherit lib;
     root = paths.packagesRoot;

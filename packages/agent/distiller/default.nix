@@ -9,6 +9,7 @@
 # passthru tests (pytest over the contract/merge/transcript units plus an
 # import smoke test).
 {
+  ix,
   lib,
   pkgs,
 }:
@@ -76,7 +77,7 @@ let
           --python-version ${pkgs.python3.pythonVersion} \
           --platform linux \
           distiller
-        ruff check --no-cache --select ANN distiller
+        ruff check --no-cache ${ix.ruffAnnArgs} distiller
         mkdir -p "$out"
       '';
 

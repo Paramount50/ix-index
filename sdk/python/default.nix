@@ -18,6 +18,7 @@
 # lib/per-system.nix), so a type or annotation regression in the shipped SDK
 # fails the build.
 {
+  ix,
   lib,
   pkgs,
   # Interpreter whose version/stdlib stubs the checks resolve against. Defaults
@@ -65,7 +66,7 @@ in
           --python-version ${python.pythonVersion} \
           --platform ${pythonPlatform} \
           ix_sdk
-        ruff check --no-cache --select ANN ix_sdk
+        ruff check --no-cache ${ix.ruffAnnArgs} ix_sdk
         touch "$out"
       '';
 }

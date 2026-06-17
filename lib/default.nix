@@ -39,7 +39,12 @@ let
     in
     entry.path;
 
-  inherit (import ./util/writers.nix { inherit lib; })
+  # Shared ruff selector (ANN explicit-annotations + TID251 no-typing.cast),
+  # imported once here and injected into every Python build gate so the policy
+  # has a single source of truth. See lib/build/ruff-ann.nix.
+  ruffAnnArgs = (import ./build/ruff-ann.nix { inherit lib; }).ruffAnnArgs;
+
+  inherit (import ./util/writers.nix { inherit lib ruffAnnArgs; })
     writePythonApplication
     writeNushellApplication
     writeBashApplication
@@ -113,7 +118,7 @@ let
     import ./build/uv-lock.nix {
       inherit lib pkgs;
     };
-  buildUvApplication = import ./build/uv-application.nix { inherit uvLockFor; };
+  buildUvApplication = import ./build/uv-application.nix { inherit uvLockFor ruffAnnArgs; };
   buildPyStrictCheck = import ./build/py-strict-check.nix { inherit lib; };
   buildGradleFatJar = import ./build/gradle-fat-jar.nix { inherit lib; };
   secrets = import ./util/secrets.nix {
@@ -425,6 +430,7 @@ let
       mutableJson
       paths
       relativePath
+      ruffAnnArgs
       rustWorkspace
       rustWorkspaceFor
       secrets

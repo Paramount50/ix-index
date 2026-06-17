@@ -1,4 +1,9 @@
-{ uvLockFor }:
+{
+  uvLockFor,
+  # Shared ruff selector (ANN explicit-annotations + TID251 no-typing.cast),
+  # injected by lib/default.nix so every Python gate enforces the same policy.
+  ruffAnnArgs,
+}:
 
 /**
   Build a Python application from a uv project.
@@ -127,10 +132,10 @@ let
   ]
   ++ typeCheckArgs
   ++ typeCheckPaths;
-  # ruff flake8-annotations (ANN): the dedicated explicit-annotation gate
-  # (ANN201 explicit returns, ANN001 arg types, ...), which the type checkers do
-  # not own. Runs alongside the strict correctness checkers.
-  ruffPhase = "ruff check --select ANN ${lib.escapeShellArgs typeCheckPaths}";
+  # ruff flake8-annotations (ANN) + banned-api (TID251, no typing.cast): the
+  # explicit-annotation + no-cast gate the type checkers do not own. The shared
+  # selector (`ruffAnnArgs`) is injected so every Python gate stays in sync.
+  ruffPhase = "ruff check ${ruffAnnArgs} ${lib.escapeShellArgs typeCheckPaths}";
   pyCheckers = {
     ty = {
       inputs = [ pkgs.ty ];

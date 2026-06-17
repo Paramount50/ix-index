@@ -1037,8 +1037,8 @@ let
           --python-version ${pkgs.python3.pythonVersion} \
           --platform linux \
           ${targets}
-        echo "ruff check --select ANN over: ${toString strictGreenModules}"
-        ruff check --select ANN ${targets}
+        echo "ruff check (ANN + TID251 no-cast) over: ${toString strictGreenModules}"
+        ruff check ${ix.ruffAnnArgs} ${targets}
 
         mkdir -p "$out"
       '';

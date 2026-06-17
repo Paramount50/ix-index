@@ -1,4 +1,9 @@
-{ lib }:
+{
+  lib,
+  # Shared ruff selector (ANN explicit-annotations + TID251 no-typing.cast),
+  # injected by lib/default.nix so every Python gate enforces the same policy.
+  ruffAnnArgs,
+}:
 let
   /**
     Package a Python entrypoint as a standalone executable.
@@ -60,7 +65,7 @@ let
       ]
       ++ extraSearchPathArgs
       ++ [ "${src}" ];
-      ruffAnnPhase = "${lib.getExe' pkgs.ruff "ruff"} check --select ANN ${lib.escapeShellArg "${src}"}";
+      ruffAnnPhase = "${lib.getExe' pkgs.ruff "ruff"} check ${ruffAnnArgs} ${lib.escapeShellArg "${src}"}";
       # zuban/mypy resolve the interpreter's own packages from
       # `--python-executable`, so MYPYPATH must carry only genuinely-extra import
       # roots. Forwarding the interpreter's site-packages (the default of
