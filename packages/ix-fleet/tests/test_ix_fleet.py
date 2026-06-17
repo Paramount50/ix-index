@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+import pytest
 from pydantic import ValidationError
 
 import ix_fleet
@@ -47,13 +48,13 @@ class FleetPlanValidationTests(unittest.TestCase):
     def test_rejects_nodes_missing_from_order(self) -> None:
         data = fleet_plan(["web"], [fleet_node("web"), fleet_node("db")])
 
-        with self.assertRaisesRegex(ValidationError, "order is missing node 'db'"):
+        with pytest.raises(ValidationError, match="order is missing node 'db'"):
             ix_fleet.FleetPlan.model_validate(data)
 
     def test_rejects_duplicate_order_entries(self) -> None:
         data = fleet_plan(["web", "web"], [fleet_node("web")])
 
-        with self.assertRaisesRegex(ValidationError, "order contains duplicate node 'web'"):
+        with pytest.raises(ValidationError, match="order contains duplicate node 'web'"):
             ix_fleet.FleetPlan.model_validate(data)
 
     def test_selected_nodes_keeps_dependencies_before_selected_node(self) -> None:
@@ -61,9 +62,9 @@ class FleetPlanValidationTests(unittest.TestCase):
             fleet_plan(["db", "web"], [fleet_node("web", depends_on=["db"]), fleet_node("db")])
         )
 
-        self.assertEqual(
-            [node.name for node in ix_fleet.selected_nodes(plan, ["web"])],
-            ["db", "web"],
+        assert (
+            [node.name for node in ix_fleet.selected_nodes(plan, ["web"])]
+            == ["db", "web"]
         )
 
     def test_accepts_declarative_secret_backend_and_refs(self) -> None:
@@ -85,36 +86,36 @@ class FleetPlanValidationTests(unittest.TestCase):
 
         plan = ix_fleet.FleetPlan.model_validate(data)
 
-        self.assertEqual(plan.secrets.provider.type, "vaultwarden")
-        self.assertEqual(plan.secrets.provider.model_extra, {"collection": "production"})
-        self.assertEqual(plan.secrets.values["sessionKey"].path, "/run/secrets/fleet/sessionKey")
-        self.assertEqual(plan.secrets.values["sessionKey"].model_extra, {"generate": True})
+        assert plan.secrets.provider.type == "vaultwarden"
+        assert plan.secrets.provider.model_extra == {"collection": "production"}
+        assert plan.secrets.values["sessionKey"].path == "/run/secrets/fleet/sessionKey"
+        assert plan.secrets.values["sessionKey"].model_extra == {"generate": True}
 
     def test_per_vm_secret_refs_default_empty_and_round_trip(self) -> None:
         bare = ix_fleet.FleetNode.model_validate(fleet_node("web"))
-        self.assertEqual(bare.secrets, [])
-        self.assertFalse(bare.noDefaultSecrets)
+        assert bare.secrets == []
+        assert not bare.noDefaultSecrets
 
         node = fleet_node("api")
         node["secrets"] = ["GH_TOKEN", "DATABASE_URL"]
         node["noDefaultSecrets"] = True
         parsed = ix_fleet.FleetNode.model_validate(node)
-        self.assertEqual(parsed.secrets, ["GH_TOKEN", "DATABASE_URL"])
-        self.assertTrue(parsed.noDefaultSecrets)
+        assert parsed.secrets == ["GH_TOKEN", "DATABASE_URL"]
+        assert parsed.noDefaultSecrets
 
 
 class VerifySecretsAvailableTests(unittest.TestCase):
     @staticmethod
-    def _fake_client(names: list[str]) -> typing.Any:
+    def _fake_client(names: list[str]) -> typing.Any:  # noqa: ANN401
         stored = [type("UserSecret", (), {"name": name})() for name in names]
 
         class FakeClient:
             async def list_secrets(self) -> list[typing.Any]:
                 return stored
 
-        return lambda: FakeClient()
+        return FakeClient
 
-    def _plan(self, secrets: list[str]) -> typing.Any:
+    def _plan(self, secrets: list[str]) -> typing.Any:  # noqa: ANN401
         node = fleet_node("web")
         node["secrets"] = secrets
         return ix_fleet.FleetPlan.model_validate(fleet_plan(["web"], [node]))
@@ -126,14 +127,16 @@ class VerifySecretsAvailableTests(unittest.TestCase):
 
     def test_raises_listing_missing_secrets(self) -> None:
         plan = self._plan(["GH_TOKEN", "DATABASE_URL"])
-        with patch.object(ix_fleet, "client", self._fake_client(["GH_TOKEN"])):
-            with self.assertRaisesRegex(RuntimeError, "missing secret\\(s\\) in the store: DATABASE_URL"):
-                asyncio.run(ix_fleet.verify_secrets_available(plan, [], dry_run=False))
+        with (
+            patch.object(ix_fleet, "client", self._fake_client(["GH_TOKEN"])),
+            pytest.raises(RuntimeError, match=r"missing secret\(s\) in the store: DATABASE_URL"),
+        ):
+            asyncio.run(ix_fleet.verify_secrets_available(plan, [], dry_run=False))
 
     def test_dry_run_makes_no_live_call(self) -> None:
         plan = self._plan(["MISSING"])
 
-        def fail_client() -> typing.Any:
+        def fail_client() -> typing.Any:  # noqa: ANN401
             raise AssertionError("dry-run preflight must not touch the store")
 
         with patch.object(ix_fleet, "client", fail_client):
@@ -142,7 +145,7 @@ class VerifySecretsAvailableTests(unittest.TestCase):
     def test_no_references_makes_no_live_call(self) -> None:
         plan = self._plan([])
 
-        def fail_client() -> typing.Any:
+        def fail_client() -> typing.Any:  # noqa: ANN401
             raise AssertionError("preflight must not query the store with no references")
 
         with patch.object(ix_fleet, "client", fail_client):
@@ -161,7 +164,7 @@ class PushReplacementImageTests(unittest.TestCase):
                 calls.append(command)
                 if command[0] == "nix-store":
                     return f"{source}\n"
-                self.assertFalse(dry_run)
+                assert not dry_run
                 return "registry.ix.dev/example/health-check-nginx:nginx-lifecycle\n"
 
             node = ix_fleet.FleetNode.model_validate(
@@ -190,14 +193,11 @@ class PushReplacementImageTests(unittest.TestCase):
             with patch.object(ix_fleet, "run_cli", fake_run_cli):
                 image = asyncio.run(ix_fleet.push_replacement_image(node, dry_run=False))
 
-            self.assertEqual(
-                calls,
-                [
-                    ["nix-store", "--realise", "/nix/store/example-image.drv"],
-                    ["ix", "image", "push", str(source), "health-check-nginx:nginx-lifecycle"],
-                ],
-            )
-            self.assertEqual(image, "registry.ix.dev/example/health-check-nginx:nginx-lifecycle")
+            assert calls == [
+                ["nix-store", "--realise", "/nix/store/example-image.drv"],
+                ["ix", "image", "push", str(source), "health-check-nginx:nginx-lifecycle"],
+            ]
+            assert image == "registry.ix.dev/example/health-check-nginx:nginx-lifecycle"
 
 
 class UpNodeTests(unittest.TestCase):
@@ -210,7 +210,7 @@ class UpNodeTests(unittest.TestCase):
 
         async def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
             del timeout
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(command)
             return ""
 
@@ -220,21 +220,18 @@ class UpNodeTests(unittest.TestCase):
         ):
             asyncio.run(ix_fleet.up_node(node, "registry.ix.dev/example/web:new", dry_run=False))
 
-        self.assertEqual(
-            calls,
+        assert calls == [
             [
-                [
-                    "ix",
-                    "new",
-                    "registry.ix.dev/example/web:new",
-                    "--name",
-                    "web",
-                    "--region",
-                    "us-west-1",
-                    "--no-shell",
-                ]
-            ],
-        )
+                "ix",
+                "new",
+                "registry.ix.dev/example/web:new",
+                "--name",
+                "web",
+                "--region",
+                "us-west-1",
+                "--no-shell",
+            ]
+        ]
 
     def test_replaces_existing_stopped_node_instead_of_starting_old_image(self) -> None:
         calls: list[list[str]] = []
@@ -245,7 +242,7 @@ class UpNodeTests(unittest.TestCase):
 
         async def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
             del timeout
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(command)
             return ""
 
@@ -255,8 +252,8 @@ class UpNodeTests(unittest.TestCase):
         ):
             asyncio.run(ix_fleet.up_node(node, "registry.ix.dev/example/web:new", dry_run=False))
 
-        self.assertEqual(calls[0][:3], ["ix", "new", "registry.ix.dev/example/web:new"])
-        self.assertNotIn(["ix", "start", "web"], calls)
+        assert calls[0][:3] == ["ix", "new", "registry.ix.dev/example/web:new"]
+        assert ["ix", "start", "web"] not in calls
 
     def test_dry_run_shows_possible_node_replacement_without_live_lookup(self) -> None:
         calls: list[list[str]] = []
@@ -268,7 +265,7 @@ class UpNodeTests(unittest.TestCase):
 
         async def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
             del timeout
-            self.assertTrue(dry_run)
+            assert dry_run
             calls.append(command)
             return ""
 
@@ -279,8 +276,8 @@ class UpNodeTests(unittest.TestCase):
         ):
             asyncio.run(ix_fleet.up_node(node, "registry.ix.dev/example/web:new", dry_run=True))
 
-        self.assertEqual(steps, ["create or replace web from uploaded image registry.ix.dev/example/web:new"])
-        self.assertEqual(calls[0][:3], ["ix", "new", "registry.ix.dev/example/web:new"])
+        assert steps == ["create or replace web from uploaded image registry.ix.dev/example/web:new"]
+        assert calls[0][:3] == ["ix", "new", "registry.ix.dev/example/web:new"]
 
 
 class EastWestGroupTests(unittest.TestCase):
@@ -289,7 +286,7 @@ class EastWestGroupTests(unittest.TestCase):
 
         async def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
             del timeout
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(command)
             return ""
 
@@ -300,20 +297,17 @@ class EastWestGroupTests(unittest.TestCase):
         with patch.object(ix_fleet, "run_cli", fake_run_cli):
             asyncio.run(ix_fleet.ensure_node_groups(node, dry_run=False))
 
-        self.assertEqual(
-            calls,
-            [
-                ["ix", "group", "create", "private-apps"],
-                ["ix", "group", "add", "private-apps", "api"],
-            ],
-        )
+        assert calls == [
+            ["ix", "group", "create", "private-apps"],
+            ["ix", "group", "add", "private-apps", "api"],
+        ]
 
     def test_existing_group_membership_is_idempotent(self) -> None:
         calls: list[list[str]] = []
 
         async def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
             del timeout
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(command)
             if command[:3] == ["ix", "group", "create"]:
                 raise ix_fleet.CliError(command, 1, "", "group already exists")
@@ -328,13 +322,10 @@ class EastWestGroupTests(unittest.TestCase):
         with patch.object(ix_fleet, "run_cli", fake_run_cli):
             asyncio.run(ix_fleet.ensure_node_groups(node, dry_run=False))
 
-        self.assertEqual(
-            calls,
-            [
-                ["ix", "group", "create", "private-apps"],
-                ["ix", "group", "add", "private-apps", "api"],
-            ],
-        )
+        assert calls == [
+            ["ix", "group", "create", "private-apps"],
+            ["ix", "group", "add", "private-apps", "api"],
+        ]
 
 
 class BootstrapTests(unittest.TestCase):
@@ -345,14 +336,14 @@ class BootstrapTests(unittest.TestCase):
         calls: list[str] = []
 
         async def fake_bootstrap_node(node: ix_fleet.FleetNode, *, dry_run: bool) -> None:
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(node.name)
 
         with patch.object(ix_fleet, "bootstrap_node", fake_bootstrap_node):
             args = argparse_namespace(on=["web"], dry_run=False)
             asyncio.run(ix_fleet.cmd_bootstrap(plan, args))
 
-        self.assertEqual(calls, ["db", "web"])
+        assert calls == ["db", "web"]
 
     def test_bootstrap_uses_bootstrap_image_without_replacement_push(self) -> None:
         calls: list[list[str]] = []
@@ -363,12 +354,12 @@ class BootstrapTests(unittest.TestCase):
             return []
 
         async def fake_wait_node_ready(node: ix_fleet.FleetNode, *, dry_run: bool) -> None:
-            self.assertFalse(dry_run)
+            assert not dry_run
             ready.append(node.name)
 
         async def fake_run_cli(command: list[str], *, dry_run: bool, timeout: int | None = None) -> str:
             del timeout
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(command)
             return ""
 
@@ -379,22 +370,19 @@ class BootstrapTests(unittest.TestCase):
         ):
             asyncio.run(ix_fleet.bootstrap_node(node, dry_run=False))
 
-        self.assertEqual(
-            calls,
+        assert calls == [
             [
-                [
-                    "ix",
-                    "new",
-                    "registry.ix.dev/ix/base:latest",
-                    "--name",
-                    "api",
-                    "--region",
-                    "us-west-1",
-                    "--no-shell",
-                ],
+                "ix",
+                "new",
+                "registry.ix.dev/ix/base:latest",
+                "--name",
+                "api",
+                "--region",
+                "us-west-1",
+                "--no-shell",
             ],
-        )
-        self.assertEqual(ready, ["api"])
+        ]
+        assert ready == ["api"]
 
 
 class NodeWorkflowDagTests(unittest.TestCase):
@@ -414,21 +402,18 @@ class NodeWorkflowDagTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(list(spec["nodes"]), ["db", "web"])
-        self.assertEqual(spec["nodes"]["db"]["depends_on"], [])
-        self.assertEqual(spec["nodes"]["web"]["depends_on"], ["db"])
-        self.assertEqual(
-            spec["nodes"]["web"]["command"],
-            [
-                "/bin/ix-fleet",
-                "--plan",
-                "fleet.json",
-                "_up-node",
-                "web",
-                "--skip-push",
-                "--skip-health",
-            ],
-        )
+        assert list(spec["nodes"]) == ["db", "web"]
+        assert spec["nodes"]["db"]["depends_on"] == []
+        assert spec["nodes"]["web"]["depends_on"] == ["db"]
+        assert spec["nodes"]["web"]["command"] == [
+            "/bin/ix-fleet",
+            "--plan",
+            "fleet.json",
+            "_up-node",
+            "web",
+            "--skip-push",
+            "--skip-health",
+        ]
 
     def test_replace_dag_forwards_replace_flags(self) -> None:
         plan = ix_fleet.FleetPlan.model_validate(fleet_plan(["api"], [fleet_node("api")]))
@@ -444,18 +429,15 @@ class NodeWorkflowDagTests(unittest.TestCase):
             ),
         )
 
-        self.assertEqual(
-            spec["nodes"]["api"]["command"],
-            [
-                "/bin/ix-fleet",
-                "--plan",
-                "/plans/fleet.json",
-                "_replace-node",
-                "api",
-                "--skip-push",
-                "--skip-health",
-            ],
-        )
+        assert spec["nodes"]["api"]["command"] == [
+            "/bin/ix-fleet",
+            "--plan",
+            "/plans/fleet.json",
+            "_replace-node",
+            "api",
+            "--skip-push",
+            "--skip-health",
+        ]
 
     def test_push_dag_serializes_shared_image_destination(self) -> None:
         api = fleet_node("api")
@@ -469,7 +451,7 @@ class NodeWorkflowDagTests(unittest.TestCase):
             argparse_namespace(plan=Path("fleet.json"), on=[], dry_run=False, skip_push=False, skip_health=True),
         )
 
-        self.assertEqual(spec["nodes"]["worker"]["depends_on"], ["api"])
+        assert spec["nodes"]["worker"]["depends_on"] == ["api"]
 
     def test_dag_runner_exit_status_becomes_process_exit_status(self) -> None:
         plan = ix_fleet.FleetPlan.model_validate(fleet_plan(["api"], [fleet_node("api")]))
@@ -486,11 +468,13 @@ class NodeWorkflowDagTests(unittest.TestCase):
             runner.write_text("#!/bin/sh\nexit 17\n")
             runner.chmod(0o755)
 
-            with patch.dict(ix_fleet.os.environ, {"IX_FLEET_DAG_RUNNER": str(runner)}):
-                with self.assertRaises(SystemExit) as raised:
-                    asyncio.run(ix_fleet.cmd_up(plan, args))
+            with (
+                patch.dict(ix_fleet.os.environ, {"IX_FLEET_DAG_RUNNER": str(runner)}),
+                pytest.raises(SystemExit) as raised,
+            ):
+                asyncio.run(ix_fleet.cmd_up(plan, args))
 
-        self.assertEqual(raised.exception.code, 17)
+        assert raised.value.code == 17
 
     def test_dry_run_runs_inline_so_child_output_is_visible(self) -> None:
         plan = ix_fleet.FleetPlan.model_validate(fleet_plan(["api"], [fleet_node("api")]))
@@ -510,7 +494,7 @@ class NodeWorkflowDagTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(calls, ["api"])
+        assert calls == ["api"]
 
 
 class SingleNodeWorkflowTests(unittest.TestCase):
@@ -536,7 +520,7 @@ class SingleNodeWorkflowTests(unittest.TestCase):
         ):
             asyncio.run(ix_fleet.cmd_up_node(plan, args))
 
-        self.assertEqual(calls, ["push", "up", "groups", "health"])
+        assert calls == ["push", "up", "groups", "health"]
 
     def test_replace_node_workflow_runs_the_existing_replace_sequence(self) -> None:
         plan = ix_fleet.FleetPlan.model_validate(fleet_plan(["api"], [fleet_node("api")]))
@@ -560,7 +544,7 @@ class SingleNodeWorkflowTests(unittest.TestCase):
         ):
             asyncio.run(ix_fleet.cmd_replace_node(plan, args))
 
-        self.assertEqual(calls, ["push", "replace", "groups", "health"])
+        assert calls == ["push", "replace", "groups", "health"]
 
     def test_switch_node_workflow_runs_the_existing_switch_sequence(self) -> None:
         plan = ix_fleet.FleetPlan.model_validate(fleet_plan(["api"], [fleet_node("api")]))
@@ -575,7 +559,7 @@ class SingleNodeWorkflowTests(unittest.TestCase):
         calls: list[str] = []
 
         with (
-            patch.object(ix_fleet, "ensure_node", async_recorder(calls, "ensure", False)),
+            patch.object(ix_fleet, "ensure_node", async_recorder(calls, "ensure", result=False)),
             patch.object(ix_fleet, "ensure_node_groups", async_recorder(calls, "groups")),
             patch.object(ix_fleet, "snapshot_node", async_recorder(calls, "snapshot")),
             patch.object(ix_fleet, "switch_node", async_recorder(calls, "switch")),
@@ -583,7 +567,7 @@ class SingleNodeWorkflowTests(unittest.TestCase):
         ):
             asyncio.run(ix_fleet.run_switch_node_workflow(plan.nodes["api"], args))
 
-        self.assertEqual(calls, ["ensure", "groups", "snapshot", "switch", "health"])
+        assert calls == ["ensure", "groups", "snapshot", "switch", "health"]
 
 
 class DownTests(unittest.TestCase):
@@ -602,16 +586,13 @@ class DownTests(unittest.TestCase):
 
         with patch.object(ix_fleet, "run_cli", fake_run_cli):
             args = argparse_namespace(on=[], dry_run=False)
-            with self.assertRaisesRegex(RuntimeError, "web: command failed"):
+            with pytest.raises(RuntimeError, match="web: command failed"):
                 asyncio.run(ix_fleet.cmd_down(plan, args))
 
-        self.assertEqual(
-            calls,
-            [
-                ["ix", "rm", "--force", "web"],
-                ["ix", "rm", "--force", "db"],
-            ],
-        )
+        assert calls == [
+            ["ix", "rm", "--force", "web"],
+            ["ix", "rm", "--force", "db"],
+        ]
 
     def test_down_treats_missing_nodes_as_absent(self) -> None:
         node = ix_fleet.FleetNode.model_validate(fleet_node("api"))
@@ -648,7 +629,7 @@ class SwitchSourceTests(unittest.TestCase):
             cwd: Path | None = None,
         ) -> str:
             del timeout
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(command)
             cwds.append(cwd)
             return ""
@@ -663,27 +644,24 @@ class SwitchSourceTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(
-            calls,
+        assert calls == [
             [
-                [
-                    "ix",
-                    "up",
-                    ".#api",
-                    "--name",
-                    "api",
-                    "--workdir",
-                    "subdir",
-                    "--build-vm",
-                    "builder",
-                    "--override-input",
-                    "ix=github:indexable-inc/ix",
-                    "--override-input",
-                    "ix-images=path:/workspace/index",
-                ],
+                "ix",
+                "up",
+                ".#api",
+                "--name",
+                "api",
+                "--workdir",
+                "subdir",
+                "--build-vm",
+                "builder",
+                "--override-input",
+                "ix=github:indexable-inc/ix",
+                "--override-input",
+                "ix-images=path:/workspace/index",
             ],
-        )
-        self.assertEqual(cwds, [Path("/source")])
+        ]
+        assert cwds == [Path("/source")]
 
     def test_source_switch_rejects_workdir_outside_source_root(self) -> None:
         # `--workdir` is resolved relative to the uploaded source root, so an
@@ -691,20 +669,22 @@ class SwitchSourceTests(unittest.TestCase):
         # loudly rather than forwarding a path `ix up` cannot interpret.
         node = ix_fleet.FleetNode.model_validate(fleet_node("api"))
 
-        async def fail_run_cli(*args: typing.Any, **kwargs: typing.Any) -> str:
+        async def fail_run_cli(*args: typing.Any, **kwargs: typing.Any) -> str:  # noqa: ANN401
             del args, kwargs
             raise AssertionError("run_cli should not be reached")
 
-        with patch.object(ix_fleet, "run_cli", fail_run_cli):
-            with self.assertRaises(ValueError):
-                asyncio.run(
-                    ix_fleet.switch_node_from_source(
-                        node,
-                        Path("/source"),
-                        Path("/elsewhere/subdir"),
-                        dry_run=False,
-                    )
+        with (
+            patch.object(ix_fleet, "run_cli", fail_run_cli),
+            pytest.raises(ValueError, match="outside source root"),
+        ):
+            asyncio.run(
+                ix_fleet.switch_node_from_source(
+                    node,
+                    Path("/source"),
+                    Path("/elsewhere/subdir"),
+                    dry_run=False,
                 )
+            )
 
 
 def remote_node(
@@ -724,20 +704,20 @@ class SwitchBatchTests(unittest.TestCase):
         return ix_fleet.FleetNode.model_validate(data)
 
     def test_is_batchable_switch(self) -> None:
-        self.assertTrue(ix_fleet.is_batchable_switch(self._node(remote_node("api"))))
+        assert ix_fleet.is_batchable_switch(self._node(remote_node("api")))
         # local build: no shared builder to batch on.
         local = fleet_node("api")
         local["switch"]["buildOn"] = "local"
-        self.assertFalse(ix_fleet.is_batchable_switch(self._node(local)))
+        assert not ix_fleet.is_batchable_switch(self._node(local))
         # remote but no build VM: multi `ix up` requires --build-vm.
         no_vm = fleet_node("api")
         no_vm["switch"]["buildOn"] = "remote"
-        self.assertFalse(ix_fleet.is_batchable_switch(self._node(no_vm)))
+        assert not ix_fleet.is_batchable_switch(self._node(no_vm))
         # installable attr must equal the node name (multi derives the VM name
         # from it and rejects --name).
         custom = remote_node("api")
         custom["switch"]["sourceInstallable"] = ".#api-system"
-        self.assertFalse(ix_fleet.is_batchable_switch(self._node(custom)))
+        assert not ix_fleet.is_batchable_switch(self._node(custom))
 
     def test_batch_groups_split_by_build_vm_region_and_overrides(self) -> None:
         a = self._node(remote_node("a", build_vm="b1"))
@@ -754,7 +734,7 @@ class SwitchBatchTests(unittest.TestCase):
 
         groups = ix_fleet.batch_groups([a, b, c, d_node, e_node])
         names = [[node.name for node in group] for group in groups]
-        self.assertEqual(names, [["a", "b"], ["c"], ["d"], ["e"]])
+        assert names == [["a", "b"], ["c"], ["d"], ["e"]]
 
     def test_switch_nodes_from_source_builds_one_multi_ix_up(self) -> None:
         nodes = [self._node(remote_node("web")), self._node(remote_node("worker"))]
@@ -769,7 +749,7 @@ class SwitchBatchTests(unittest.TestCase):
             cwd: Path | None = None,
         ) -> str:
             del timeout
-            self.assertFalse(dry_run)
+            assert not dry_run
             calls.append(command)
             cwds.append(cwd)
             return ""
@@ -786,23 +766,20 @@ class SwitchBatchTests(unittest.TestCase):
 
         # One native multi-VM `ix up`: every installable, one shared --build-vm,
         # and no --name (multi derives each VM name from its installable attr).
-        self.assertEqual(
-            calls,
+        assert calls == [
             [
-                [
-                    "ix",
-                    "up",
-                    ".#web",
-                    ".#worker",
-                    "--build-vm",
-                    "builder",
-                    "--workdir",
-                    "subdir",
-                ]
-            ],
-        )
-        self.assertNotIn("--name", calls[0])
-        self.assertEqual(cwds, [Path("/source")])
+                "ix",
+                "up",
+                ".#web",
+                ".#worker",
+                "--build-vm",
+                "builder",
+                "--workdir",
+                "subdir",
+            ]
+        ]
+        assert "--name" not in calls[0]
+        assert cwds == [Path("/source")]
 
     def test_cmd_switch_batches_remote_nodes_and_runs_singles(self) -> None:
         api = remote_node("api")
@@ -816,16 +793,16 @@ class SwitchBatchTests(unittest.TestCase):
             group: list[ix_fleet.FleetNode],
             source_root: Path,
             source_workdir: Path,
-            args: typing.Any,
+            args: typing.Any,  # noqa: ANN401
         ) -> None:
             del source_root, source_workdir, args
             groups.append([node.name for node in group])
 
-        async def record_single(node: ix_fleet.FleetNode, args: typing.Any) -> None:
+        async def record_single(node: ix_fleet.FleetNode, args: typing.Any) -> None:  # noqa: ANN401
             del args
             singles.append(node.name)
 
-        async def no_verify(*args: typing.Any, **kwargs: typing.Any) -> None:
+        async def no_verify(*args: typing.Any, **kwargs: typing.Any) -> None:  # noqa: ANN401
             del args, kwargs
 
         with (
@@ -847,8 +824,8 @@ class SwitchBatchTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(groups, [["api", "web"]])
-        self.assertEqual(singles, ["cache"])
+        assert groups == [["api", "web"]]
+        assert singles == ["cache"]
 
     def test_cmd_switch_respects_dependency_layers(self) -> None:
         api = remote_node("api")
@@ -860,7 +837,7 @@ class SwitchBatchTests(unittest.TestCase):
             group: list[ix_fleet.FleetNode],
             source_root: Path,
             source_workdir: Path,
-            args: typing.Any,
+            args: typing.Any,  # noqa: ANN401
         ) -> None:
             del source_root, source_workdir, args
             switched.append([node.name for node in group])
@@ -883,17 +860,17 @@ class SwitchBatchTests(unittest.TestCase):
             )
 
         # `dependsOn` keeps the switch layered: api's batch runs before worker's.
-        self.assertEqual(switched, [["api"], ["worker"]])
+        assert switched == [["api"], ["worker"]]
 
 
-def argparse_namespace(**kwargs: typing.Any) -> typing.Any:
+def argparse_namespace(**kwargs: typing.Any) -> typing.Any:  # noqa: ANN401
     return type("Args", (), kwargs)()
 
 
 def captured_dag(
     command: typing.Callable[[ix_fleet.FleetPlan, typing.Any], typing.Coroutine[typing.Any, typing.Any, None]],
     plan: ix_fleet.FleetPlan,
-    args: typing.Any,
+    args: typing.Any,  # noqa: ANN401
 ) -> dict[str, typing.Any]:
     specs: list[dict[str, typing.Any]] = []
 
@@ -912,9 +889,9 @@ def captured_dag(
 def async_recorder(
     calls: list[str],
     name: str,
-    result: typing.Any = None,
+    result: typing.Any = None,  # noqa: ANN401
 ) -> typing.Callable[..., typing.Coroutine[typing.Any, typing.Any, typing.Any]]:
-    async def record(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:
+    async def record(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:  # noqa: ANN401
         del args, kwargs
         calls.append(name)
         return result

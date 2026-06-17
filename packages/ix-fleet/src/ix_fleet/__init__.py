@@ -356,7 +356,7 @@ async def push_replacement_image(node: FleetNode, *, dry_run: bool) -> str:
     realised = [line.strip() for line in out.splitlines() if line.strip()]
     if realised:
         source = realised[-1]
-    if not Path(source).exists():
+    if not await asyncio.to_thread(Path(source).exists):
         raise RuntimeError(f"OCI image derivation did not realise to an existing path: {source}")
 
     step(f"pushing {image.destination} from {source}")
@@ -715,7 +715,7 @@ async def run_source_switch(command: list[str], source_root: Path, label: str, *
             step(f"switching {label} from source (attempt {attempt}/{MAX_SWITCH_RETRIES})")
             await run_cli(command, dry_run=dry_run, timeout=3600, cwd=source_root)
             return
-        except (CliError, CliTimeoutError) as e:
+        except (CliError, CliTimeoutError) as e:  # noqa: PERF203 -- retry loop by design
             error_msg = e.output or str(e)
             if "stream framing error" in error_msg and attempt < MAX_SWITCH_RETRIES:
                 step(f"transient error, retrying in {RETRY_DELAY_SECS}s: {error_msg[:100]}")
@@ -1027,7 +1027,7 @@ async def cmd_down(plan: FleetPlan, args: argparse.Namespace) -> None:
     for node in reversed(selected_nodes(plan, args.on)):
         try:
             await remove_node(node, dry_run=args.dry_run)
-        except (ix_sdk.IxError, OSError) as error:
+        except (ix_sdk.IxError, OSError) as error:  # noqa: PERF203 -- collect all failures before raising
             failures.append(f"{node.name}: {error}")
     if failures:
         raise RuntimeError("failed to remove fleet nodes: " + "; ".join(failures))
