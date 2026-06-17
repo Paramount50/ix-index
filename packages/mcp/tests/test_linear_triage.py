@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import os
 from pathlib import Path
 
 # Make `import linear` work when running directly against the source tree.

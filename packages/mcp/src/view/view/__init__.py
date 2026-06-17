@@ -496,7 +496,9 @@ def ls(path: str | os.PathLike[str] = ".", *, all: bool = False) -> pl.DataFrame
         try:
             st = p.stat()
             size = st.st_size if p.is_file() else None
-            mtime = datetime.fromtimestamp(st.st_mtime, tz=UTC)
+            # Local wall-clock (aware), preserving the pre-DTZ006 naive-local
+            # display rather than shifting `ls` mtimes to UTC.
+            mtime = datetime.fromtimestamp(st.st_mtime, tz=UTC).astimezone()
         except OSError:
             size, mtime = None, None
         kind = "dir" if p.is_dir() else ("link" if p.is_symlink() else "file")
