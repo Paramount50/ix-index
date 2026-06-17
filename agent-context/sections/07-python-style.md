@@ -28,3 +28,14 @@ mixed footing is `packages/mcp` (its own `strictTypecheck` gate covers the
 migrated modules; the rest is tracked in ENG-3136). Once mcp is fully clean, a
 whole-repo `ruff check --select ANN .` lint stage can replace per-package
 enforcement with a single tree-wide gate.
+
+`typing.Any` in annotations is already banned everywhere by `ruff ANN401`. For
+external or untrusted JSON (an HTTP API response, a config file), parse it into a
+[pydantic](https://docs.pydantic.dev) model at the boundary rather than threading
+`dict[str, Any]`/`object` through the code: the model validates the shape once and
+fails with a path-precise error when upstream drifts, and every downstream access
+is typed. `packages/update-loaders` is the worked example (a `TypeAdapter` over
+the PaperMC response). Reserve a bare `object` annotation for genuinely opaque
+values where narrowing is the caller's job (`def __eq__(self, other: object)`,
+`*args: object`), and leave a comment saying why; do not use it as a shortcut to
+skip modeling data you actually read.
