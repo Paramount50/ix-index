@@ -75,6 +75,13 @@ let
     "RUF001"
     "RUF002"
     "RUF003"
+    # PERF203 (try-except in a loop) is a minor perf hint AND version-volatile
+    # across ruff releases: the per-package buildUvApplication gate and the
+    # repo-wide lint stage can resolve to different ruff builds, so a
+    # `# noqa: PERF203` one gate needs the other flags as RUF100 (unused). Drop
+    # it -- the flagged loops (retry/drain/collect-failures) genuinely need the
+    # per-iteration try; hoisting it would change behavior.
+    "PERF203"
   ];
 in
 {

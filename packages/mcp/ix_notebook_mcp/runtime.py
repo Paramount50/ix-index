@@ -1686,9 +1686,9 @@ def _coerce_image(value: Any) -> dict | None:
             mime = head[5:].split(";", 1)[0] or "image/png"
             return _encode_image_b64(payload, mime)
         # A filesystem path to an image.
-        if len(s) < 4096 and Path(s).is_file():
+        if len(s) < 4096 and pathlib.Path(s).is_file():
             try:
-                raw = Path(s).read_bytes()
+                raw = pathlib.Path(s).read_bytes()
             except OSError:
                 return None
             mime = "image/jpeg" if s.lower().endswith((".jpg", ".jpeg")) else "image/png"
@@ -2396,7 +2396,7 @@ async def _restore_body() -> None:
                 try:
                     ns[name] = loader.loads(payload)
                     restored.append(name)
-                except Exception:  # noqa: PERF203 -- per-name restore; individual failures tracked in load_failed
+                except Exception:  # per-name restore; individual failures tracked in load_failed
                     load_failed.append(name)
     since = snap["created_at"] if snap is not None else None
     rows: list[dict] = []
@@ -2779,7 +2779,7 @@ def _install_signal_handlers() -> None:
 
     trace_path = os.environ.get("IX_MCP_KERNEL_TRACE")
     if trace_path:
-        _trace_file = Path(trace_path).open("w")  # trace file must remain open for faulthandler; cannot use context manager
+        _trace_file = pathlib.Path(trace_path).open("w")  # noqa: SIM115 -- trace file must outlive this scope (faulthandler writes to it for the process lifetime)
         # enable() handles fatal signals (SIGSEGV/SIGABRT) -> stderr; register()
         # adds the on-demand SIGUSR1 all-thread dump the kernel_trace tool reads.
         faulthandler.enable()
@@ -2847,7 +2847,7 @@ def install(user_ns: dict | None = None) -> None:
     # Seed the default session label with this kernel's working directory; the
     # connecting client's identity is folded in later (see Kernel.set_client).
     with contextlib.suppress(OSError):
-        session._workdir = Path.cwd().name or ""
+        session._workdir = pathlib.Path.cwd().name or ""
         session._rev += 1  # ensure the first flush mirrors the default to the store
     target["resources"] = resources
     target["Resource"] = Resource

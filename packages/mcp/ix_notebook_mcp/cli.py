@@ -138,7 +138,7 @@ def _bindable(host: str, port: int) -> bool:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(sockaddr)
             return True
-        except OSError:  # noqa: PERF203 -- try-except is required to probe bindability per address family
+        except OSError:
             continue
     return False
 

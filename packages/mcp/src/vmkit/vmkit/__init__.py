@@ -453,7 +453,7 @@ def screenshot_many(
         for key, future in futures.items():
             try:
                 results[key] = future.result()
-            except BaseException as exc:  # noqa: PERF203 -- must drain all futures before re-raising so no thread leaks
+            except BaseException as exc:  # must drain all futures before re-raising so no thread leaks
                 if error is None:
                     error = exc
     if error is not None:
