@@ -41,8 +41,8 @@ let
 
   # Shared ruff selector (ANN explicit-annotations + TID251 no-typing.cast),
   # imported once here and injected into every Python build gate so the policy
-  # has a single source of truth. See lib/build/ruff-ann.nix.
-  inherit (import ./build/ruff-ann.nix { inherit lib; }) ruffAnnArgs;
+  # has a single source of truth. See lib/ruff-ann.nix.
+  inherit (import ./ruff-ann.nix { inherit lib; }) ruffAnnArgs;
 
   inherit (import ./util/writers.nix { inherit lib ruffAnnArgs; })
     writePythonApplication

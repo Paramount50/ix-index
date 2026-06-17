@@ -114,7 +114,7 @@ let
       }
       # Repo-wide Python lint: the shared ruff selector (bug-catchers + security +
       # pathlib + pytest + explicit annotations + no `typing.cast`; see
-      # lib/build/ruff-ann.nix) over EVERY tracked .py, so non-package dirs
+      # lib/ruff-ann.nix) over EVERY tracked .py, so non-package dirs
       # (tools/, users/, skills/, sdk/, examples/, lib/) are covered too, not just
       # the per-package build gates. `fd` skips gitignored paths; `.claude` (agent
       # worktrees and assets) is filtered out explicitly.

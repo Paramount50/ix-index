@@ -87,10 +87,22 @@ let
     # underlying library (httpx/asyncssh/subprocess/wait_for), which the rule
     # cannot see; it fires ~38 times with no bug behind any. Not a helpful lint here.
     "ASYNC109"
+    # PEP-695 modernization (UP040 `type X =`, UP047 `def f[T]`, UP049 private
+    # type params) is churn, not bug-catching, and it fights the type checker:
+    # zuban rejects PEP-695 generics ("type parameter not declared"). Keep the
+    # classic `TypeAlias` / `TypeVar` forms.
+    "UP040"
+    "UP047"
+    "UP049"
   ];
 in
 {
-  inherit banMessage banConfig select ignore;
+  inherit
+    banMessage
+    banConfig
+    select
+    ignore
+    ;
   # Drop-in replacement for the old bare `--select ANN`:
   #   ruff check ${ruffAnnArgs} <targets>
   #

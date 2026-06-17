@@ -171,7 +171,7 @@ class ProgressEvent:
         )
 
 
-type Region = str
+Region: typing.TypeAlias = str
 DEFAULT_REGION: Region = "us-west-1"
 DEFAULT_CREATE_IPV4 = False
 
@@ -1117,7 +1117,7 @@ class _VMContext:
 _ShieldedT = typing.TypeVar("_ShieldedT")
 
 
-async def _await_shielded_to_completion[ShieldedT](
+async def _await_shielded_to_completion(
     awaitable: typing.Awaitable[_ShieldedT],
 ) -> _ShieldedT:
     task = asyncio.ensure_future(awaitable)

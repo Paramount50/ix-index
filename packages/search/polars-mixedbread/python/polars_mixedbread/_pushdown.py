@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 # value": a recursive union, walked with `isinstance` guards. This is precise --
 # every access below narrows from it -- without claiming a structure Polars does
 # not guarantee.
-type JSONValue = (
+JSONValue: TypeAlias = (
     "str | int | float | bool | None | list[JSONValue] | dict[str, JSONValue]"
 )
 
@@ -41,7 +41,7 @@ type JSONValue = (
 # whose value is a list of nested filters. Both branches are `dict[str, ...]`,
 # so the union of their value types (a string or a list of filters) is the
 # value type of the returned dict.
-type Filter = "dict[str, str | list[Filter]]"
+Filter: TypeAlias = "dict[str, str | list[Filter]]"
 
 # Polars comparison ops we can push to Mixedbread. Restricted to equality on its
 # own: string equality is unambiguous, so a server-side `eq`/`not_eq` can never

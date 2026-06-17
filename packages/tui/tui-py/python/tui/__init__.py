@@ -100,7 +100,7 @@ __all__ = [
 #: A VT100 cell color: `None` is the terminal default, an `int` in `0..=255` is
 #: a palette index, and an `(r, g, b)` tuple is 24-bit truecolor. Read off a
 #: `StyledCell` via `cell.fg` / `cell.bg`.
-type Color = int | tuple[int, int, int] | None
+Color: TypeAlias = int | tuple[int, int, int] | None
 
 
 # --------------------------------------------------------------------------- #
@@ -109,7 +109,7 @@ type Color = int | tuple[int, int, int] | None
 
 
 #: A concrete 24-bit color as `(r, g, b)`, each component `0..=255`.
-type RGB = tuple[int, int, int]
+RGB: TypeAlias = tuple[int, int, int]
 
 
 def _hex_to_rgb(value: str) -> RGB:
@@ -488,7 +488,7 @@ class Key(StrEnum):
 # --------------------------------------------------------------------------- #
 
 
-type Pattern = str | re.Pattern[str] | Callable[["Snapshot"], bool]
+Pattern: TypeAlias = str | re.Pattern[str] | Callable[["Snapshot"], bool]
 
 
 class WaitTimeout(TimeoutError):
