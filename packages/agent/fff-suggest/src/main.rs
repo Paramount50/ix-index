@@ -1,7 +1,7 @@
 //! fff-backed `@` file completer for Claude Code, one compiled binary with two
 //! subcommands:
 //!
-//!   * `fff-suggest query` — the per-keystroke client wired into Claude Code's
+//!   * `fff-suggest query`: the per-keystroke client wired into Claude Code's
 //!     `fileSuggestion` setting. Claude spawns it fresh on every keystroke after
 //!     `@`, hands it `{ "query": "<text>" , … }` on stdin (cwd = the project
 //!     dir), and treats each non-empty stdout line as a suggestion, used in the
@@ -10,7 +10,7 @@
 //!     error exits 0 with no output (Claude then shows no suggestions rather
 //!     than hanging on its 5s budget).
 //!
-//!   * `fff-suggest serve <root>` — the resident daemon. It `dlopen`s the same
+//!   * `fff-suggest serve <root>`: the resident daemon. It `dlopen`s the same
 //!     `libfff_c` the notebook kernel uses (`IX_FFF_LIB`, baked by the
 //!     claude-code wrapper), holds one frecency-ranked, file-watched index over
 //!     `<root>`, and answers queries over the socket until it sits idle. The
@@ -63,16 +63,67 @@ fn main() -> ExitCode {
 
 // ── shared ───────────────────────────────────────────────────────────────────
 
-/// The unix socket for `root`'s daemon. A hash of the (canonical) path keeps the
-/// filename short, since `sun_path` is ~104 bytes on macOS. Client and daemon
-/// run the same build, so `DefaultHasher` agrees between them.
+/// The per-user runtime directory that holds the daemon sockets. Prefer
+/// `$XDG_RUNTIME_DIR`, which the OS already guarantees is a 0700 user-private
+/// tmpfs. When it is absent we fall back to the world-writable system temp dir,
+/// so the directory name is namespaced by uid and the directory itself is
+/// created/validated 0700 (see `ensure_private_dir`); otherwise a deterministic
+/// socket path under a shared `/tmp` would let another local user pre-bind or
+/// connect to it to spoof completions or stall every `@`.
+fn runtime_dir() -> PathBuf {
+    dirs::runtime_dir().map_or_else(
+        // SAFETY: `getuid` is always safe; it just reads the process's real uid.
+        || std::env::temp_dir().join(format!("ix-fff-suggest-{}", unsafe { libc::getuid() })),
+        |dir| dir.join("ix-fff-suggest"),
+    )
+}
+
+/// The unix socket for `root`'s daemon, under the per-user `runtime_dir`. A hash
+/// of the (canonical) path keeps the filename short, since `sun_path` is ~104
+/// bytes on macOS. Client and daemon run the same build, so `DefaultHasher`
+/// agrees between them.
 fn socket_path(root: &Path) -> PathBuf {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     root.hash(&mut hasher);
-    let dir = dirs::runtime_dir()
-        .unwrap_or_else(std::env::temp_dir)
-        .join("ix-fff-suggest");
-    dir.join(format!("{:016x}.sock", hasher.finish()))
+    runtime_dir().join(format!("{:016x}.sock", hasher.finish()))
+}
+
+/// Create `dir` as a user-private 0700 directory, or accept it only if it
+/// already is a real directory owned by us. Returns `false` (caller must fail
+/// open, leaving no socket server) when the path exists but is not a directory,
+/// is a symlink, or is owned by another user: the markers of a hijack attempt
+/// under a shared `/tmp`.
+///
+/// An existing dir we own but with group/other bits is *repaired* to 0700 rather
+/// than rejected: earlier builds created `<runtime>/ix-fff-suggest` with plain
+/// `create_dir_all`, which leaves it 0755 under the usual 022 umask, so rejecting
+/// it would silently disable completions across an in-session upgrade. Since the
+/// dir is already ours (and, under `$XDG_RUNTIME_DIR`, inside a 0700 parent),
+/// tightening it back to 0700 restores the invariant without that regression.
+fn ensure_private_dir(dir: &Path) -> bool {
+    use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, PermissionsExt as _};
+    // create_new-style: succeeds only if we make it, so the 0700 mode is ours.
+    match std::fs::DirBuilder::new().mode(0o700).create(dir) {
+        Ok(()) => return true,
+        // Already there; fall through to validate it is safely ours.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(_) => return false,
+    }
+    // `symlink_metadata` does not follow a symlink, so a planted symlink to a
+    // dir we happen to own cannot pass this check.
+    let Ok(meta) = std::fs::symlink_metadata(dir) else {
+        return false;
+    };
+    // SAFETY: `getuid` just reads the process's real uid.
+    if !meta.is_dir() || meta.uid() != unsafe { libc::getuid() } {
+        return false;
+    }
+    // No group/other permission bits set: the low 6 bits of the mode are zero,
+    // i.e. at least 6 trailing zero bits. Repair a loose-but-owned dir in place.
+    if meta.permissions().mode().trailing_zeros() >= 6 {
+        return true;
+    }
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).is_ok()
 }
 
 // ── client ───────────────────────────────────────────────────────────────────
@@ -84,6 +135,16 @@ fn client() -> ExitCode {
     };
     let sock = socket_path(&root);
 
+    // Refuse to talk to a socket under a directory that is not a user-private
+    // 0700 dir we own: under a shared `/tmp` fallback another local user could
+    // have planted one to spoof completions. Fail open (no suggestions).
+    let Some(dir) = sock.parent() else {
+        return ExitCode::SUCCESS;
+    };
+    if !ensure_private_dir(dir) {
+        return ExitCode::SUCCESS;
+    }
+
     // Fast path: a warm daemon is already listening.
     if let Some(out) = try_query(&sock, &query) {
         print!("{out}");
@@ -91,7 +152,7 @@ fn client() -> ExitCode {
     }
 
     // Cold path: start the daemon detached, then poll until it binds (or budget
-    // runs out). Failing here is silent — Claude just shows no suggestions.
+    // runs out). Failing here is silent: Claude just shows no suggestions.
     spawn_daemon(&root);
     let deadline = Instant::now() + Duration::from_millis(CLIENT_BUDGET_MS);
     while Instant::now() < deadline {
@@ -158,7 +219,8 @@ fn daemon(root: Option<String>) -> ExitCode {
     let sock = socket_path(&root);
 
     let Some(listener) = bind(&sock) else {
-        // Another daemon already owns this socket; nothing to do.
+        // A live daemon already owns this socket, or the runtime dir is not a
+        // private 0700 dir we own. Either way, nothing to do.
         return ExitCode::SUCCESS;
     };
 
@@ -180,10 +242,13 @@ fn daemon(root: Option<String>) -> ExitCode {
 }
 
 /// Bind the socket, taking over a stale file left by a dead daemon. Returns
-/// `None` when a *live* daemon already holds it (we lose the start race).
+/// `None` when a *live* daemon already holds it (we lose the start race), or
+/// when the runtime directory is not a user-private 0700 dir we own (we then
+/// fail open rather than serve over a hijackable socket).
 fn bind(sock: &Path) -> Option<UnixListener> {
-    if let Some(parent) = sock.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    let parent = sock.parent()?;
+    if !ensure_private_dir(parent) {
+        return None;
     }
     if let Ok(listener) = UnixListener::bind(sock) {
         return Some(listener);
