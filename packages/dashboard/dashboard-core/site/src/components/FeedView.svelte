@@ -139,6 +139,10 @@
       }
     }
     return [...scopes]
+      // The in-process scope ('') carries no session pane and its option value
+      // would collide with the "All sessions" option, so it is never a selectable
+      // session; drop it.
+      .filter((scope) => scope !== '')
       .map((scope) => ({ scope, label: labels.get(scope) || shortScope(scope) }))
       .sort((a, b) => (a.label < b.label ? -1 : 1));
   });
@@ -343,7 +347,8 @@
         {@const resultTxt = k === 'exec' ? (p.result ?? '').trim() : ''}
         {@const hasStreamOut = !!stdoutTxt || !!stripAnsi(p.stderr ?? '').trim()}
         {@const resultIsPrimary = !hasStreamOut && !selectedOut && !!resultTxt}
-        {@const resultIsExtra = (hasStreamOut || !!selectedOut) && !!resultTxt && resultTxt !== stdoutTxt}
+        {@const resultShownInline = !traced && resultIsPrimary}
+        {@const resultIsExtra = !!resultTxt && resultTxt !== stdoutTxt && !resultShownInline}
         {@const resultOpen = showResult[selected.key] === true}
         <div class="detail-head">
           <span class="entry-dot" class:live={ledLive(p)} class:run={ledRun(p)} class:err={isErr}></span>

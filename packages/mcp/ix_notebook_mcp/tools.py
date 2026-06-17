@@ -137,16 +137,28 @@ def _client_label(ctx: Context | None) -> str:
 
 
 async def _identify_client_once(ctx: Context | None) -> None:
-    """Tell the kernel which client connected, exactly once per server process,
-    so an unnamed session still reads as e.g. ``claude-code · index`` rather than
-    an opaque id. Best-effort: the kernel call swallows its own failures."""
+    """Tell the kernel which client connected, once per server process, so an
+    unnamed session still reads as e.g. ``claude-code · index`` rather than an
+    opaque id. Best-effort: the kernel call swallows its own failures.
+
+    Latches only once a label is actually resolved, so a first call that lacks
+    ``clientInfo`` (no request context yet) does not permanently suppress a later
+    call that has it. The label lookup is sync and cheap, so retrying costs
+    nothing; the latch is still set before the first ``await`` so a concurrent
+    first call cannot double-fire."""
     global _client_identified
     if _client_identified:
         return
-    _client_identified = True  # latch before awaiting so a concurrent first call skips
     label = _client_label(ctx)
-    if label:
+    if not label:
+        return
+    _client_identified = True  # latch before awaiting so a concurrent first call skips
+    try:
         await current_kernel().set_client(label)
+    except Exception:
+        # No kernel yet (an embedder driving the tools directly) or a transient
+        # kernel error: the label is a convenience, never worth failing a tool call.
+        pass
 
 
 def _first_sentence(text: str) -> str:
