@@ -5,7 +5,7 @@ import sys
 from collections.abc import Sequence
 
 from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, CliPositionalArg, SettingsConfigDict
+from pydantic_settings import BaseSettings, CliPositionalArg, CliSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 AUTH = 3
@@ -30,6 +30,23 @@ class RconSettings(BaseSettings):
     password: str | None = None
     password_file: str | None = None
     command: CliPositionalArg[list[str]] = _UNSET_COMMAND
+
+    @classmethod
+    def settings_customise_sources(  # noqa: PLR0913
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Return only init + CLI sources; drop env/dotenv/secrets so that
+        # ambient env vars (e.g. PASSWORD, HOST) cannot silently populate
+        # settings (argparse parity, CWE-15).
+        return (
+            init_settings,
+            CliSettingsSource(settings_cls, cli_parse_args=True),
+        )
 
     @model_validator(mode="after")
     def validate_required_fields_and_password(self) -> "RconSettings":

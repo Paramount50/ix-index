@@ -7,7 +7,7 @@ from pathlib import Path
 import duckdb
 import httpx
 from pydantic import BaseModel
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 LOGGER = logging.getLogger("daily_scraper")
@@ -24,6 +24,23 @@ class CliArgs(BaseSettings):
     repo: str = "indexable-inc/index"
     github_api_url: str = "https://api.github.com"
     user_agent: str = "ix-daily-scraper-example/0.1"
+
+    @classmethod
+    def settings_customise_sources(  # noqa: PLR0913
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Return only init + CLI sources; drop env/dotenv/secrets so that
+        # ambient env vars (e.g. OUTPUT_DIR, REPO) cannot silently populate
+        # settings (argparse parity, CWE-15).
+        return (
+            init_settings,
+            CliSettingsSource(settings_cls, cli_parse_args=True),
+        )
 
 
 class GitHubRepoPayload(BaseModel):
@@ -121,7 +138,7 @@ def write_parquet(metric: RepoMetric, output_dir: Path) -> Path:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    args = CliArgs.model_validate({})
+    args = CliArgs()
 
     metric = fetch_repo_metric(
         repo=args.repo,

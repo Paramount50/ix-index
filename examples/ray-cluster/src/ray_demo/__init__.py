@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 import ray
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, CliSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
 
 
 LOGGER = logging.getLogger("ray_demo")
@@ -29,6 +29,23 @@ class CliArgs(BaseSettings):
         default=1,
         description="Fail unless the cluster has at least this many alive nodes.",
     )
+
+    @classmethod
+    def settings_customise_sources(  # noqa: PLR0913
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Return only init + CLI sources; drop env/dotenv/secrets so that
+        # ambient env vars (e.g. ADDRESS, TASKS) cannot silently populate
+        # settings (argparse parity, CWE-15).
+        return (
+            init_settings,
+            CliSettingsSource(settings_cls, cli_parse_args=True),
+        )
 
 
 @dataclass(frozen=True)
