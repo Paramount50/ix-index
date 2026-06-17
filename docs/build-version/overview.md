@@ -42,7 +42,7 @@ cannot be baked into the binary and rides the env instead (`src/lib.rs:1-8`).
 
 These are the shared names every ix tool reads. The Nix wrapper for
 [nix-web-monitor](../nix-web-monitor/overview.md) is the worked example of setting
-them (`packages/nix-web-monitor/server/default.nix:59-62`), and its
+them (`packages/nix/nix-web-monitor/server/default.nix:59-62`), and its
 `server/src/main.rs:107` is a worked example of consuming `version_static`.
 
 ## Build and packaging

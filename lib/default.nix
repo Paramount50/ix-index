@@ -124,7 +124,7 @@ let
   # for syntax color across the repo: the code-highlight crate embeds this JSON
   # for the search `-c` output, and the base profile generates its
   # Neovim colorscheme from the same data through this value.
-  islandsTheme = lib.importJSON (paths.packagesRoot + "/code-highlight/src/islands-theme.json");
+  islandsTheme = lib.importJSON (paths.packagesRoot + "/code/code-highlight/src/islands-theme.json");
   languages = {
     cpp = import ./languages/cpp.nix { inherit errors; };
     dhall = import ./languages/dhall.nix { };

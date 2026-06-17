@@ -118,7 +118,7 @@ bossbar list ; bossbar rm "Ender Dragon" ; bossbar db
 ```
 
 The `services.ciBars` home module
-(`packages/bossbar-overlay/ci-bars-home-module.nix`) drives this DB to draw one
+(`packages/minecraft/bossbar-overlay/ci-bars-home-module.nix`) drives this DB to draw one
 bar per in-flight GitHub Actions run.
 
 ## book (`book`)

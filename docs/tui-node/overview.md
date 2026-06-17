@@ -4,7 +4,7 @@
 spawn and drive PTY-backed programs (vim, a REPL, a shell) from Node with full
 VT100 emulation, plus the in-process web dashboard. It is a thin binding built
 with [napi-rs](https://napi.rs/); the `tui` crate owns every behavior. npm name
-`@indexable/tui`, native addon `tui_node.node` (`packages/tui-node/README.md:12`).
+`@indexable/tui`, native addon `tui_node.node` (`packages/tui/tui-node/README.md:12`).
 
 ## What it is
 

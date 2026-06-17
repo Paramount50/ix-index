@@ -39,7 +39,7 @@ Develop:
 
 ```sh
 nix develop .#symphony      # Elixir 1.19 / OTP 28, plus codex, gh, git
-cd packages/symphony/elixir
+cd packages/agent/symphony/elixir
 make all                    # setup, compile -Werror, fmt-check, credo
 mix test
 ```
@@ -98,7 +98,7 @@ Each agent node picks where its engine process runs with `location:` in the
 `.sym` ([envelope](../engine/contract.md#envelope)). `host` runs codex directly on
 the Symphony machine as `SYMPHONY_HOST_USER` (no VM); `ixvm` runs it in a
 short-lived iXVM; `local`/`room` use `SYMPHONY_ROOM_SERVER_URL`
-(`packages/symphony/docs/setup.md:53-73`). When an `ixvm` placement fails to
+(`packages/agent/symphony/docs/setup.md:53-73`). When an `ixvm` placement fails to
 provision, the run retries on `SYMPHONY_PLACEMENT_FALLBACK` (default `host`; also
 `remote`, `local`, `none`, `config.ex:74-83`). Host placement needs
 `SYMPHONY_HOST_USER` (and optionally `_GROUP`, `_WORKSPACES_DIR`, `_KEEP`); on
@@ -196,4 +196,4 @@ defined in `default.nix` (`elixirCheck`, exposed via `passthru.tests.elixir`,
 hash there (`default.nix:40-54`). The advisory lane (`make quality`: format check,
 Credo, Sobelow, `deps.audit`, Dialyzer, plus `mix coveralls`) stays a local run,
 since those tools want network or large mutable caches; see
-`packages/symphony/docs/quality.md`.
+`packages/agent/symphony/docs/quality.md`.

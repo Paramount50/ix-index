@@ -10,13 +10,13 @@ can come and go behind one stable URL.
 It is a thin binary over [dashboard-core](../dashboard-core/overview.md): it owns
 no wire types, no transport, and no rendering, only the process wiring (CLI,
 runtime, signal handling) plus a self-contained `demo` producer. Source is one
-file, `packages/dashboard/src/main.rs`.
+file, `packages/dashboard/dashboard/src/main.rs`.
 
 ## Build and run
 
-Rust workspace binary (`packages/dashboard/Cargo.toml`: `[[bin]] name =
+Rust workspace binary (`packages/dashboard/dashboard/Cargo.toml`: `[[bin]] name =
 "dashboard"`), built as the `dashboard` flake output
-(`packages/dashboard/package.nix`: `flake = true`, so `meta.mainProgram =
+(`packages/dashboard/dashboard/package.nix`: `flake = true`, so `meta.mainProgram =
 "dashboard"`). Dependencies: `dashboard-core`, `clap`, `serde_json`, `tokio`
 (`Cargo.toml:15`).
 
@@ -27,7 +27,7 @@ nix run .#dashboard -- demo              # self-contained producer, no other pro
 nix build .#dashboard                    # build the binary
 ```
 
-`packages/dashboard/default.nix` selects the workspace binary via
+`packages/dashboard/dashboard/default.nix` selects the workspace binary via
 `ix.cargoUnit.selectBinaryWithTests` and additionally exposes the nix-built
 Svelte site under `passthru.tests.site` as a build check. The page itself is
 embedded into `dashboard-core` at compile time (see

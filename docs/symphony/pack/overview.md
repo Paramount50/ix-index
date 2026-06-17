@@ -1,7 +1,7 @@
 # Pack: the workflow-pack format
 
 The runtime is pack-agnostic: workflow shape lives in a pack directory, not in
-`elixir/lib/` (`packages/symphony/AGENTS.md:29-35`). A pack is three things:
+`elixir/lib/` (`packages/agent/symphony/AGENTS.md:29-35`). A pack is three things:
 
 ```
 <pack>/
@@ -19,7 +19,7 @@ and defaults under the pack dir (`config.ex:16-24`). `Config` validates at boot
 that the pack dir, workflows dir, skills dir, and repositories file all exist,
 raising a clear error otherwise (`config.ex:548-571`). Symphony treats the pack
 as read-only runtime input; mutable state goes under `SYMPHONY_RUNS_DIR` and
-`SYMPHONY_WORKSPACES_DIR` (`packages/symphony/docs/setup.md:36-38`).
+`SYMPHONY_WORKSPACES_DIR` (`packages/agent/symphony/docs/setup.md:36-38`).
 
 ## Workflows (`workflows/*.sym`, `workflow_catalog.ex`)
 
@@ -116,7 +116,7 @@ workspaces root, rejecting symlink escapes (`workspace.ex:66-85`).
 
 The public default, intentionally narrow: a single manual-trigger workflow plus a
 read-only skill that pushes nothing anywhere, meant as a starting point to copy
-(`packages/symphony/docs/setup.md:15-18`). `workflows/example/workflows/inspect.sym`:
+(`packages/agent/symphony/docs/setup.md:15-18`). `workflows/example/workflows/inspect.sym`:
 
 ```
 workflow "inspect" on manual {
@@ -133,5 +133,5 @@ workflow "inspect" on manual {
 It pairs with `skills/inspect.md` (above) and the one-repo `repositories.yaml`.
 Real deployments point `SYMPHONY_PACK_DIR` at their own pack; keeping the example
 narrow is a deliberate constraint so no workflow names, repo slugs, labels, or
-ticket schemes leak into the core (`packages/symphony/AGENTS.md:29-35`). See
+ticket schemes leak into the core (`packages/agent/symphony/AGENTS.md:29-35`). See
 [operations](../operations/overview.md) for running a pack.

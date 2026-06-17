@@ -35,7 +35,7 @@ let
   # `IX_DASHBOARD_SITE_HTML` below, so the generated bundle is built by nix
   # rather than committed to the repo. Only `dashboard-core` reads the env var,
   # the same shape as `IX_VT_GHOSTTY_LIB_DIR`.
-  dashboardSiteRoot = root + "/packages/dashboard-core/site";
+  dashboardSiteRoot = root + "/packages/dashboard/dashboard-core/site";
   dashboardSite = buildSvelteSite workspacePkgs {
     pname = "dashboard-site";
     version = "0.1.0";
@@ -46,7 +46,7 @@ let
     serve.enable = false;
     devServer = {
       name = "dashboard-site-dev";
-      checkoutSubdir = "packages/dashboard-core/site";
+      checkoutSubdir = "packages/dashboard/dashboard-core/site";
     };
   };
   dashboardSiteHtml = "${dashboardSite}/share/dashboard-site/index.html";
@@ -219,7 +219,7 @@ let
           # dir available so the loader resolves `@rpath`/`-l ghostty-vt`.
           ix-vt = [ libghosttyVt ];
         };
-        # `rodio` (packages/minecraft/sound) pulls `cpal`/`alsa-sys`, whose build
+        # `rodio` (packages/minecraft/minecraft/sound) pulls `cpal`/`alsa-sys`, whose build
         # script needs ALSA's pkg-config metadata to link `libasound` on Linux.
         #
         # `pkg-config` + `PKG_CONFIG_PATH` let `alsa-sys`'s build script find ALSA

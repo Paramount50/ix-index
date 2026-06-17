@@ -8,7 +8,7 @@ browser-facing [`Hub`] Loro document and its SSE server, the durable
 publishes panes pulls in no HTTP or CRDT code; only a consumer that serves the
 board touches the `dashboard` module.
 
-It is a workspace library crate (`packages/dashboard-core/package.nix`:
+It is a workspace library crate (`packages/dashboard/dashboard-core/package.nix`:
 `inRustWorkspace = true`, no `flake`/`packageSet`), so it has no flake output of
 its own. It is consumed by [`dashboard`](../dashboard/overview.md),
 [`ix-windows`](../ix-windows/overview.md), and the `tui` crate. The deep

@@ -4,7 +4,7 @@
 Nix builds the `polars-sftp` cdylib and calls this to assemble the wheel, so there
 is no maturin / PEP 517 backend in the loop. The extension is abi3
 (`pyo3/abi3-py311`), hence the `cp311-abi3` tag: one wheel loads on CPython 3.11+.
-Adapted from packages/search-py/wheel/mkwheel.py.
+Adapted from packages/search/search-py/wheel/mkwheel.py.
 """
 
 from __future__ import annotations

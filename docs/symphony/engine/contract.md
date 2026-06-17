@@ -4,7 +4,7 @@
 the room-server HTTP contract. It is the WS-0 seam of the overhaul: the DSL, the
 runtime, and the Rust room-server all code against these shapes, so a change here
 is a deliberate cross-language change with a golden fixture proving both sides
-still agree (`packages/symphony/docs/engine-contract.md:1-7`). The room-server
+still agree (`packages/agent/symphony/docs/engine-contract.md:1-7`). The room-server
 itself lives in the ix monorepo (`crates/room/src/engine.rs`), not here.
 
 Two modules own the Elixir side:
@@ -43,7 +43,7 @@ property of the prompt/skill, not of execution (`engine/envelope.ex:34-35`).
 
 ## Casing and tagging
 
-Wire conventions (`packages/symphony/docs/engine-contract.md:31-39`): field names
+Wire conventions (`packages/agent/symphony/docs/engine-contract.md:31-39`): field names
 are camelCase (`turnId`, `runId`); enum bodies carry a `type` tag
 (`EngineEventBody`) or a `kind` tag (`TurnOutcome`, `EngineAnswer`); scalar enums
 serialize as lowercase/snake_case strings (`engine: "claude"`, `permissions:
@@ -75,7 +75,7 @@ and any nil field is dropped. The golden fixture
 loudly with `:missing_cwd` rather than running a turn in an unknown directory
 (`engine/client.ex:158-162`). The Elixir fixture test asserts `request_body/2`
 reproduces this JSON byte-for-byte after a round-trip, so the lowering and the
-shared fixture cannot drift (`packages/symphony/docs/engine-contract.md:109-117`).
+shared fixture cannot drift (`packages/agent/symphony/docs/engine-contract.md:109-117`).
 
 ## EngineEvent (Rust produces, Elixir will consume)
 
@@ -85,7 +85,7 @@ Claude is a subset producer (it self-executes tools under
 `toolCallRequest`). Body variants: `turnStarted`, `textDelta`, `reasoningDelta`,
 `toolCallStarted`, `toolCallOutput`, `fileChanged`, `statusChanged`, `usage`,
 `approvalRequest`, `toolCallRequest`, `turnCompleted`
-(`packages/symphony/docs/engine-contract.md:64-77`). Only the Rust side parses the
+(`packages/agent/symphony/docs/engine-contract.md:64-77`). Only the Rust side parses the
 fixture today; the Elixir `EngineEvent` decoder lands with the streaming client.
 
 ## AgentTurnResponse (the synchronous result)
@@ -121,9 +121,9 @@ self-executing engine until the streaming client lands (`engine/client.ex:39-50`
 ## Golden fixtures (`contracts/fixtures/`)
 
 `contracts/` sits beside `elixir/` (not under it) because the Elixir contract test
-resolves it relatively (`packages/symphony/README.md:26`,
-`packages/symphony/default.nix:26-29`). The fixtures are shared with the
+resolves it relatively (`packages/agent/symphony/README.md:26`,
+`packages/agent/symphony/default.nix:26-29`). The fixtures are shared with the
 room-server: `turn_request.json` (both sides assert), `engine_event.json` (Rust
 asserts today), and `agent_turn_response.json` (both sides assert). A field rename
 fails a check on both sides rather than silently at runtime
-(`packages/symphony/docs/engine-contract.md:17-29`).
+(`packages/agent/symphony/docs/engine-contract.md:17-29`).

@@ -3,7 +3,7 @@
 `packages/vt` is the VT engine: drive a terminal state machine with raw bytes and
 snapshot its render state. It wraps [ghostty](https://ghostty.org/)'s
 `libghostty-vt` C library in three layers, each its own crate/package under
-`packages/vt/`:
+`packages/tui/vt/`:
 
 | member | kind | role |
 | --- | --- | --- |
@@ -12,9 +12,9 @@ snapshot its render state. It wraps [ghostty](https://ghostty.org/)'s
 | `libghostty-vt` | Nix/Zig package (`nix build .#libghostty-vt`) | ghostty's VT engine built as a standalone C library: the `.a`, the self-contained `.dylib`/`.so`, and the headers. |
 
 [tui](../tui/overview.md) is the in-repo consumer: its engine thread owns an
-`ix_vt::Terminal` (`packages/tui/src/actor/engine.rs`). The conversion from
+`ix_vt::Terminal` (`packages/tui/tui/src/actor/engine.rs`). The conversion from
 `ix_vt` types to `tui`'s `Color`/`CursorShape`/`StyledCell` is in
-`packages/tui/src/types.rs`.
+`packages/tui/tui/src/types.rs`.
 
 ## ix-vt: the safe wrapper (`ix-vt/src/lib.rs`)
 

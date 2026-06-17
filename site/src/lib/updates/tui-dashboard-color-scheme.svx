@@ -5,7 +5,7 @@ title: "tui dashboard follows the browser's light/dark scheme"
 tags: [interesting, ui, css]
 links:
   - label: dashboard styles
-    href: https://github.com/indexable-inc/index/blob/main/packages/dashboard-core/site/src/style.css
+    href: https://github.com/indexable-inc/index/blob/main/packages/dashboard/dashboard-core/site/src/style.css
   - label: CSS light-dark()
     href: https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/light-dark
 ---

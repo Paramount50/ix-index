@@ -20,7 +20,7 @@ tunes thresholds and ignore globs (`nix run .#clone`).
 | `clone-detect/cli` | `clone` (pkg `clone-cli`) | the `clone` binary (flake output) |
 
 All five are Rust workspace members; only `cli` is the flake/packageSet output
-(`packages/clone-detect/cli/default.nix`, binary `clone`, package `clone-cli`,
+(`packages/code/clone-detect/cli/default.nix`, binary `clone`, package `clone-cli`,
 `nix run .#clone`). `hash`, `scanner`, and `pragma` build on
 [`ast-merge-ast`](../ast-merge/overview.md) (parse + structural hash) and
 [`ast-merge-langs`](../ast-merge/overview.md) (grammars + detection).

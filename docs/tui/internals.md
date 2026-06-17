@@ -17,7 +17,7 @@ Each spawned child gets two owners (`src/manager/spawn.rs:96-119`):
 2. A **VT engine thread**, a dedicated OS thread (`actor::engine::spawn`,
    `src/actor/engine.rs:62`). It owns the `ix_vt::Terminal`. This split exists
    because libghostty-vt's terminal is `!Send + !Sync` (it has thread affinity,
-   `src/lib.rs` doc and `packages/vt/ix-vt/src/lib.rs:289`): it cannot live in a
+   `src/lib.rs` doc and `packages/tui/vt/ix-vt/src/lib.rs:289`): it cannot live in a
    tokio task that may migrate worker threads. The actor forwards every byte feed
    and read request to the engine thread as an `EngineRequest`
    (`engine.rs:25`); replies ride back on per-request `oneshot` channels, so the

@@ -1,7 +1,7 @@
 """Publish dashboard panes into the shared Loro hub.
 
 This is the Python side of the dashboard-core producer protocol (the Rust
-contract lives in ``packages/dashboard-core/src/pane.rs`` and ``publish.rs``).
+contract lives in ``packages/dashboard/dashboard-core/src/pane.rs`` and ``publish.rs``).
 A producer *binds* a unix socket in the discovery directory and streams its full
 pane set as one NDJSON ``ProducerSnapshot`` line to every reader; the standalone
 ``dashboard`` aggregator connects in, folds each producer's stream into one Loro

@@ -4,7 +4,7 @@
 interactive terminal programs (gdb, vim, a shell, a REPL) from one process as if
 a human were typing, and read back a VT-rendered screen instead of a raw byte
 stream. It is a Rust library crate (`name = "tui"`,
-`packages/tui/Cargo.toml:2`), a workspace member with no standalone flake output;
+`packages/tui/tui/Cargo.toml:2`), a workspace member with no standalone flake output;
 it is consumed directly by [tui-node](../tui-node/overview.md),
 [tui-py](../tui-py/overview.md), and `tap`'s integration tests, and indirectly
 anywhere those bindings are used.
@@ -95,7 +95,7 @@ exception class (`error.rs:78`); [tui-py](../tui-py/overview.md) turns that on.
 
 ## Features and the dashboard bridge
 
-Three optional features (`packages/tui/Cargo.toml`), all off by default so the
+Three optional features (`packages/tui/tui/Cargo.toml`), all off by default so the
 core PTY library stays free of the HTTP/CRDT closure:
 
 - `pyo3`: adds the `PyErr` conversion only. Used by `tui-py`.
@@ -124,7 +124,7 @@ running after that runtime drops.
 
 ## How it builds
 
-`packages/tui/package.nix` is just `{ id = "tui"; inRustWorkspace = true; }`: no
+`packages/tui/tui/package.nix` is just `{ id = "tui"; inRustWorkspace = true; }`: no
 flake output, built only as a workspace library. It depends on
 [ix-vt](../vt/overview.md) (`Cargo.toml:21`), so a build links the libghostty-vt
 dylib that the workspace injects via `IX_VT_GHOSTTY_LIB_DIR`
@@ -133,5 +133,5 @@ dylib that the workspace injects via `IX_VT_GHOSTTY_LIB_DIR`
 `snafu`.
 
 Note: the README still says "no runtime resize today"
-(`packages/tui/README.md:143`), but `resize`/`resize_async` exist
+(`packages/tui/tui/README.md:143`), but `resize`/`resize_async` exist
 (`src/manager/mod.rs:84,92`) and the bindings expose them; trust the source.

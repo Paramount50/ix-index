@@ -49,17 +49,17 @@ MIT (`default.nix:102`).
 
 ## How consumers use it
 
-The overlay build (`packages/bossbar-overlay/app/default.nix:73`) copies the
+The overlay build (`packages/minecraft/bossbar-overlay/app/default.nix:73`) copies the
 slices into each crate's `assets/` directory before compiling, where
 `include_bytes!` bakes them into the binaries: `font/ascii.png` into
 `overlay-core`, the boss bar sprites into `bossbar`, the gui sprites into `book`,
 and the entity/particle sprites into `orb`. For local Rust development,
-`packages/bossbar-overlay/app/scripts/fetch-assets.sh` nix-builds this package
+`packages/minecraft/bossbar-overlay/app/scripts/fetch-assets.sh` nix-builds this package
 and copies the same slices into the gitignored `assets/` trees. See the
 [overlay engine](../bossbar-overlay/engine.md) for how the font sheet is measured
 and rendered.
 
 Note: this package extracts the GUI/font art for overlays; the separate Mojang
 sound pack the overlays play through `minecraft-sound` is a different
-fixed-output derivation (`packages/minecraft/sound/sounds.nix`, see
+fixed-output derivation (`packages/minecraft/minecraft/sound/sounds.nix`, see
 [minecraft tools](../minecraft/overview.md)).

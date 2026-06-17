@@ -67,7 +67,7 @@ programmatic prompt/await/read so rollouts are a `for`-loop or an `asyncio.gathe
 The harness is Playwright for an agent REPL (`tui.harness`): `Claude.launch()`,
 `agent.prompt()`, `agent.run()`, `agent.wait_for_idle()`, `expect(agent)`. It
 handles the fiddly bits (onboarding gates, submit races, quiescence-based "turn
-done" detection). See `packages/tui-py/README.md` for the full surface.
+done" detection). See `packages/tui/tui-py/README.md` for the full surface.
 
 ### One rollout
 

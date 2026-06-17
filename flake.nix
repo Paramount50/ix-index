@@ -137,7 +137,7 @@
     # or the symphony-codex image moves into ix.
 
     # Ghostty's terminal VT engine, consumed as a source tree (not a flake) so
-    # `packages/vt/libghostty-vt` owns the build. Pinned to the commit the
+    # `packages/tui/vt/libghostty-vt` owns the build. Pinned to the commit the
     # local clone validated against; `requireZig` in `build.zig.zon` is exact
     # minor (0.15.x), so the build uses `pkgs.zig_0_15`. The pinned tree ships
     # `build.zig.zon.nix` (zon2nix output), which vendors every lazy Zig
@@ -307,8 +307,8 @@
         # elapsed / average duration; purple = queued/unpicked). Import it and set
         # `services.ciBars = { enable = true; repos = [ ... ]; }`. Closed over the
         # per-system packages so it resolves the `bossbar` CLI for the host. See
-        # packages/bossbar-overlay/ci-bars-home-module.nix.
-        ci-bars = import ./packages/bossbar-overlay/ci-bars-home-module.nix {
+        # packages/minecraft/bossbar-overlay/ci-bars-home-module.nix.
+        ci-bars = import ./packages/minecraft/bossbar-overlay/ci-bars-home-module.nix {
           indexPackages = system: (collect "packages").${system};
           portableServicesModule = ix.portableServices.homeModule;
         };
@@ -316,8 +316,8 @@
         # Slack/Linear exports, git repos) to an S3/R2 parquet archive and/or
         # Mixedbread, as a portable timer service. Closed over the per-system
         # packages so it resolves the `indexer` for the host. See
-        # packages/indexer/home-module.nix.
-        indexer = import ./packages/indexer/home-module.nix {
+        # packages/search/indexer/home-module.nix.
+        indexer = import ./packages/search/indexer/home-module.nix {
           indexPackages = system: (collect "packages").${system};
           portableServicesModule = ix.portableServices.homeModule;
         };

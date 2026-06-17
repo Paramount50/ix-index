@@ -377,7 +377,7 @@ let
   updateSounds = ix.writeNushellApplication pkgs {
     name = "update-sounds";
     text = builtins.readFile paths.tools.updateSounds;
-    meta.description = "Refresh the pinned Minecraft sound pack in packages/minecraft/sound";
+    meta.description = "Refresh the pinned Minecraft sound pack in packages/minecraft/minecraft/sound";
   };
 
   benchFilesystem = import paths.bench.filesystem { inherit ix pkgs; };
@@ -900,7 +900,7 @@ let
                 cp -r ${
                   builtins.path {
                     name = "scipql-two-sockets-fixture";
-                    path = paths.packagesRoot + "/scipql/tests/fixtures/two-sockets";
+                    path = paths.packagesRoot + "/code/scipql/tests/fixtures/two-sockets";
                   }
                 } work
                 chmod -R u+w work
@@ -952,7 +952,7 @@ let
           run-records-session = repoPackages.run.passthru.tests.recordsSession;
           # Symphony's required quality lane (compile -Werror, mix format,
           # credo, mix test) as a sandboxed derivation; see
-          # packages/symphony/default.nix. The advisory lane (dialyzer,
+          # packages/agent/symphony/default.nix. The advisory lane (dialyzer,
           # sobelow, deps.audit) stays a local `mix quality` run.
           symphony-elixir = repoPackages.symphony.passthru.tests.elixir;
           # Deterministic alloc-count gate for indexbench: runs the counting-

@@ -14,8 +14,8 @@ engine). The `tap` binary is the flake output `nix run .#tap`
 | crate | role |
 | --- | --- |
 | `packages/tap` (`tap`) | the CLI, the session daemon, and the attach client (`src/`). Binary `tap`. |
-| `packages/tap/pty` (`tap-pty`) | the reusable multiplexable PTY session engine: spawn a child on a PTY, mirror it with vt100, fan raw output out to many subscribers with atomic resync snapshots. Library, no flake output. |
-| `packages/tap/protocol` (`tap-protocol`) | wire types and runtime paths, no I/O. Library, no flake output. |
+| `packages/tui/tap/pty` (`tap-pty`) | the reusable multiplexable PTY session engine: spawn a child on a PTY, mirror it with vt100, fan raw output out to many subscribers with atomic resync snapshots. Library, no flake output. |
+| `packages/tui/tap/protocol` (`tap-protocol`) | wire types and runtime paths, no I/O. Library, no flake output. |
 
 ## Architecture: one daemon per session, thin clients
 

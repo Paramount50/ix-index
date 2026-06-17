@@ -1,18 +1,18 @@
 # Symphony
 
 Symphony is a boring DAG runtime for deterministic agent workflows. It is an
-Elixir/OTP control plane (`packages/symphony/elixir`) that orchestrates Codex
+Elixir/OTP control plane (`packages/agent/symphony/elixir`) that orchestrates Codex
 and Claude agent sessions across one or more git repositories. Workflows are
 authored in the `.sym` surface language, lowered to an intermediate-representation
 (IR) run graph, and walked by a supervised per-run GenServer with a LiveView
 dashboard, cron/Slack/Linear/GitHub triggers, and per-run git worktrees. The
-single Nix flake output is `nix run .#symphony` (`packages/symphony/default.nix:148`);
+single Nix flake output is `nix run .#symphony` (`packages/agent/symphony/default.nix:148`);
 the runtime drives a Rust `room-server` (in the ix monorepo, not here) over HTTP
 to actually run each agent turn.
 
 Read this page first, then the component pages it links. Symphony moved here from
 the standalone `indexable-inc/symphony` repo at rev `c9e7092`
-(`packages/symphony/README.md:10`).
+(`packages/agent/symphony/README.md:10`).
 
 ## Units
 
@@ -30,7 +30,7 @@ The layers, and where each is documented:
 It is a Nix-only package (a Nushell launcher wrapping `bin/run-nix`), not a Rust
 workspace member. The `room-server` it drives is a separate package in the ix
 monorepo (`crates/room`, `packages/room`); only the Elixir control plane lives
-here (`packages/symphony/default.nix:9-13`).
+here (`packages/agent/symphony/default.nix:9-13`).
 
 ## How it fits together
 
@@ -82,7 +82,7 @@ that schedules ready nodes as monitored BEAM tasks until every node is terminal.
   (`workspace.ex:66-85`).
 - **Pack-agnostic core.** No workflow names, repo slugs, labels, or ticket schemes
   are hardcoded in `elixir/lib/`; workflow shape lives in the pack
-  (`packages/symphony/AGENTS.md:29-35`).
+  (`packages/agent/symphony/AGENTS.md:29-35`).
 
 ## Glossary
 

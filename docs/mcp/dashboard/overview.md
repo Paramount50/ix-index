@@ -71,7 +71,7 @@ title), an extra `html` pane for a run's rich outputs (tables/plots/images), one
 pane (the `namespace` renderer) for the kernel's live globals.
 
 `produce.py` is the Python side of the dashboard-core producer protocol (the Rust
-contract is `packages/dashboard-core/src/pane.rs`/`publish.rs`,
+contract is `packages/dashboard/dashboard-core/src/pane.rs`/`publish.rs`,
 `produce.py:1-15`). `PaneProducer` (`produce.py:126`) binds a unix socket in the
 discovery directory and streams its full pane set as one NDJSON
 `ProducerSnapshot` line to every reader (replacement semantics, so a late-joining

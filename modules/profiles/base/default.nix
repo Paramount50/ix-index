@@ -429,7 +429,7 @@ in
         };
         # ix-islands colorscheme, generated from the shared islands palette so
         # the editor and the search `-c` highlighter never drift. Both
-        # variants live in packages/code-highlight/src/islands-theme.json (the
+        # variants live in packages/code/code-highlight/src/islands-theme.json (the
         # single source of truth, exposed here as ix.islandsTheme), and
         # nvim/islands-body.lua holds the highlight-group wiring both variants
         # share. Faithful port of JetBrains Islands Dark/Light (see
@@ -447,7 +447,7 @@ in
               pkgs.writeText "ix-islands-${variant}.lua" ''
                 -- ix-islands-${variant}
                 --
-                -- Generated from packages/code-highlight/src/islands-theme.json
+                -- Generated from packages/code/code-highlight/src/islands-theme.json
                 -- and nvim/islands-body.lua. Edit those, not this file.
                 vim.cmd("highlight clear")
                 if vim.fn.exists("syntax_on") == 1 then

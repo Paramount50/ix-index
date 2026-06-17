@@ -17,7 +17,7 @@
 #   * the full-screen karma feed overlay it announces onto (`merge-orb-feed`),
 #     which renders both pop kinds and plays their per-kind sounds;
 #   * the CI progress bars (`services.ciBars`, the reusable
-#     packages/bossbar-overlay/ci-bars-home-module.nix), which draw one Minecraft
+#     packages/minecraft/bossbar-overlay/ci-bars-home-module.nix), which draw one Minecraft
 #     boss bar per in-flight GitHub Actions run across our repos (green, filled by
 #     elapsed / average-duration; purple while a run is still queued or not yet
 #     picked up by a runner) and clear each as the run finishes. Silent (pr-watch
@@ -169,7 +169,7 @@ let
   # The CI progress bars are a standalone reusable component, not personal glue:
   # this just composes it (imported below, turned on in config). Anyone can do
   # the same with `services.ciBars = { enable = true; repos = [ ... ]; }`.
-  ciBarsModule = import ../../packages/bossbar-overlay/ci-bars-home-module.nix {
+  ciBarsModule = import ../../packages/minecraft/bossbar-overlay/ci-bars-home-module.nix {
     inherit indexPackages portableServicesModule;
   };
 in

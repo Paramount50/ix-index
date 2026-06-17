@@ -7,7 +7,7 @@ through a fallible iterator. It wraps [`ignore::WalkBuilder`](https://docs.rs/ig
 and adds the binary-extension filter and error surfacing so callers do not
 reimplement them. Single Rust workspace library crate (`id = repo-walker`, no
 flake output); consumers are the search/corpus tooling
-(`packages/file-search/Cargo.toml`, `packages/search-core/Cargo.toml`).
+(`packages/search/file-search/Cargo.toml`, `packages/search/search-core/Cargo.toml`).
 
 ## Public surface (`src/lib.rs`)
 

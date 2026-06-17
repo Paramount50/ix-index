@@ -1,41 +1,41 @@
 [workspace]
 members = [
   "modules/services/resource-monitor/stats-writer",
-  "packages/agents-md",
+  "packages/agent/agents-md",
   "packages/blast-radius",
   "packages/build-version",
-  "packages/claude-hooks",
-  "packages/claude-stories",
-  "packages/ast-merge/ast",
-  "packages/ast-merge/cli",
-  "packages/ast-merge/diff",
-  "packages/ast-merge/git",
-  "packages/ast-merge/langs",
-  "packages/ast-merge/matcher",
-  "packages/astlog/core",
-  "packages/astlog/cli",
-  "packages/astlog/py",
-  "packages/source/atuin",
-  "packages/source/claude",
-  "packages/source/codex",
-  "packages/source/debug",
-  "packages/source/git",
-  "packages/source/journald",
-  "packages/clone-detect/cli",
-  "packages/clone-detect/detect",
-  "packages/clone-detect/hash",
-  "packages/clone-detect/pragma",
-  "packages/clone-detect/scanner",
+  "packages/agent/claude-hooks",
+  "packages/agent/claude-stories",
+  "packages/code/ast-merge/ast",
+  "packages/code/ast-merge/cli",
+  "packages/code/ast-merge/diff",
+  "packages/code/ast-merge/git",
+  "packages/code/ast-merge/langs",
+  "packages/code/ast-merge/matcher",
+  "packages/code/astlog/core",
+  "packages/code/astlog/cli",
+  "packages/code/astlog/py",
+  "packages/search/source/atuin",
+  "packages/search/source/claude",
+  "packages/search/source/codex",
+  "packages/search/source/debug",
+  "packages/search/source/git",
+  "packages/search/source/journald",
+  "packages/code/clone-detect/cli",
+  "packages/code/clone-detect/detect",
+  "packages/code/clone-detect/hash",
+  "packages/code/clone-detect/pragma",
+  "packages/code/clone-detect/scanner",
   "packages/config-launch",
-  "packages/code-highlight",
-  "packages/code-tokenizer",
+  "packages/code/code-highlight",
+  "packages/search/code-tokenizer",
   "packages/dag-runner",
-  "packages/edit-applier",
-  "packages/file-language",
-  "packages/file-search",
-  "packages/scipql/core",
-  "packages/scipql/cli",
-  "packages/scipql/py",
+  "packages/code/edit-applier",
+  "packages/code/file-language",
+  "packages/search/file-search",
+  "packages/code/scipql/core",
+  "packages/code/scipql/cli",
+  "packages/code/scipql/py",
   "packages/flecs-query/core",
   "packages/flecs-query/mcp",
   "packages/flecs-query/py",
@@ -51,53 +51,53 @@ members = [
   "packages/indexbench",
   "packages/ix-dev-diagnose",
   "packages/ix-windows",
-  "packages/kitty",
-  "packages/lake/iceberg",
-  "packages/minecraft/nbt",
-  "packages/minecraft/sound",
-  "packages/minecraft/sync-managed",
-  "packages/mixedbread",
+  "packages/terminal/kitty",
+  "packages/search/lake/iceberg",
+  "packages/minecraft/minecraft/nbt",
+  "packages/minecraft/minecraft/sound",
+  "packages/minecraft/minecraft/sync-managed",
+  "packages/search/mixedbread",
   "packages/mynoise",
-  "packages/nix-web-monitor/parser",
-  "packages/nix-web-monitor/server",
-  "packages/oci-image-builder",
-  "packages/polars-mixedbread",
+  "packages/nix/nix-web-monitor/parser",
+  "packages/nix/nix-web-monitor/server",
+  "packages/nix/oci-image-builder",
+  "packages/search/polars-mixedbread",
   "packages/progress-style",
-  "packages/reel",
+  "packages/tui/reel",
   "packages/repo-walker",
-  "packages/screencast",
-  "packages/screencast-ingest",
-  "packages/source/linear",
-  "packages/source/github",
-  "packages/search",
-  "packages/search-core",
-  "packages/source/meta",
-  "packages/source/parquet",
-  "packages/search-py",
+  "packages/screencast/screencast",
+  "packages/screencast/screencast-ingest",
+  "packages/search/source/linear",
+  "packages/search/source/github",
+  "packages/search/search",
+  "packages/search/search-core",
+  "packages/search/source/meta",
+  "packages/search/source/parquet",
+  "packages/search/search-py",
   "packages/skill-lint",
-  "packages/source/slack",
-  "packages/sink/mixedbread",
-  "packages/sink/parquet",
-  "packages/indexer",
-  "packages/tap",
-  "packages/tap/protocol",
-  "packages/tap/pty",
-  "packages/terminal-theme",
-  "packages/dashboard",
-  "packages/dashboard-core",
-  "packages/tui",
-  "packages/tui-node",
-  "packages/tui-py",
-  "packages/vmkit",
-  "packages/vt/ix-vt",
-  "packages/vt/ix-vt-sys",
+  "packages/search/source/slack",
+  "packages/search/sink/mixedbread",
+  "packages/search/sink/parquet",
+  "packages/search/indexer",
+  "packages/tui/tap",
+  "packages/tui/tap/protocol",
+  "packages/tui/tap/pty",
+  "packages/terminal/terminal-theme",
+  "packages/dashboard/dashboard",
+  "packages/dashboard/dashboard-core",
+  "packages/tui/tui",
+  "packages/tui/tui-node",
+  "packages/tui/tui-py",
+  "packages/vm/vmkit",
+  "packages/tui/vt/ix-vt",
+  "packages/tui/vt/ix-vt-sys",
 ]
 # nix-cargo-unit is the bootstrap tool that renders this workspace's unit graph,
 # so it owns its own Cargo.toml + Cargo.lock (it carries its own `[workspace]`).
 # Excluding it here keeps the root lockfile from pulling it in, so a root-lock
 # bump never recompiles it; its Nix build keys only on its own folder.
 exclude = [
-  "packages/nix-cargo-unit",
+  "packages/nix/nix-cargo-unit",
 ]
 resolver = "3"
 
@@ -134,43 +134,43 @@ anstream = "1"
 anstyle = "1"
 anyhow = "1"
 arrow = "59"
-ast-merge-ast = { path = "packages/ast-merge/ast" }
-ast-merge-diff = { path = "packages/ast-merge/diff" }
-ast-merge-git = { path = "packages/ast-merge/git" }
-ast-merge-langs = { path = "packages/ast-merge/langs" }
-ast-merge-matcher = { path = "packages/ast-merge/matcher" }
-astlog-core = { path = "packages/astlog/core" }
+ast-merge-ast = { path = "packages/code/ast-merge/ast" }
+ast-merge-diff = { path = "packages/code/ast-merge/diff" }
+ast-merge-git = { path = "packages/code/ast-merge/git" }
+ast-merge-langs = { path = "packages/code/ast-merge/langs" }
+ast-merge-matcher = { path = "packages/code/ast-merge/matcher" }
+astlog-core = { path = "packages/code/astlog/core" }
 axum = "0.8"
 base64 = "0.22"
 build-version = { path = "packages/build-version" }
 bytes = "1"
 chrono = { version = "0.4", default-features = false }
 clap = "4"
-source-atuin = { path = "packages/source/atuin" }
-source-claude = { path = "packages/source/claude" }
-source-codex = { path = "packages/source/codex" }
-source-debug = { path = "packages/source/debug" }
-source-git = { path = "packages/source/git" }
-source-journald = { path = "packages/source/journald" }
-clone-detect = { path = "packages/clone-detect/detect" }
-clone-hash = { path = "packages/clone-detect/hash" }
-clone-pragma = { path = "packages/clone-detect/pragma" }
-clone-scanner = { path = "packages/clone-detect/scanner" }
-code-highlight = { path = "packages/code-highlight" }
-code-tokenizer = { path = "packages/code-tokenizer" }
+source-atuin = { path = "packages/search/source/atuin" }
+source-claude = { path = "packages/search/source/claude" }
+source-codex = { path = "packages/search/source/codex" }
+source-debug = { path = "packages/search/source/debug" }
+source-git = { path = "packages/search/source/git" }
+source-journald = { path = "packages/search/source/journald" }
+clone-detect = { path = "packages/code/clone-detect/detect" }
+clone-hash = { path = "packages/code/clone-detect/hash" }
+clone-pragma = { path = "packages/code/clone-detect/pragma" }
+clone-scanner = { path = "packages/code/clone-detect/scanner" }
+code-highlight = { path = "packages/code/code-highlight" }
+code-tokenizer = { path = "packages/search/code-tokenizer" }
 github-avatar = { path = "packages/github-avatar" }
 google-auth = { path = "packages/google/auth" }
 google-calendar = { path = "packages/google/calendar" }
 google-gmail = { path = "packages/google/gmail" }
 indexbench = { path = "packages/indexbench" }
-kitty = { path = "packages/kitty" }
-lake-iceberg = { path = "packages/lake/iceberg" }
+kitty = { path = "packages/terminal/kitty" }
+lake-iceberg = { path = "packages/search/lake/iceberg" }
 color-eyre = "0.6"
-dashboard-core = { path = "packages/dashboard-core" }
+dashboard-core = { path = "packages/dashboard/dashboard-core" }
 devicons = "0.6"
 dirs = "6"
-edit-applier = { path = "packages/edit-applier" }
-file-language = { path = "packages/file-language" }
+edit-applier = { path = "packages/code/edit-applier" }
+file-language = { path = "packages/code/file-language" }
 flecs-query-core = { path = "packages/flecs-query/core" }
 fontdue = "0.9"
 futures = "0.3"
@@ -189,16 +189,16 @@ indicatif = "0.18"
 insta = { version = "1.42", features = ["json"] }
 lazy-regex = "3.4"
 libc = "0.2"
-source-linear = { path = "packages/source/linear" }
-source-github = { path = "packages/source/github" }
-mixedbread = { path = "packages/mixedbread" }
+source-linear = { path = "packages/search/source/linear" }
+source-github = { path = "packages/search/source/github" }
+mixedbread = { path = "packages/search/mixedbread" }
 loro = "1.12"
 napi = { version = "3", default-features = false, features = ["napi6", "tokio_rt"] }
 napi-build = "2"
 napi-derive = "3"
 ndarray = "0.17"
 nix = "0.31"
-nix-web-monitor-parser = { path = "packages/nix-web-monitor/parser" }
+nix-web-monitor-parser = { path = "packages/nix/nix-web-monitor/parser" }
 numpy = "0.28"
 objc2 = "0.6"
 objc2-foundation = "0.3"
@@ -230,29 +230,29 @@ rustc-hash = "2.1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 scip = "0.8"
-scipql-core = { path = "packages/scipql/core" }
-search-core = { path = "packages/search-core" }
-source-meta = { path = "packages/source/meta" }
+scipql-core = { path = "packages/code/scipql/core" }
+search-core = { path = "packages/search/search-core" }
+source-meta = { path = "packages/search/source/meta" }
 serde = "1"
 serde_json = "1"
 serde_norway = "0.9"
 sha2 = "0.11"
 similar = "3"
-source-slack = { path = "packages/source/slack" }
-source-parquet = { path = "packages/source/parquet" }
-sink-mixedbread = { path = "packages/sink/mixedbread" }
-sink-parquet = { path = "packages/sink/parquet" }
+source-slack = { path = "packages/search/source/slack" }
+source-parquet = { path = "packages/search/source/parquet" }
+sink-mixedbread = { path = "packages/search/sink/mixedbread" }
+sink-parquet = { path = "packages/search/sink/parquet" }
 snafu = "0.9"
 strip-ansi-escapes = "0.2"
 tango-bench = "0.7"
 tantivy = "0.26"
 tao = "0.35"
-tap-protocol = { path = "packages/tap/protocol" }
-tap-pty = { path = "packages/tap/pty" }
+tap-protocol = { path = "packages/tui/tap/protocol" }
+tap-pty = { path = "packages/tui/tap/pty" }
 tar = "0.4"
 tempfile = "3"
 terminal-light = "1"
-terminal-theme = { path = "packages/terminal-theme" }
+terminal-theme = { path = "packages/terminal/terminal-theme" }
 tokio = "1"
 tokio-stream = "0.1"
 tokio-util = "0.7"
@@ -293,7 +293,7 @@ tree-sitter-swift = "0.7"
 tree-sitter-toml-ng = "0.7"
 tree-sitter-typescript = "0.23"
 tree-sitter-yaml = "0.7"
-tui = { path = "packages/tui" }
+tui = { path = "packages/tui/tui" }
 url = { version = "2.5.8", default-features = false }
 uuid = "1"
 vt100 = "0.16"

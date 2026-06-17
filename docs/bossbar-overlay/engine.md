@@ -1,6 +1,6 @@
 # overlay engine (overlay-core)
 
-`packages/bossbar-overlay/app/crates/overlay-core` is the reusable engine behind
+`packages/minecraft/bossbar-overlay/app/crates/overlay-core` is the reusable engine behind
 every overlay in [bossbar-overlay](overview.md). It owns the mechanics every
 overlay shares and none of the domain: a transparent float window, one
 textured-quad wgpu pipeline with the Minecraft bitmap font baked in, gesture
