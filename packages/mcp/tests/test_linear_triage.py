@@ -740,6 +740,52 @@ class TestGqlRetry:
         assert calls["n"] == 2
         assert sleeps == [0.5]
 
+    def test_retries_on_internal_server_error_with_null_data(self):
+        """Regression: the GraphQL spec returns ``{"data": null, "errors": [...]}``
+        for a top-level error. The envelope must accept ``data: null`` so the
+        internal-server-error retry still fires (not a raw ValidationError)."""
+        import httpx
+
+        calls = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(
+                    200,
+                    json={"data": None, "errors": [{"message": "Internal server error"}]},
+                )
+            return httpx.Response(200, json={"data": {"searchIssues": {"nodes": []}}})
+
+        sleeps: list[float] = []
+        restore = self._wire(handler, sleep_calls=sleeps)
+        try:
+            result = run(linear.issue_search("t"))
+        finally:
+            restore()
+
+        assert result == []
+        assert calls["n"] == 2
+        assert sleeps == [0.5]
+
+    def test_null_data_other_error_raises_linear_error(self):
+        """A non-transient top-level error with ``data: null`` surfaces as
+        LinearError (the documented contract), not a raw ValidationError."""
+        import httpx
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={"data": None, "errors": [{"message": "Argument 'term' is invalid"}]},
+            )
+
+        restore = self._wire(handler)
+        try:
+            with pytest.raises(linear.LinearError):
+                run(linear.issue_search("t"))
+        finally:
+            restore()
+
     def test_exhausts_retries_then_raises(self):
         """Three consecutive 500s exhaust the retry budget and raise."""
         import httpx

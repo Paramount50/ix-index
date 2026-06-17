@@ -152,9 +152,16 @@ class _GqlEnvelope(_LinearModel):
 
     ``data`` is kept as a raw dict because its shape varies per operation; the
     public functions validate the relevant sub-object into a typed model.
+
+    ``data`` is nullable, not defaulted-empty: the GraphQL spec returns
+    ``{"data": null, "errors": [...]}`` for a top-level error (e.g. Linear's
+    "Internal server error"). A non-nullable default only fills an *absent* key,
+    so an explicit ``null`` would raise a ValidationError before the ``errors``
+    check could run -- swallowing the LinearError contract and the
+    internal-server-error retry.
     """
 
-    data: dict[str, Any] = {}
+    data: dict[str, Any] | None = None
     errors: list[dict[str, Any]] | None = None
 
 # ---------------------------------------------------------------------------
@@ -276,7 +283,9 @@ async def _gql(
                 await asyncio.sleep(_GQL_RETRY_BACKOFFS_S[attempt])
                 continue
             raise LinearError(env.errors)
-        return env.data
+        # A successful response always carries a data object; `or {}` covers the
+        # spec-legal "data omitted with no errors" edge so callers get a dict.
+        return env.data or {}
 
     raise RuntimeError("unreachable: _gql retry loop exited without return or raise")
 
@@ -357,11 +366,16 @@ async def issue(id: str) -> Issue:
         i.title            # str
         i.state.name       # "In Progress", "Done", ...
 
-    Raises :class:`LinearError` on GraphQL errors and
-    ``httpx.HTTPStatusError`` on network errors.
+    Raises :class:`LinearError` if no issue has that id (or on other GraphQL
+    errors) and ``httpx.HTTPStatusError`` on network errors.
     """
     data = await _gql(_ISSUE_QUERY, {"id": id})
-    return Issue.model_validate(data["issue"])
+    raw = data.get("issue")
+    if raw is None:
+        # Linear returns `issue: null` (HTTP 200, no errors) for a missing id;
+        # surface a clear LinearError rather than a raw ValidationError.
+        raise LinearError([{"message": f"no Linear issue with id {id!r}"}])
+    return Issue.model_validate(raw)
 
 
 _ISSUE_UPDATE_MUTATION = """
