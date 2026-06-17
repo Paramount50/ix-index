@@ -23,6 +23,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any, cast
 
+from pydantic import BaseModel, TypeAdapter
+
 JsonObject = dict[str, Any]
 
 USER_AGENT = "indexable-inc/index update-loaders (github.com/indexable-inc/index)"
@@ -49,13 +51,30 @@ def http_get(url: str) -> bytes:
     raise RuntimeError(f"rate limited after retries: {url}")
 
 
-def http_get_json(url: str) -> object:
-    """Fetch and JSON-decode `url`; the caller casts to the documented shape."""
-    return cast(object, json.loads(http_get(url)))
-
-
 def sri_sha256(data: bytes) -> str:
     return "sha256-" + base64.b64encode(hashlib.sha256(data).digest()).decode()
+
+
+# The slice of the PaperMC fill v3 builds response this tool depends on. Modeled
+# with pydantic so the response is validated at the boundary: if upstream drops
+# or renames a field, validation fails with a path-precise error instead of a
+# bare KeyError deep in the access chain. Unmodeled fields are ignored.
+class _PaperChecksums(BaseModel):
+    sha256: str
+
+
+class _PaperDownload(BaseModel):
+    url: str
+    checksums: _PaperChecksums
+
+
+class _PaperBuild(BaseModel):
+    id: int
+    channel: str | None = None
+    downloads: dict[str, _PaperDownload]
+
+
+_PAPER_BUILDS = TypeAdapter(list[_PaperBuild])
 
 
 def latest_papermc_build(project: str, version: str, channel: str) -> JsonObject:
@@ -66,23 +85,21 @@ def latest_papermc_build(project: str, version: str, channel: str) -> JsonObject
     handles; the SHA-256 is converted to SRI before storing.
     """
     builds_url = f"{PAPER_FILL_API}/projects/{project}/versions/{version}/builds"
-    builds = cast(list[JsonObject], http_get_json(builds_url))
-    filtered = [build for build in builds if channel == "default" or build.get("channel") == channel]
+    builds = _PAPER_BUILDS.validate_json(http_get(builds_url))
+    filtered = [build for build in builds if channel == "default" or build.channel == channel]
     if not filtered:
         raise RuntimeError(
             f"{project} {version}: no builds matched channel `{channel}` (got {len(builds)} builds)"
         )
     # PaperMC returns newest first; the latest entry is the canonical build.
     latest = filtered[0]
-    build_id = latest["id"]
-    download = latest["downloads"]["server:default"]
-    sha256_hex = download["checksums"]["sha256"]
-    sha256_bytes = bytes.fromhex(sha256_hex)
+    download = latest.downloads["server:default"]
+    sha256_bytes = bytes.fromhex(download.checksums.sha256)
     sri = "sha256-" + base64.b64encode(sha256_bytes).decode()
     return {
-        "build": build_id,
+        "build": latest.id,
         "hash": sri,
-        "url": download["url"],
+        "url": download.url,
     }
 
 

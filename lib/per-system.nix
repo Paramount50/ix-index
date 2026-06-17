@@ -315,6 +315,9 @@ let
     name = "update-loaders";
     src = paths.tools.updateLoaders;
     pyChecker = "zuban";
+    # pydantic validates the PaperMC fill v3 response at the boundary so upstream
+    # drift fails with a path-precise error rather than a bare KeyError.
+    python = pkgs.python314.withPackages (ps: [ ps.pydantic ]);
     meta.description = "Refresh Minecraft loader (Paper / Velocity / Fabric) catalogs from upstream";
   };
 

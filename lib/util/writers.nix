@@ -60,9 +60,18 @@ let
       ]
       ++ extraSearchPathArgs
       ++ [ "${src}" ];
-      # zuban/mypy resolve extra import roots from MYPYPATH rather than a flag.
-      mypyPath = lib.concatStringsSep ":" extraPaths;
       ruffAnnPhase = "${lib.getExe' pkgs.ruff "ruff"} check --select ANN ${lib.escapeShellArg "${src}"}";
+      # zuban/mypy resolve the interpreter's own packages from
+      # `--python-executable`, so MYPYPATH must carry only genuinely-extra import
+      # roots. Forwarding the interpreter's site-packages (the default of
+      # `extraPaths`) is both redundant and harmful: pointing MYPYPATH at a real
+      # site-packages dir makes zuban drop the stdlib typeshed, so e.g.
+      # `Path.__truediv__` widens to `Any` and trips `no-any-return`. Drop the
+      # default site-packages; keep any caller-added roots.
+      strictMypyPaths = lib.filter (p: p != "${python}/${python.sitePackages}") extraPaths;
+      mypyPathPrefix = lib.optionalString (
+        strictMypyPaths != [ ]
+      ) "MYPYPATH=${lib.escapeShellArg (lib.concatStringsSep ":" strictMypyPaths)} ";
       # `zuban` needs the `check` subcommand; `mypy` is invoked directly. Both
       # accept --strict / --python-executable / --python-version / --platform.
       #
@@ -70,12 +79,11 @@ let
       # bare absolute store path (the usual single-file `src`) yields "No Python
       # files found to check". Run the checker from the src's parent directory
       # and pass the basename; this is equally valid for a directory `src` (zuban
-      # walks the named dir) and leaves MYPYPATH — which carries absolute import
-      # roots — unaffected. ruff resolves absolute paths fine, so it keeps the
+      # walks the named dir). ruff resolves absolute paths fine, so it keeps the
       # full path and runs from the build's default cwd.
       strictPhase = checker: subcommand: ''
         ( cd ${lib.escapeShellArg (builtins.dirOf "${src}")} && \
-          MYPYPATH=${lib.escapeShellArg mypyPath} ${lib.getExe' checker (lib.getName checker)} ${subcommand}--strict \
+          ${mypyPathPrefix}${lib.getExe' checker (lib.getName checker)} ${subcommand}--strict \
             --python-executable ${lib.escapeShellArg (lib.getExe python)} \
             --python-version ${python.pythonVersion} --platform ${pythonPlatform} \
             ${lib.escapeShellArg (builtins.baseNameOf "${src}")} )
