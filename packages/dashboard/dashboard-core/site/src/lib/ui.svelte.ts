@@ -19,12 +19,29 @@ function loadView(): View {
   }
 }
 
+// The selected session in the feed: a producer scope to show alone, or '' for
+// all sessions (the default). Each MCP client is its own scope, so this narrows
+// the feed to one agent's runs. Persisted, falling back to all if the saved
+// session is gone next time. Note: a real MCP scope is "<pid>-<uuid>" (never
+// empty), so '' is an unambiguous "all" sentinel.
+const SESSION_KEY = 'dash-session-v1';
+
+function loadSession(): string {
+  try {
+    return localStorage.getItem(SESSION_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
 export const ui = $state({
   // The active top-level view.
   view: loadView() as View,
   // The key (scope<0x1f>id) of the focused pane in the fullscreen single-pane
   // view (opened from a feed entry or a board card), or null for none.
   focusKey: null as string | null,
+  // The feed's selected session scope ('' = all sessions).
+  sessionScope: loadSession(),
   // Wall-clock milliseconds, ticked every second; cards derive their age from it.
   clock: Date.now(),
 });
@@ -35,6 +52,15 @@ export function setView(view: View): void {
     localStorage.setItem(VIEW_KEY, view);
   } catch {
     // Non-persistent is fine; the view just resets to the default next load.
+  }
+}
+
+export function setSession(scope: string): void {
+  ui.sessionScope = scope;
+  try {
+    localStorage.setItem(SESSION_KEY, scope);
+  } catch {
+    // Non-persistent is fine; the selection just resets to all next load.
   }
 }
 

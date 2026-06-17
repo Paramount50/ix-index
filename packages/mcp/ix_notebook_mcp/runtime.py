@@ -953,6 +953,76 @@ class Cells:
 cells = Cells()
 
 
+class Session:
+    """This MCP session — how the dashboard groups your runs.
+
+    Every ``python_exec`` run on this kernel belongs to one session: one MCP
+    client (a Claude Code window, an editor) talking to one ``ix-mcp serve``
+    process. The dashboard's session selector lists each live session by its
+    ``name``, so naming yours is the first thing to do — a human watching several
+    agents at once can then tell them apart at a glance:
+
+        session.name = "refactor the auth flow"   # retitle this session
+        session.name                               # the label shown now
+
+    Until you set a name, the label defaults to the connecting client and this
+    kernel's working directory (e.g. ``claude-code · index``), which is fine for
+    one agent but ambiguous once several share a repo — so set it.
+    """
+
+    def __init__(self) -> None:
+        self._name = ""  # explicit, user-set via `session.name = ...`
+        self._client = ""  # the connecting MCP client's reported identity
+        self._workdir = ""  # this kernel's cwd basename, for the default label
+        self._rev = 0
+        self._synced = -1
+
+    @property
+    def name(self) -> str:
+        """The effective label: the user-set name, else client · workdir."""
+        if self._name:
+            return self._name
+        parts = [p for p in (self._client, self._workdir) if p]
+        return " · ".join(parts) or "session"
+
+    @name.setter
+    def name(self, value: str) -> None:
+        self._name = (value or "").strip()
+        self._rev += 1
+
+    @property
+    def client(self) -> str:
+        """The connecting MCP client's reported identity (read-only)."""
+        return self._client
+
+    def _set_client(self, client: str) -> None:
+        """Record the connecting client's identity. Called once by the server when
+        the MCP client identifies itself at ``initialize`` — not user-facing."""
+        client = (client or "").strip()
+        if client and client != self._client:
+            self._client = client
+            self._rev += 1
+
+    def __repr__(self) -> str:
+        tail = f" · {self._client}" if self._client and self._client != self.name else ""
+        return f"<Session {self.name!r}{tail}>"
+
+    def _sync(self) -> None:
+        """Mirror the session label to the store when it has changed, so the
+        dashboard's selector picks it up. Best-effort, like ``cells._sync``."""
+        if self._rev == self._synced or _store is None or _store_conn is None:
+            return
+        try:
+            _store.set_session(_store_conn, name=self.name, client=self._client)
+            self._synced = self._rev
+        except Exception:
+            # A store write must never raise into user code.
+            pass
+
+
+session = Session()
+
+
 # AST node types that open their own scope: a `yield` (or a name binding) inside
 # one of these belongs to that inner scope, not the cell's top level.
 _NESTED_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
@@ -2075,6 +2145,7 @@ async def _flusher() -> None:
                     pass
         await _sweep_resources()
         cells._sync()
+        session._sync()
         if _SESSION and _snapshot_dirty and not _snapshot_busy and not _restoring:
             # Fire-and-forget so a multi-second dump of a big namespace never
             # stalls the live-output mirroring this loop exists for.
@@ -2803,6 +2874,14 @@ def install(user_ns: dict | None = None) -> None:
     target["Result"] = Result
     target["cells"] = cells
     target["Cells"] = Cells
+    target["session"] = session
+    # Seed the default session label with this kernel's working directory; the
+    # connecting client's identity is folded in later (see Kernel.set_client).
+    try:
+        session._workdir = os.path.basename(os.getcwd()) or ""
+        session._rev += 1  # ensure the first flush mirrors the default to the store
+    except OSError:
+        pass
     target["resources"] = resources
     target["Resource"] = Resource
     target["register_resource"] = register_resource

@@ -9,6 +9,36 @@ export function seedDemo(): void {
   const SEP = String.fromCharCode(0x1f);
 
   store.panes = {
+    // Each producer (MCP client) publishes a reserved `__session__` pane naming
+    // the session; the feed reads it to label the session selector and never
+    // shows it as a run. Two scopes here exercise the picker.
+    [`demo${SEP}__session__`]: {
+      kind: 'data',
+      renderer: 'session',
+      title: 'refactor the auth flow',
+      body: JSON.stringify({ name: 'refactor the auth flow', client: 'claude-code 2.1.0' }),
+      created_at: now - 32000,
+    },
+    [`agent2${SEP}__session__`]: {
+      kind: 'data',
+      renderer: 'session',
+      title: 'claude-code · nix-web-monitor',
+      body: JSON.stringify({ name: '', client: 'claude-code 2.1.0' }),
+      created_at: now - 12000,
+    },
+    // A run belonging to the second session, so selecting it shows a distinct set.
+    [`agent2${SEP}probe`]: {
+      kind: 'exec',
+      title: 'probe service health',
+      subtitle: 'exec · demo',
+      lang: 'python',
+      source: 'import httpx\nr = await httpx.AsyncClient().get("http://localhost:8080/health")\nprint(r.status_code, r.text)',
+      stdout: '200 ok\n',
+      running: false,
+      ok: true,
+      duration_ms: 92,
+      created_at: now - 11000,
+    },
     // Inline-trace: a traced exec — each printed line's output shown inline beside it.
     [`demo${SEP}files`]: {
       kind: 'exec',

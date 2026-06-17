@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { stripAnsi } from '$lib/ansi';
   import { store, timeline, SCOPE_SEP } from '$lib/stream.svelte';
-  import { ui, focusPane, humanAge, humanDuration } from '$lib/ui.svelte';
+  import { ui, focusPane, humanAge, humanDuration, setSession } from '$lib/ui.svelte';
   import { setListNav } from '$lib/keys.svelte';
   import { rendererFor } from '$lib/renderers';
   import CodeBlock from './CodeBlock.svelte';
@@ -81,13 +81,15 @@
   );
 
   // Master-detail: the left column is a quiet list of intents (one line per run);
-  // the selected entry's output/error/source renders in the detail panel on the
-  // right, which follows the selection. `showCode` (per pane key) reveals the
-  // source inside that panel.
-  let showCode: Record<string, boolean> = $state({});
-  function toggleCode(e: MouseEvent, key: string): void {
+  // the selected entry's output and source render in the detail panel on the
+  // right, which follows the selection. The source is shown by default there (you
+  // usually want to see the code beside its output); `showResult` (per pane key)
+  // reveals the model-facing result, which is hidden by default because it usually
+  // just repeats stdout.
+  let showResult: Record<string, boolean> = $state({});
+  function toggleResult(e: MouseEvent, key: string): void {
     e.stopPropagation();
-    showCode[key] = !showCode[key];
+    showResult[key] = !showResult[key];
   }
 
   // The short run id from a pane key (`scope<0x1f>id`): the trailing id, shown as
@@ -104,6 +106,48 @@
   function isNamespace(p: Pane): boolean {
     return (p.kind ?? 'data') === 'data' && p.renderer === 'namespace';
   }
+
+  // The reserved per-producer session pane: it carries the session's identity for
+  // the selector, not a run, so the feed excludes it (like the namespace pane).
+  function isSession(p: Pane): boolean {
+    return (p.kind ?? 'data') === 'data' && p.renderer === 'session';
+  }
+
+  // The scope a pane key belongs to (its producer = one MCP session). '' is the
+  // in-process scope; a real MCP producer is "<pid>-<uuid>".
+  function scopeOf(key: string): string {
+    const sep = key.indexOf(SCOPE_SEP);
+    return sep === -1 ? '' : key.slice(0, sep);
+  }
+  // A short, legible label for a scope with no session pane to name it.
+  function shortScope(scope: string): string {
+    return scope ? scope.slice(0, 8) : 'local';
+  }
+
+  // Every live session: one entry per producer scope, labelled by its session
+  // pane's title (the user-set name, else client · workdir), falling back to a
+  // short scope id. Drives the header's session selector.
+  const sessions = $derived.by(() => {
+    const labels = new Map<string, string>();
+    const scopes = new Set<string>();
+    for (const key of Object.keys(store.panes)) {
+      const scope = scopeOf(key);
+      scopes.add(scope);
+      const p = store.panes[key];
+      if ((p.kind ?? 'data') === 'data' && p.renderer === 'session') {
+        labels.set(scope, p.title || 'session');
+      }
+    }
+    return [...scopes]
+      .map((scope) => ({ scope, label: labels.get(scope) || shortScope(scope) }))
+      .sort((a, b) => (a.label < b.label ? -1 : 1));
+  });
+
+  // The active session scope, validated against what is live: a saved selection
+  // for a session that has since gone falls back to all ('').
+  const activeScope = $derived(
+    ui.sessionScope && sessions.some((s) => s.scope === ui.sessionScope) ? ui.sessionScope : '',
+  );
 
   // A run's rich output (a table/plot/image) is published as a separate
   // `<id>/out` html pane beside its exec pane. It is an *attachment* to the run,
@@ -122,20 +166,21 @@
   const items = $derived(
     Object.keys(store.panes)
       .filter((key) => !isOutputAttachment(key))
-      .map((key) => {
-        const sep = key.indexOf(SCOPE_SEP);
-        const scope = sep === -1 ? '' : key.slice(0, sep);
-        return { key, pane: { ...store.panes[key], key, scope } as Pane };
-      })
-      .filter((it) => !isNamespace(it.pane))
+      .map((key) => ({ key, pane: { ...store.panes[key], key, scope: scopeOf(key) } as Pane }))
+      .filter((it) => !isNamespace(it.pane) && !isSession(it.pane))
       .sort(
         (a, b) =>
           (a.pane.created_at ?? 0) - (b.pane.created_at ?? 0) || (a.key < b.key ? -1 : 1),
       ),
   );
 
+  // The runs in the selected session ('' = all sessions). This is the working set
+  // the counts, filter, and list all build on, so picking a session narrows the
+  // whole view to one agent's runs.
+  const scoped = $derived(activeScope ? items.filter((it) => it.pane.scope === activeScope) : items);
+
   // How many runs are currently executing, for the header's active badge.
-  const activeCount = $derived(items.filter((it) => ledRun(it.pane)).length);
+  const activeCount = $derived(scoped.filter((it) => ledRun(it.pane)).length);
 
   // `/` filter: a case-insensitive substring match over the title, id and tag, so
   // a long feed narrows to the run you mean. Empty query shows everything.
@@ -143,8 +188,8 @@
   let filterEl: HTMLInputElement | undefined;
   const filtered = $derived.by(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((it) => {
+    if (!q) return scoped;
+    return scoped.filter((it) => {
       const p = it.pane;
       return (
         (p.title ?? '').toLowerCase().includes(q) ||
@@ -198,7 +243,7 @@
     selectIndex((i < 0 ? 0 : i) + delta);
   }
   function openSelected(): void {
-    if (selectedKey) showCode[selectedKey] = !showCode[selectedKey];
+    if (selectedKey) showResult[selectedKey] = !showResult[selectedKey];
   }
 
   // Register this view's motions with the global keymap while it is mounted.
@@ -217,9 +262,25 @@
 <div class="feedview">
   <header class="view-head">
     <h1 class="view-title">Jobs</h1>
-    {#if items.length}<span class="view-meta">{items.length} {items.length === 1 ? 'run' : 'runs'}</span>{/if}
+    {#if scoped.length}<span class="view-meta">{scoped.length} {scoped.length === 1 ? 'run' : 'runs'}</span>{/if}
     {#if activeCount}<span class="view-active"><i></i>{activeCount} active</span>{/if}
     <span class="view-spacer"></span>
+    <!-- Session picker: each MCP client is its own session, so this narrows the
+         feed to one agent's runs. Only shown once there is more than one to pick
+         between. -->
+    {#if sessions.length > 1}
+      <select
+        class="view-session"
+        aria-label="session"
+        value={activeScope}
+        onchange={(e) => setSession((e.currentTarget as HTMLSelectElement).value)}
+      >
+        <option value="">All sessions</option>
+        {#each sessions as s (s.scope)}
+          <option value={s.scope}>{s.label}</option>
+        {/each}
+      </select>
+    {/if}
     <!-- The `/` filter. Esc (handled by the keymap) blurs it back to navigation. -->
     <input
       class="view-filter"
@@ -235,6 +296,8 @@
   <div class="feed feed-split">
   {#if items.length === 0}
     <div class="feed-empty">{store.live ? 'no panes yet' : 'connecting…'}</div>
+  {:else if scoped.length === 0}
+    <div class="feed-empty">no runs in this session</div>
   {:else if filtered.length === 0}
     <div class="feed-empty">no runs match “{query}”</div>
   {:else}
@@ -275,8 +338,13 @@
         {@const traced = k === 'exec' && !!p.source && traceArr.length > 0}
         {@const hasSource = k === 'exec' && !!p.source}
         {@const isErr = ledErr(p)}
-        {@const codeOpen = showCode[selected.key] === true}
         {@const errInfo = isErr ? parseError(p.stderr, p.source) : null}
+        {@const stdoutTxt = k === 'exec' ? stripAnsi(p.stdout ?? '').trim() : ''}
+        {@const resultTxt = k === 'exec' ? (p.result ?? '').trim() : ''}
+        {@const hasStreamOut = !!stdoutTxt || !!stripAnsi(p.stderr ?? '').trim()}
+        {@const resultIsPrimary = !hasStreamOut && !selectedOut && !!resultTxt}
+        {@const resultIsExtra = (hasStreamOut || !!selectedOut) && !!resultTxt && resultTxt !== stdoutTxt}
+        {@const resultOpen = showResult[selected.key] === true}
         <div class="detail-head">
           <span class="entry-dot" class:live={ledLive(p)} class:run={ledRun(p)} class:err={isErr}></span>
           <span class="detail-title" class:err={isErr}>{p.title || '(pane)'}</span>
@@ -299,29 +367,56 @@
                 {/each}
               </div>
             {/if}
-            <div class="entry-box cell cell-out"><ExecBody pane={p} chrome={false} expanded /></div>
-            {#if selectedOut}
-              {@const OutBody = rendererFor(selectedOut.kind, selectedOut.renderer)}
-              <div class="entry-box pane entry-body detail-out">
-                <div class="body html-body"><OutBody pane={selectedOut} /></div>
+            {#if traced}
+              <!-- Inline trace: source with each line's output beside it — one
+                   combined view, so no separate output box (it would duplicate). -->
+              <div class="detail-section">
+                <div class="detail-label">code · output</div>
+                <div class="entry-box entry-trace-box">
+                  <InlineTrace source={p.source ?? ''} lang={p.lang ?? 'text'} trace={traceArr} />
+                  {#if p.stderr}<pre class="exec-out err trace-stderr">{stripAnsi(p.stderr)}</pre>{/if}
+                </div>
               </div>
+              {#if selectedOut}
+                {@const OutBody = rendererFor(selectedOut.kind, selectedOut.renderer)}
+                <div class="entry-box pane entry-body detail-out">
+                  <div class="body html-body"><OutBody pane={selectedOut} /></div>
+                </div>
+              {/if}
+            {:else}
+              <!-- Output (the point): human-facing stdout/stderr, plus the result
+                   only when it is the run's sole output. A rich table/plot/image
+                   attachment renders separately below, so the box keys on the
+                   captured streams (and a still-running run, to show "running…"). -->
+              {#if hasStreamOut || resultIsPrimary || ledRun(p)}
+                <div class="entry-box cell cell-out"><ExecBody pane={p} chrome={false} expanded hideResult={!resultIsPrimary} /></div>
+              {/if}
+              {#if selectedOut}
+                {@const OutBody = rendererFor(selectedOut.kind, selectedOut.renderer)}
+                <div class="entry-box pane entry-body detail-out">
+                  <div class="body html-body"><OutBody pane={selectedOut} /></div>
+                </div>
+              {/if}
+              <!-- Code, shown by default: the source beside its output. -->
+              {#if hasSource}
+                <div class="detail-section">
+                  <div class="detail-label">code</div>
+                  <div class="entry-box entry-code"><CodeBlock code={p.source ?? ''} lang={p.lang ?? 'text'} /></div>
+                </div>
+              {/if}
             {/if}
-            {#if hasSource}
+            <!-- Model view (hidden by default): the result the model received.
+                 Shown only when it adds something beyond stdout, so the common
+                 case (result == stdout) never duplicates the output above. -->
+            {#if resultIsExtra}
               <button
                 class="entry-code-toggle"
-                class:on={codeOpen}
-                onclick={(e) => toggleCode(e, selected.key)}
-                title={codeOpen ? 'hide code' : 'show code'}
-              >{codeOpen ? '▾' : '▸'} code</button>
-              {#if codeOpen}
-                {#if traced}
-                  <div class="entry-box entry-trace-box entry-code-reveal">
-                    <InlineTrace source={p.source ?? ''} lang={p.lang ?? 'text'} trace={traceArr} />
-                    {#if p.stderr}<pre class="exec-out err trace-stderr">{stripAnsi(p.stderr)}</pre>{/if}
-                  </div>
-                {:else}
-                  <div class="entry-box entry-code entry-code-reveal"><CodeBlock code={p.source ?? ''} lang={p.lang ?? 'text'} /></div>
-                {/if}
+                class:on={resultOpen}
+                onclick={(e) => toggleResult(e, selected.key)}
+                title={resultOpen ? 'hide result' : 'show the result returned to the model'}
+              >{resultOpen ? '▾' : '▸'} model view</button>
+              {#if resultOpen}
+                <pre class="exec-out res entry-code-reveal">{p.result}</pre>
               {/if}
             {/if}
           {:else}

@@ -78,6 +78,20 @@ def _is_rich(out: dict) -> bool:
 def _panes(conn) -> list[dict]:
     """The MCP's current pane set, mapped from the store."""
     panes: list[dict] = []
+    # A reserved pane carrying this session's identity. It rides under this
+    # producer's scope like every other pane, so the dashboard reads its title to
+    # label this session in its selector; it is not a run, so the feed excludes it
+    # (the same treatment the namespace pane gets).
+    sess = store.get_session(conn)
+    if sess and (sess.get("name") or sess.get("client")):
+        panes.append(
+            data_pane(
+                "__session__",
+                sess.get("name") or "session",
+                "session",
+                {"name": sess.get("name") or "", "client": sess.get("client") or ""},
+            )
+        )
     # `recent` is newest-first; reverse so the feed (oldest-first) grows downward
     # like a log, matching how the board stamps and orders first appearances.
     for row in reversed(store.recent(conn, limit=_JOBS_LIMIT)):

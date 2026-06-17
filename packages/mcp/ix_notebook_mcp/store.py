@@ -71,6 +71,19 @@ CREATE TABLE IF NOT EXISTS resources (
     created_at  REAL NOT NULL,
     updated_at  REAL NOT NULL
 );
+
+-- This MCP session's identity: one singleton row (id = 0). Every run in this
+-- store belongs to one session (one MCP client talking to one `ix-mcp serve`
+-- process); the dashboard groups runs by it and lists each session by `name`.
+-- `name` is the effective label (the user-set name, else a default derived from
+-- the connecting client and the kernel's workdir); `client` is the raw client
+-- identity for display. The kernel is the sole writer (see runtime.Session).
+CREATE TABLE IF NOT EXISTS session (
+    id          INTEGER PRIMARY KEY CHECK (id = 0),
+    name        TEXT NOT NULL DEFAULT '',
+    client      TEXT NOT NULL DEFAULT '',
+    updated_at  REAL NOT NULL
+);
 """
 
 
@@ -274,6 +287,32 @@ def get(conn: sqlite3.Connection, id: str) -> dict | None:
         f"SELECT {_EXEC_COLUMNS} FROM executions WHERE id = ?", (id,)
     ).fetchone()
     return _exec_row(row) if row is not None else None
+
+
+# --------------------------------------------------------------------------- #
+# Session: this server's identity, grouping every run in the store.
+# --------------------------------------------------------------------------- #
+
+
+def set_session(conn: sqlite3.Connection, *, name: str, client: str) -> None:
+    """Write this session's effective label and client identity (the singleton
+    id-0 row). The kernel runtime is the sole writer; the dashboard reads it to
+    label the session in its selector."""
+    conn.execute(
+        "INSERT INTO session (id, name, client, updated_at) VALUES (0, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET "
+        "name = excluded.name, client = excluded.client, updated_at = excluded.updated_at",
+        (name, client, _now()),
+    )
+
+
+def get_session(conn: sqlite3.Connection) -> dict | None:
+    """This session's ``{name, client, updated_at}``, or None before it is set."""
+    conn.row_factory = sqlite3.Row
+    row = conn.execute(
+        "SELECT name, client, updated_at FROM session WHERE id = 0"
+    ).fetchone()
+    return dict(row) if row is not None else None
 
 
 # --------------------------------------------------------------------------- #

@@ -24,8 +24,14 @@
   // the body past the card's cap; it does not reveal the source.
   // `chrome` draws the source toggle + status footer; the feed sets it false and
   // shows the source in its own column, so the renderer is just the output there.
-  let { pane, expanded = false, chrome = true }: { pane: Pane; expanded?: boolean; chrome?: boolean } =
-    $props();
+  // `hideResult` drops the result block: the feed shows the model-facing result
+  // under its own toggle, leaving this renderer to the human-facing stdout/stderr.
+  let {
+    pane,
+    expanded = false,
+    chrome = true,
+    hideResult = false,
+  }: { pane: Pane; expanded?: boolean; chrome?: boolean; hideResult?: boolean } = $props();
 
   // Source stays collapsed until asked for, on cards and in the detail alike.
   let showSource = $state(false);
@@ -33,13 +39,17 @@
   const stdout = $derived(stripAnsi(pane.stdout ?? ''));
   const stderr = $derived(stripAnsi(pane.stderr ?? ''));
   const result = $derived(pane.result ?? '');
+  // The kernel folds a cell's stdout into its result, so the two are usually
+  // identical — render the result only when it actually adds something beyond
+  // stdout (and the caller has not asked to hide it), to kill the duplicate box.
+  const showResult = $derived(!hideResult && !!result && result.trim() !== stdout.trim());
   // Auto-detected JSON (pretty-printed) for the result/stdout streams, else null.
   const resultJson = $derived(asJson(result));
   const stdoutJson = $derived(asJson(stdout));
   const source = $derived(pane.source ?? '');
   const lang = $derived(pane.lang ?? '');
   const running = $derived(pane.running === true);
-  const empty = $derived(!stdout && !stderr && !result);
+  const empty = $derived(!stdout && !stderr && !showResult);
 
   // The card is a drag handle; interactive controls must not start a drag.
   function swallow(e: PointerEvent): void {
@@ -53,7 +63,7 @@
   {#if empty}
     <div class="exec-empty">{running ? '· running…' : '· no output'}</div>
   {:else}
-    {#if result}
+    {#if showResult}
       {#if resultJson}<div class="exec-out res exec-json"><CodeBlock code={resultJson} lang="json" /></div>
       {:else}<pre class="exec-out res">{result}</pre>{/if}
     {/if}

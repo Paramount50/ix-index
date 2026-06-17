@@ -53,6 +53,7 @@ from .kernel import current_kernel
 # close. Losing the tail degrades gracefully; losing the head does not.
 _KERNEL_GUIDE = guide.compose(
     guide.INTRO,
+    guide.SESSION,
     guide.NAMESPACE,
     guide.DISCOVER,
     guide.NO_SHELL,
@@ -108,6 +109,44 @@ def _session_id(ctx: Context | None) -> str | None:
         sid = uuid.uuid4().hex[:8]
         _session_ids[session] = sid
     return sid
+
+
+# Set once the connecting client has been identified to the kernel, so the
+# session label defaults to it (see runtime.Session). A latch, not per-call work.
+_client_identified = False
+
+
+def _client_label(ctx: Context | None) -> str:
+    """The connecting MCP client's identity (name + version), from the
+    ``initialize`` handshake, or "" when unavailable. This is what the session
+    label defaults to so a human can tell one agent's runs from another's."""
+    try:
+        session = ctx.session if ctx is not None else None
+    except ValueError:
+        # No request context on this call (an embedder driving the tools directly).
+        return ""
+    params = getattr(session, "client_params", None) if session is not None else None
+    info = getattr(params, "clientInfo", None) if params is not None else None
+    if info is None:
+        return ""
+    name = (getattr(info, "name", "") or "").strip()
+    version = (getattr(info, "version", "") or "").strip()
+    if name and version:
+        return f"{name} {version}"
+    return name or version
+
+
+async def _identify_client_once(ctx: Context | None) -> None:
+    """Tell the kernel which client connected, exactly once per server process,
+    so an unnamed session still reads as e.g. ``claude-code · index`` rather than
+    an opaque id. Best-effort: the kernel call swallows its own failures."""
+    global _client_identified
+    if _client_identified:
+        return
+    _client_identified = True  # latch before awaiting so a concurrent first call skips
+    label = _client_label(ctx)
+    if label:
+        await current_kernel().set_client(label)
 
 
 def _first_sentence(text: str) -> str:
@@ -218,11 +257,12 @@ Content = list[outputs.Content]
 )
 async def python_exec(
     code: Annotated[str, Field(description="Python source to run on the shared kernel")],
+    intent: Annotated[str, Field(description="Required. A short plain-language description of what this run does, e.g. 'count rows per host' or 'fetch and parse the open PR list'. It titles the run's card in the dashboard feed (grouped under your session) so a human watching can follow your work — never the raw code. Keep it under ~8 words.")],
     budget: Annotated[float, Field(description="Seconds to wait before backgrounding the run (server-side cap: 120s; larger values are clamped and a notice is appended to the reply)")] = 15.0,
-    intent: Annotated[str | None, Field(description="A short plain-language description of what this run does, e.g. 'count rows per host' or 'fetch and parse the open PR list'. Shown as the run's title in the dashboard feed so a human watching can follow your work; without it the feed falls back to the first line of code. Strongly recommended on every call — keep it under ~8 words.")] = None,
     ctx: Context | None = None,
 ) -> Content:
     _open_dashboard_once()
+    await _identify_client_once(ctx)
     # A foreground budget is how long the run holds the one shared shell channel
     # before it backgrounds, so cap it: a giant budget (a 15-minute `await
     # jobs[...]`) would block every other call behind it. The clamp is surfaced
@@ -302,9 +342,14 @@ async def read(
     ctx: Context | None = None,
 ) -> Content:
     _open_dashboard_once()
+    await _identify_client_once(ctx)
     sid = _session_id(ctx)
     code = f"await __ix_read({target!r}, {start!r}, {end!r}, session={sid!r})"
-    cell_outputs, summary = await current_kernel().python_exec(code, budget=30.0, session=sid)
+    # Title the run by what it reads (with the line span when given) so its card
+    # reads "read path/to/file.py:10-40", not the raw `await __ix_read(...)` call.
+    span = f":{start}-{end}" if start is not None and end is not None else (f":{start}" if start is not None else "")
+    name = f"read {target}{span}"
+    cell_outputs, summary = await current_kernel().python_exec(code, budget=30.0, name=name, session=sid)
     if summary is not None and summary.get("status") == "error" and summary.get("error"):
         return [outputs.text(summary["error"])]
     rendered = outputs.to_mcp(cell_outputs)

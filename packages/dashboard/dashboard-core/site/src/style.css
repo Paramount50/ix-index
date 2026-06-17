@@ -384,6 +384,18 @@ body {
   background: var(--bg);
 }
 
+/* The session picker: a quiet pill matching the filter box, sitting just left of
+   it. Each MCP client is a session; this scopes the feed to one. */
+.view-session {
+  align-self: center; max-width: 220px;
+  padding: 5px 8px; font-family: var(--mono); font-size: 11.5px;
+  color: var(--ink); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px; outline: none; cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.view-session:hover { border-color: var(--ink-faint); }
+.view-session:focus { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+
 /* The feed view fills the stage as a column: the header, then the split below. */
 .feedview { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .feed { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; background: var(--bg); }
@@ -476,6 +488,16 @@ body {
   font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
 }
 .detail-body .entry-fail { margin-bottom: 10px; }
+
+/* A titled section in the detail panel (e.g. "code", "code · output"): a quiet
+   uppercase label over its box, so the panel reads as labelled regions rather
+   than a stack of anonymous slabs. */
+.detail-section { margin-top: 14px; }
+.detail-label {
+  margin: 0 0 5px 2px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
 
 /* The `code` toggle in the detail panel: a quiet bordered chip. */
 .entry-code-toggle {

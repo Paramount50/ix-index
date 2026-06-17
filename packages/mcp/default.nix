@@ -1910,6 +1910,83 @@ let
         mkdir -p "$out"
       '';
 
+  # The session identity feature: a run's session label flows kernel -> store ->
+  # pane bridge so the dashboard can group and name each MCP client's runs.
+  # Covers the store singleton row, runtime.Session's label precedence + store
+  # mirror, and the reserved `__session__` pane the bridge publishes.
+  sessionIdentityTestPy = pkgs.writeText "ix-mcp-session-identity-test.py" ''
+    import tempfile
+
+    from ix_notebook_mcp import pane_bridge, runtime, store
+
+    conn = store.connect(tempfile.mktemp(suffix=".db"))
+
+    # Store: the session row is a singleton (id 0) that round-trips and updates
+    # in place rather than accumulating rows.
+    assert store.get_session(conn) is None, "no session before it is set"
+    store.set_session(conn, name="alpha", client="claude-code 2.1")
+    got = store.get_session(conn)
+    assert got["name"] == "alpha" and got["client"] == "claude-code 2.1", got
+    store.set_session(conn, name="beta", client="claude-code 2.1")
+    assert store.get_session(conn)["name"] == "beta", "set_session must update in place"
+    assert conn.execute("SELECT count(*) FROM session").fetchone()[0] == 1, "singleton row"
+
+    # runtime.Session: label precedence is explicit name > client . workdir.
+    s = runtime.Session()
+    s._workdir = "index"
+    assert s.name == "index", s.name
+    s._set_client("claude-code 2.1")
+    assert s.name == "claude-code 2.1 · index", s.name
+    s.name = "refactor auth"
+    assert s.name == "refactor auth", s.name
+    assert s.client == "claude-code 2.1", s.client
+
+    # _sync mirrors the effective label to the store, and is a no-op when nothing
+    # changed (so an idle session never rewrites the row).
+    runtime._store = store
+    runtime._store_conn = conn
+    s._sync()
+    assert store.get_session(conn)["name"] == "refactor auth", store.get_session(conn)
+    stamp = store.get_session(conn)["updated_at"]
+    s._sync()
+    assert store.get_session(conn)["updated_at"] == stamp, "unchanged sync must not rewrite"
+
+    # pane bridge: a reserved `__session__` data pane carries the label + client,
+    # so the dashboard reads it for the session selector (and excludes it as a run).
+    store.set_session(conn, name="my session", client="claude-code 2.1")
+    panes = pane_bridge._panes(conn)
+    sess = [p for p in panes if p["id"] == "__session__"]
+    assert len(sess) == 1, panes
+    pane = sess[0]
+    assert pane["title"] == "my session", pane
+    assert pane["view"]["kind"] == "data" and pane["view"]["renderer"] == "session", pane
+    assert pane["view"]["data"]["client"] == "claude-code 2.1", pane
+
+    print("session-identity-ok")
+  '';
+
+  sessionIdentitySmoke =
+    pkgs.runCommand "ix-mcp-session-identity-smoke"
+      {
+        nativeBuildInputs = [ mcpPython ];
+        strictDeps = true;
+      }
+      ''
+        export HOME=$TMPDIR/home
+        mkdir -p "$HOME"
+        ${lib.getExe mcpPython} ${sessionIdentityTestPy} >stdout 2>stderr || {
+          echo "ix-mcp session identity smoke failed:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        grep -qx 'session-identity-ok' stdout || {
+          echo "ix-mcp session identity smoke did not confirm the contract:" >&2
+          cat stdout stderr >&2
+          exit 1
+        }
+        mkdir -p "$out"
+      '';
+
   # The read-only data API is also the embedding contract: a host (the room
   # server runs `ix-mcp` as its agent's only tool) reads the agent's rich
   # results back over HTTP and renders them in its own UI. Exercise that path
@@ -4232,6 +4309,7 @@ package.overrideAttrs (old: {
         evalSmoke
         runtimeSmoke
         sessionSmoke
+        sessionIdentitySmoke
         feedSmoke
         apiSmoke
         wedgeSmoke

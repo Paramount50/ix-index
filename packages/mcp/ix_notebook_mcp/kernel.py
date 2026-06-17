@@ -213,6 +213,18 @@ class Kernel:
             interrupted = await self._interrupt()
             return [], _wedged_summary(budget, grace, deadline, interrupted)
 
+    async def set_client(self, client: str) -> None:
+        """Tell the kernel which MCP client connected, so the session label can
+        default to it. Runs as a raw shell request (not ``__ix_exec``), so it
+        leaves no job/card behind — it only pokes ``session._set_client``. The
+        server calls this once, when the client identifies itself."""
+        try:
+            await self._execute(f"session._set_client({client!r})", timeout=10.0)
+        except Exception:
+            # The session label is a convenience; a failure here must never break
+            # the tool call that triggered identification.
+            pass
+
     async def _interrupt(self) -> bool:
         """Break a synchronous call wedging the kernel's event loop. ipykernel's
         own ``interrupt_kernel`` cancels the asyncio task, which a synchronous call
