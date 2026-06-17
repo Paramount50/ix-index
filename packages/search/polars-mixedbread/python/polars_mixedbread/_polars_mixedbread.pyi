@@ -20,4 +20,3 @@ def search_mixedbread(
     `filters` is the metadata filter as a JSON string. The wrapper
     `scan_mixedbread` builds it from the Polars predicate; see that function.
     """
-    ...

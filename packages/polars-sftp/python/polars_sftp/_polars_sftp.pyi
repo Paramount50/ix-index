@@ -19,4 +19,3 @@ def read_sftp(
     check_host_key: bool = ...,
 ) -> pl.DataFrame:
     """Read a remote file over SFTP into a DataFrame (see `scan_sftp`)."""
-    ...

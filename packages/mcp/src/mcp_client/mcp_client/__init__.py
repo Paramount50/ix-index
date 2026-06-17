@@ -63,7 +63,7 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
-__all__ = ["connect", "Server", "ToolResult", "MCPError", "servers", "close_all"]
+__all__ = ["MCPError", "Server", "ToolResult", "close_all", "connect", "servers"]
 
 __version__ = "0.1.0"
 
@@ -91,7 +91,7 @@ class MCPError(RuntimeError):
 
 # --- the live registry of open servers (like `jobs`) -------------------------
 
-servers: dict[str, "Server"] = {}
+servers: dict[str, Server] = {}
 
 
 async def close_all() -> None:
@@ -116,7 +116,7 @@ class ToolResult(_ResultBase):
         out.is_error # True if the tool reported a failure
     """
 
-    def __init__(self, tool: str, result: "types.CallToolResult") -> None:
+    def __init__(self, tool: str, result: types.CallToolResult) -> None:
         self.tool = tool
         self.content = list(result.content or [])
         self.data = result.structuredContent
@@ -199,7 +199,7 @@ class Server:
 
     # -- lifecycle --
 
-    async def _open(self) -> "Server":
+    async def _open(self) -> Server:
         self._task = asyncio.create_task(self._run(), name=f"mcp:{self.label}")
         ready = asyncio.create_task(self._ready.wait())
         done, _ = await asyncio.wait(
@@ -240,10 +240,10 @@ class Server:
                             res = await fn(session)
                             if not fut.done():
                                 fut.set_result(res)
-                        except Exception as exc:  # noqa: BLE001 - relay to caller
+                        except Exception as exc:
                             if not fut.done():
                                 fut.set_exception(exc)
-        except Exception as exc:  # noqa: BLE001 - surface to _open / pending calls
+        except Exception as exc:
             self._error = exc
             self._ready.set()
         finally:
@@ -276,7 +276,7 @@ class Server:
         except asyncio.TimeoutError:
             self._task.cancel()
 
-    async def __aenter__(self) -> "Server":
+    async def __aenter__(self) -> Server:
         return self
 
     async def __aexit__(self, *exc) -> None:
@@ -284,7 +284,7 @@ class Server:
 
     # -- catalog --
 
-    async def _load_catalog(self, session: "ClientSession") -> None:
+    async def _load_catalog(self, session: ClientSession) -> None:
         try:
             tools = (await session.list_tools()).tools
         except Exception:
@@ -302,7 +302,7 @@ class Server:
             prompts = []
         self.prompts = _prompts_frame(prompts)
 
-    async def refresh(self) -> "Server":
+    async def refresh(self) -> Server:
         """Re-fetch the tool / resource / prompt catalog from the server."""
         await self._submit(self._load_catalog)
         return self
@@ -325,7 +325,7 @@ class Server:
                 f"{self.label}: no tool {tool!r}; available: {', '.join(sorted(known)) or '(none)'}"
             )
 
-        async def _do(session: "ClientSession"):
+        async def _do(session: ClientSession):
             return await session.call_tool(tool, args)
 
         result = await self._submit(_do)
@@ -334,7 +334,7 @@ class Server:
     async def read(self, uri: str):
         """Read a resource by URI; returns the SDK ``ReadResourceResult``."""
 
-        async def _do(session: "ClientSession"):
+        async def _do(session: ClientSession):
             return await session.read_resource(uri)
 
         return await self._submit(_do)
@@ -344,7 +344,7 @@ class Server:
         args = dict(arguments or {})
         args.update(kwargs)
 
-        async def _do(session: "ClientSession"):
+        async def _do(session: ClientSession):
             return await session.get_prompt(name, args)
 
         return await self._submit(_do)

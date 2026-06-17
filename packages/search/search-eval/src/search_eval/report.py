@@ -104,7 +104,7 @@ def render_agentic_table(results: Sequence[TaskResult]) -> str:
     lines = [header, "-" * len(header)]
     for r in results:
         mark = "ERROR" if r.error else ("yes" if r.correct else "no")
-        detail = r.error if r.error else r.answer
+        detail = r.error or r.answer
         lines.append(f"{r.case.id:<22} {mark:>8}  {detail[:48]}")
     summary = summarize_agentic(results)
     if summary:

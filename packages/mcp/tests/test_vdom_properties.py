@@ -51,8 +51,8 @@ browser = pytest.importorskip("browser")
 async_playwright = pytest.importorskip("playwright.async_api").async_playwright
 hypothesis = pytest.importorskip("hypothesis")
 
-from hypothesis import HealthCheck, given, settings  # noqa: E402
-from hypothesis import strategies as st  # noqa: E402
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
 
 MAX_TEXT_DEFAULT = 120
 

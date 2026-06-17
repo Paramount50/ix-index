@@ -9,14 +9,15 @@ predicate handling. The actual read + decode happens in Rust (``_polars_sftp``).
 
 from __future__ import annotations
 
-from typing import Iterator, TypedDict
+from typing import TypedDict
+from collections.abc import Iterator
 
 import polars as pl
 from polars.io.plugins import register_io_source
 
 from ._polars_sftp import __version__, read_sftp
 
-__all__ = ["scan_sftp", "read_sftp", "__version__"]
+__all__ = ["__version__", "read_sftp", "scan_sftp"]
 
 
 class _ConnKwargs(TypedDict):
@@ -77,7 +78,7 @@ def scan_sftp(
         with_columns: list[str] | None,
         predicate: pl.Expr | None,
         n_rows: int | None,
-        batch_size: int | None,  # noqa: ARG001 - single-chunk reader ignores the hint
+        batch_size: int | None,
     ) -> Iterator[pl.DataFrame]:
         df = read_sftp(host, path, with_columns=with_columns, n_rows=n_rows, **conn)
         if predicate is not None:

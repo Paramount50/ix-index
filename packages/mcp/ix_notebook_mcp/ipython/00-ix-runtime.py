@@ -11,6 +11,6 @@ import sys
 try:
     from ix_notebook_mcp.runtime import install
 
-    install(get_ipython().user_ns)  # noqa: F821  (get_ipython is injected by IPython)
+    install(get_ipython().user_ns)
 except Exception as exc:  # pragma: no cover - defensive: a broken runtime must be loud
     print(f"[ix-mcp] runtime install failed: {exc!r}", file=sys.stderr)

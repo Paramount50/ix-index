@@ -139,7 +139,7 @@ def _tool_call(arguments: JsonObject) -> JsonObject:
     except (RconError, OSError) as error:
         return _tool_error(f"RCON failure: {error}")
     return {
-        "content": [{"type": "text", "text": response if response else "(no output)"}],
+        "content": [{"type": "text", "text": response or "(no output)"}],
         "isError": False,
     }
 

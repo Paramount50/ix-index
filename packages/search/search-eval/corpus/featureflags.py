@@ -12,6 +12,6 @@ def is_enabled(flag: str, user_id: str, rollout_percent: int) -> bool:
     Hashing (flag, salt, user) gives a stable 0..99 bucket, so a user keeps the
     same answer across calls and a higher percent only ever adds users.
     """
-    digest = hashlib.sha256(f"{flag}:{ROLLOUT_SALT}:{user_id}".encode("utf-8")).digest()
+    digest = hashlib.sha256(f"{flag}:{ROLLOUT_SALT}:{user_id}".encode()).digest()
     bucket = digest[0] % 100
     return bucket < rollout_percent

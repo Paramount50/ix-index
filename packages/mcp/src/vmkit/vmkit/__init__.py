@@ -332,7 +332,7 @@ def _bundle_login(bundle: str | os.PathLike | None) -> dict[str, str] | None:
 
 
 def login(
-    driver: "Driver",
+    driver: Driver,
     password: str | None = None,
     *,
     field: tuple[float, float] = (0.5, 0.83),
@@ -382,7 +382,7 @@ def screenshot(
     seconds: int = 20,
     timeout: float | None = None,
     shares: Sequence[str] | None = None,
-) -> "Image.Image":
+) -> Image.Image:
     """Boot the macOS guest in ``bundle`` off-screen and return a ``PIL.Image``
     of its display after ``seconds`` (the last frame captured).
 
@@ -422,7 +422,7 @@ def screenshot_many(
     timeout: float | None = None,
     shares: Sequence[str] | None = None,
     max_workers: int | None = None,
-) -> dict[str, "Image.Image"]:
+) -> dict[str, Image.Image]:
     """Boot several guests off-screen *concurrently* and return one frame each.
 
     Each bundle runs in its own ``vmkit`` process, so the boots are fully
@@ -453,7 +453,7 @@ def screenshot_many(
         for key, future in futures.items():
             try:
                 results[key] = future.result()
-            except BaseException as exc:  # noqa: BLE001 - first failure re-raised below
+            except BaseException as exc:
                 if error is None:
                     error = exc
     if error is not None:
@@ -510,7 +510,7 @@ def boot_linux(
     seconds: int = 20,
     timeout: float | None = None,
     net: bool = False,
-    ports: "Sequence[tuple[int, int]] | None" = None,
+    ports: Sequence[tuple[int, int]] | None = None,
 ) -> str:
     """Boot an aarch64 Linux guest headlessly from a raw EFI-bootable ``disk``
     via libkrun (Hypervisor.framework), returning the guest serial console
@@ -570,7 +570,7 @@ def boot_linux_gui(
     seconds: int = 60,
     timeout: float | None = None,
     efi_vars: str | os.PathLike | None = None,
-) -> "Image.Image":
+) -> Image.Image:
     """Boot an aarch64 Linux GUI guest from a raw EFI ``disk`` off-screen and
     return a ``PIL.Image`` of its display after ``seconds`` (the last frame).
 
@@ -643,10 +643,10 @@ class Driver:
     # guests with no coupling (the runtime polls ``Driver.list_all()``, mirroring
     # the ``Tui`` resource provider). WeakValueDictionary so a driver that is
     # dropped without ``close()`` simply falls out.
-    _live: "weakref.WeakValueDictionary[str, Driver]" = weakref.WeakValueDictionary()
+    _live: weakref.WeakValueDictionary[str, Driver] = weakref.WeakValueDictionary()
 
     @classmethod
-    def list_all(cls) -> "list[Driver]":
+    def list_all(cls) -> list[Driver]:
         """Every currently-booted driver, for resource discovery."""
         return [d for d in cls._live.values() if d.is_alive]
 
@@ -701,7 +701,7 @@ class Driver:
         # ack (keeps the single lockstep pipe in sync).
         self._pending_acks = 0
 
-    def __enter__(self) -> "Driver":
+    def __enter__(self) -> Driver:
         bin_path = _binary()
         if self._disk is not None:
             # VZ opens the boot disk read-write; a read-only image (e.g. a
@@ -831,7 +831,7 @@ class Driver:
             raise VmkitError(f"command {command!r} failed: {ack}")
         return ack
 
-    def _read_ack(self, proc: "subprocess.Popen[str]", deadline: float | None) -> str | None:
+    def _read_ack(self, proc: subprocess.Popen[str], deadline: float | None) -> str | None:
         """Return the next ack line, skipping guest-console noise; ``None`` on
         deadline.
 
@@ -966,7 +966,7 @@ class Driver:
         """Sleep ``seconds`` in the guest driver (fractional allowed)."""
         return self.send(f"wait {seconds}")
 
-    def shot(self, path: str | os.PathLike | None = None) -> "Image.Image":
+    def shot(self, path: str | os.PathLike | None = None) -> Image.Image:
         """Screenshot the guest framebuffer and return a ``PIL.Image``.
 
         With ``path``, the PNG is also written there. With no ``path``, it goes
@@ -1080,7 +1080,7 @@ def run_app(
     boot_seconds: float = 30,
     login_password: str | None = None,
     timeout: float = 300,
-) -> "Image.Image":
+) -> Image.Image:
     """Share a host directory into a guest, launch a command in it, and return a
     frame of the guest display.
 
@@ -1162,7 +1162,7 @@ def run_binary(
     *,
     name: str | None = None,
     **run_app_kwargs: object,
-) -> "Image.Image":
+) -> Image.Image:
     """Stage a nix-built macOS binary guest-portable, run it in the guest, and
     return a frame of the display: :func:`stage_binary` + :func:`run_app` in one
     call.
@@ -1200,7 +1200,7 @@ def run_oci(
     seconds: int | None = None,
     require_aarch64: bool = True,
     **kwargs: object,
-) -> "str | Image.Image":
+) -> str | Image.Image:
     """Boot a raw EFI-bootable Linux ``disk`` as a guest: the generic entry over
     :func:`boot_linux` (headless, libkrun) and :func:`boot_linux_gui` (GUI, VZ).
 
@@ -1235,7 +1235,7 @@ def _shell_quote(path: str) -> str:
     return "'" + path.replace("'", "'\\''") + "'"
 
 
-def _frames_differ(before: "Image.Image", after: "Image.Image", min_changed: float) -> bool:
+def _frames_differ(before: Image.Image, after: Image.Image, min_changed: float) -> bool:
     """Whether two frames differ in at least ``min_changed`` (fraction) of pixels.
 
     A per-pixel threshold first (ignoring tiny noise like antialiasing or a
@@ -1253,7 +1253,7 @@ def _frames_differ(before: "Image.Image", after: "Image.Image", min_changed: flo
     return total > 0 and changed / total >= min_changed
 
 
-def grid(image: "Image.Image", n: int = 10) -> "Image.Image":
+def grid(image: Image.Image, n: int = 10) -> Image.Image:
     """Return a copy of ``image`` with a labelled fraction grid drawn on top.
 
     A calibration aid for clicking: every line is annotated with its ``0..1``

@@ -324,7 +324,7 @@ class Job:
         return body or f"(no lines match {pattern!r} in {len(src)} lines)"
 
     @property
-    def running(self) -> "_CallableBool":
+    def running(self) -> _CallableBool:
         """True while the job runs. Works as an attribute (``job.running``) and
         as the historical method call (``job.running()``): both spellings are
         natural guesses, and the attribute form returning a bound method was a
@@ -332,7 +332,7 @@ class Job:
         return _CallableBool(self.status == "running")
 
     @property
-    def done(self) -> "_CallableBool":
+    def done(self) -> _CallableBool:
         """True once the job has finished (done, error, or cancelled), as an
         attribute or a call. Pair it with `.result`, which only yields a value
         once the job is done."""
@@ -366,12 +366,12 @@ class Job:
             )
         return self._result
 
-    def cancel(self) -> "Job":
+    def cancel(self) -> Job:
         if self.task is not None and not self.task.done():
             self.task.cancel()
         return self
 
-    async def wait(self, timeout: float | None = None) -> "Job":
+    async def wait(self, timeout: float | None = None) -> Job:
         """Wait until this job finishes, or up to ``timeout`` seconds, and return
         the job (check ``.done()`` / ``.status`` / ``.result`` on it). Unlike
         ``await jobs['<id>']`` it never raises on a slow job -- it just returns
@@ -416,7 +416,7 @@ def _llm_text(value):
     return _safe_repr(value)
 
 
-def _result_from_text(cls, value, *, html: str | None = None) -> "Result":
+def _result_from_text(cls, value, *, html: str | None = None) -> Result:
     """The ``Result.text(...)`` constructor body (see :class:`_TextDescriptor`):
     a Result that shows the same text to the human and the model. Pass ``html``
     to give the human a richer view than the plain text."""
@@ -440,10 +440,10 @@ class _TextDescriptor:
     # checker see both, so `Result.text(...)` is callable and `result.text[-100:]`
     # is a str.
     @overload
-    def __get__(self, obj: None, objtype: type | None = ...) -> "Callable[..., Result]": ...
+    def __get__(self, obj: None, objtype: type | None = ...) -> Callable[..., Result]: ...
     @overload
     def __get__(self, obj: object, objtype: type | None = ...) -> str: ...
-    def __get__(self, obj: object, objtype: type | None = None) -> "Callable[..., Result] | str":
+    def __get__(self, obj: object, objtype: type | None = None) -> Callable[..., Result] | str:
         if obj is None:
             return types.MethodType(_result_from_text, objtype)
         return obj.llm_result or ""
@@ -527,7 +527,7 @@ class Result:
     text = _TextDescriptor()
 
     @classmethod
-    def ok(cls, message: str = "done") -> "Result":
+    def ok(cls, message: str = "done") -> Result:
         """A quiet confirmation for a side-effecting cell (an import, a cancel, a
         terminal keystroke) that has no value to return."""
         msg = str(message)
@@ -535,7 +535,7 @@ class Result:
         return cls(user_html=user, llm_result=msg)
 
     @classmethod
-    def of(cls, value, *, llm_result: str | None = None) -> "Result":
+    def of(cls, value, *, llm_result: str | None = None) -> Result:
         """Wrap any value: render it richly for the human (a DataFrame as a
         table, a figure as an image, anything else as its display HTML or repr)
         and hand the model concise text. For a polars DataFrame the model text is
@@ -649,7 +649,7 @@ class Result:
             bundle[IX_LLM_MIME] = {"text": self.llm_result or "", "images": images}
         return bundle
 
-    def __call__(self) -> "Result":
+    def __call__(self) -> Result:
         """Calling a Result returns it unchanged. ``Job.result`` is a property,
         so ``jobs['id'].result()`` -- the natural method-call guess while
         polling a finished job -- used to die with "'Result' object is not
@@ -764,7 +764,7 @@ class Resource:
     def closed(self) -> bool:
         return self.status == "closed"
 
-    def close(self) -> "Resource":
+    def close(self) -> Resource:
         """Close the resource so the sidebar drops it on the next tick."""
         self.status = "closed"
         return self
@@ -1056,7 +1056,7 @@ def _has_toplevel_yield(nodes) -> bool:
     return False
 
 
-def _compile(code: str, filename: str) -> tuple[str, "types.CodeType"]:
+def _compile(code: str, filename: str) -> tuple[str, types.CodeType]:
     """Compile a cell, returning ``(mode, code_obj)``.
 
     ``mode == "gen"`` for a cell that yields at top level (run as an async
@@ -1076,7 +1076,7 @@ def _compile(code: str, filename: str) -> tuple[str, "types.CodeType"]:
     return ("expr", compile(tree, filename, "exec", flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT))
 
 
-def _compile_generator(code: str, filename: str) -> "types.CodeType":
+def _compile_generator(code: str, filename: str) -> types.CodeType:
     """Compile a yielding cell as ``async def __ix_cell__()`` whose top-level
     names stay in the shared namespace.
 
@@ -1111,7 +1111,7 @@ def _compile_generator(code: str, filename: str) -> "types.CodeType":
     return compile(shell, filename, "exec")
 
 
-def _merge_stdout(job: "Job", result: "Result") -> "Result":
+def _merge_stdout(job: Job, result: Result) -> Result:
     """Jupyter shows a cell's stdout AND its final value; so do we. When a cell
     both printed and ended with a bare (non-Result) expression, prepend the
     captured stdout to the model text and the human view, clipped like any other
@@ -1142,7 +1142,7 @@ def _merge_stdout(job: "Job", result: "Result") -> "Result":
 _AUTO_RESULT_CHARS = 20_000
 
 
-def _auto_result(job: "Job") -> "Result":
+def _auto_result(job: Job) -> Result:
     """The Result for a cell whose last statement evaluated to None (an
     assignment, a bare ``print()``, a side-effecting call): its captured stdout,
     or a quiet ok when it printed nothing -- the same thing a notebook shows."""
@@ -1161,7 +1161,7 @@ def _auto_result(job: "Job") -> "Result":
     )
 
 
-def _display_result(result: "Result") -> None:
+def _display_result(result: Result) -> None:
     """Show one yielded Result to both audiences. The IPython display goes onto
     the running job's captured outputs (the dashboard) and out on iopub (the
     model's tool result), the same path the trailing Result takes \u2014 so a
@@ -1200,7 +1200,7 @@ def _is_displayable(value) -> bool:
     return module.startswith("matplotlib") or module.startswith("PIL")
 
 
-def _current_line(job: "Job") -> int | None:
+def _current_line(job: Job) -> int | None:
     """The cell line ``job`` is executing right now, or None.
 
     Read off the suspended coroutine chain: starting from the cell's own
@@ -1255,7 +1255,7 @@ def _user_traceback(exc: BaseException) -> str:
     return "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
 
 
-def _error_line(exc: BaseException, job: "Job") -> int | None:
+def _error_line(exc: BaseException, job: Job) -> int | None:
     """The cell line the failure was raised on: a SyntaxError's reported line,
     else the deepest traceback frame inside this job's own pseudo-file (the
     cell line whose statement failed, even when the raise happened in a
@@ -1794,7 +1794,7 @@ def _result_bundle(value) -> dict | None:
     return bundle if bundle["data"] else None
 
 
-def _job_outputs(job: "Job") -> list[dict]:
+def _job_outputs(job: Job) -> list[dict]:
     """A job's rich outputs for the store: every display() bundle captured while it
     ran, plus the trailing-expression result rendered the same way."""
     outs = list(job._displays)
@@ -2005,7 +2005,7 @@ def _api_rows() -> list[dict]:
     return rows
 
 
-def doc(obj) -> "Result":
+def doc(obj) -> Result:
     """The signature and docstring of any object, RETURNED (not printed) as a
     Result -- so the documented "everything through Result" path also works for
     reading docs. ``help()`` only writes to stdout (not your channel) and returns
@@ -2371,7 +2371,7 @@ async def _snapshot_tick() -> None:
         _snapshot_busy = False
 
 
-async def __ix_snapshot() -> "Result":
+async def __ix_snapshot() -> Result:
     """Checkpoint the namespace to the session store right now (the server sends
     this on shutdown; callable any time)."""
     info = await _snapshot_now()
@@ -2562,7 +2562,7 @@ def _job_summary(job: Job) -> dict:
     }
 
 
-def history(n: int = 20) -> "Result":
+def history(n: int = 20) -> Result:
     """A compact, newest-last listing of the most recent runs in this kernel, so
     you can see what is available to drill into without remembering ids. Each row
     is a ``jobs['<id>']`` you can page: ``.tail()/.head()/.slice()/.lines()/
@@ -2695,7 +2695,7 @@ def _value_icon_svg(*, px: int = 16) -> str:
     )
 
 
-async def __ix_read(target, start=None, end=None, session=None) -> "Result":
+async def __ix_read(target, start=None, end=None, session=None) -> Result:
     """Read a file (or evaluate a kernel value) FOR THE MODEL, quietly.
 
     Returns a Result whose ``llm_result`` is the full text the model receives and

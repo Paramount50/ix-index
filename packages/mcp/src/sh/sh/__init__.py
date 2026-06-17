@@ -86,7 +86,7 @@ import shlex
 import signal
 import sys
 
-__all__ = ["sh", "Output", "ShellError"]
+__all__ = ["Output", "ShellError", "sh"]
 
 __version__ = "0.1.0"
 
@@ -167,7 +167,7 @@ class ShellError(RuntimeError):
     inspectable: ``except ShellError as e: print(e.output.text)``.
     """
 
-    def __init__(self, output: "Output") -> None:
+    def __init__(self, output: Output) -> None:
         self.output = output
         super().__init__(f"command exited {output.code}: {output.cmd}")
 

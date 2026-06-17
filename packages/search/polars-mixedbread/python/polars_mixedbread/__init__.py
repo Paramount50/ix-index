@@ -76,7 +76,7 @@ wider coverage.
 from __future__ import annotations
 
 import json
-from typing import Iterator
+from collections.abc import Iterator
 
 import polars as pl
 from polars.io.plugins import register_io_source
@@ -154,7 +154,7 @@ def scan_mixedbread(
         with_columns: list[str] | None,
         predicate: pl.Expr | None,
         n_rows: int | None,
-        batch_size: int | None,  # noqa: ARG001 - single-shot source ignores the hint
+        batch_size: int | None,
     ) -> Iterator[pl.DataFrame]:
         pushed = None if predicate is None else pushdown(predicate, pushable)
 

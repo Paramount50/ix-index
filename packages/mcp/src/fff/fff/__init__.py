@@ -57,6 +57,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 __all__ = [
+    "CodeMap",
     "FffError",
     "FileFinder",
     "FileHit",
@@ -66,14 +67,13 @@ __all__ = [
     "SearchResult",
     "afind",
     "agrep",
+    "amap",
+    "atree",
     "find",
     "finder",
     "grep",
-    "tree",
-    "atree",
     "map",
-    "amap",
-    "CodeMap",
+    "tree",
 ]
 
 __version__ = "0.9.2"
@@ -591,7 +591,7 @@ class FileFinder:
             _lib.fff_destroy(self._handle)
             self._closed = True
 
-    def __enter__(self) -> "FileFinder":
+    def __enter__(self) -> FileFinder:
         return self
 
     def __exit__(self, *_exc) -> None:
@@ -988,7 +988,7 @@ def _is_unindexable_root(directory: str) -> bool:
     return os.path.normcase(resolved) == os.path.normcase(home)
 
 
-def _refuse_unindexable_dir(root: str) -> "FffError":
+def _refuse_unindexable_dir(root: str) -> FffError:
     """A clear, actionable error for a bare home / fs-root *directory*.
 
     Indexing the whole of ``$HOME`` or ``/`` is the one case fff genuinely won't
@@ -1005,7 +1005,7 @@ def _refuse_unindexable_dir(root: str) -> "FffError":
     )
 
 
-def _isolated_file_finder(abspath: str, tmp: str, *, content_indexing: bool) -> "FileFinder":
+def _isolated_file_finder(abspath: str, tmp: str, *, content_indexing: bool) -> FileFinder:
     """A finder over a throwaway directory holding only a copy of ``abspath``.
 
     An explicitly named file can't always be searched in place: fff-c can't
@@ -1126,7 +1126,7 @@ def grep(query: str | list[str], path=".", *, mode: str = "plain", limit: int = 
             'single pattern string with mode="regex" (e.g. "a|b").'
         )
 
-    def _run(ff: "FileFinder") -> GrepResult:
+    def _run(ff: FileFinder) -> GrepResult:
         if multi:
             return ff.multi_grep(patterns=query, constraints=glob, limit=limit)
         result = ff.grep(query=query, mode=mode, limit=limit)
@@ -1177,19 +1177,19 @@ class CodeMap:
     stays scannable on the dashboard.
     """
 
-    def __init__(self, *, query: "str | list[str]", matches: list["GrepMatch"]) -> None:
+    def __init__(self, *, query: str | list[str], matches: list[GrepMatch]) -> None:
         self.query = query
         # A list query (multi-pattern OR) displays as ``a | b`` in the headers.
         self._query_str = query if isinstance(query, str) else " | ".join(query)
         self.matches = matches
-        self.by_file: dict[str, list["GrepMatch"]] = {}
+        self.by_file: dict[str, list[GrepMatch]] = {}
         for m in matches:
             self.by_file.setdefault(m.path, []).append(m)
         for hits in self.by_file.values():
             hits.sort(key=lambda h: (not h.is_definition, h.line_number))
 
     @property
-    def defs(self) -> list["GrepMatch"]:
+    def defs(self) -> list[GrepMatch]:
         return [m for m in self.matches if m.is_definition]
 
     @property

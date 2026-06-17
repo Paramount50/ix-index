@@ -78,18 +78,18 @@ def _git_ignored(root: pathlib.Path, rels: list[str]) -> set[str]:
 
 
 __all__ = [
-    "ls",
-    "tree",
+    "Code",
     "cat",
-    "read",
-    "head",
-    "tail",
-    "json",
+    "df_html",
     "diff",
     "edit",
+    "head",
     "img",
-    "Code",
-    "df_html",
+    "json",
+    "ls",
+    "read",
+    "tail",
+    "tree",
 ]
 
 # Grayscale palette matching the dashboard, in two themes. Flat and still (no
@@ -315,7 +315,7 @@ def _fmt_cell(value: Any, dtype: pl.DataType | pl.datatypes.DataTypeClass) -> tu
     )
 
 
-def df_html(df: "pl.DataFrame", max_rows: int = 50) -> str:
+def df_html(df: pl.DataFrame, max_rows: int = 50) -> str:
     """The dashboard's styled HTML for a polars DataFrame (safe wrapper).
 
     Installed as the global ``pl.DataFrame._repr_html_``; a render failure on some
@@ -333,7 +333,7 @@ def df_html(df: "pl.DataFrame", max_rows: int = 50) -> str:
         )
 
 
-def _df_html_impl(df: "pl.DataFrame", max_rows: int) -> str:
+def _df_html_impl(df: pl.DataFrame, max_rows: int) -> str:
     """The dashboard's styled HTML for a polars DataFrame.
 
     The kernel installs this as the global ``polars.DataFrame._repr_html_``, so
@@ -474,7 +474,7 @@ def _lang_for(path: pathlib.Path) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
-def ls(path: str | os.PathLike[str] = ".", *, all: bool = False) -> "pl.DataFrame":
+def ls(path: str | os.PathLike[str] = ".", *, all: bool = False) -> pl.DataFrame:
     """A directory listing as a DataFrame (name, kind, size, modified, ignored).
 
     Dirs sort first, then by name. Hidden entries are skipped unless ``all``.
@@ -525,7 +525,7 @@ def ls(path: str | os.PathLike[str] = ".", *, all: bool = False) -> "pl.DataFram
 
 def tree(
     path: str | os.PathLike[str] = ".", depth: int = 2, *, all: bool = False
-) -> "pl.DataFrame":
+) -> pl.DataFrame:
     """A recursive listing to ``depth`` as a DataFrame (depth, name, path, kind).
 
     ``name`` is indented by depth for a tree shape; ``path`` is relative to the

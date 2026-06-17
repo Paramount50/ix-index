@@ -24,13 +24,13 @@ import math
 from collections.abc import Mapping, Sequence
 
 __all__ = [
+    "RetrievalScores",
     "dcg",
+    "mrr",
     "ndcg_at_k",
     "ndcg_from_scores",
-    "recall_at_k",
     "precision_at_k",
-    "mrr",
-    "RetrievalScores",
+    "recall_at_k",
     "score_ranking",
 ]
 

@@ -100,7 +100,7 @@ if sys.platform != "darwin":
 # cursor read, and synthetic-event posting. Import errors should name the
 # dependency so a stripped environment is diagnosable rather than mysterious.
 try:
-    import Quartz  # noqa: N813  (Apple framework module name)
+    import Quartz
 except ImportError as exc:  # pragma: no cover - environment wiring
     raise RuntimeError(
         "screen: pyobjc `Quartz` is required but not importable; the ix-mcp "

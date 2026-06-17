@@ -73,7 +73,7 @@ class Judge:
     def _client(self) -> anthropic.Anthropic:
         try:
             return anthropic.Anthropic()
-        except Exception as exc:  # noqa: BLE001 - surface a clear setup error
+        except Exception as exc:
             raise RuntimeError(
                 "could not construct the Anthropic client; set ANTHROPIC_API_KEY"
             ) from exc

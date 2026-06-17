@@ -40,7 +40,7 @@ import polars as pl
 
 import browser
 
-__all__ = ["posts", "DEFAULT_ENDPOINT", "DEFAULT_APP"]
+__all__ = ["DEFAULT_APP", "DEFAULT_ENDPOINT", "posts"]
 
 __version__ = "0.1.0"
 

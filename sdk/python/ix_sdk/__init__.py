@@ -159,7 +159,7 @@ class ProgressEvent:
     vm_id: str | None = None
 
     @classmethod
-    def from_native(cls, native: _NativeProgressEvent) -> "ProgressEvent":
+    def from_native(cls, native: _NativeProgressEvent) -> ProgressEvent:
         return cls(
             stage=native.stage,
             detail=native.detail,
@@ -352,7 +352,7 @@ class RemotePath:
     def __fspath__(self) -> str:
         return self.as_posix()
 
-    def __truediv__(self, other: str | os.PathLike[str]) -> "RemotePath":
+    def __truediv__(self, other: str | os.PathLike[str]) -> RemotePath:
         return RemotePath(self._fs, self._path / os.fspath(other))
 
     @property
@@ -360,7 +360,7 @@ class RemotePath:
         return self._path.name
 
     @property
-    def parent(self) -> "RemotePath":
+    def parent(self) -> RemotePath:
         return RemotePath(self._fs, self._path.parent)
 
     def as_posix(self) -> str:
@@ -561,7 +561,7 @@ class SecretsHandle:
 # ── Branch ──────────────────────────────────────────────────────────
 
 class Branch:
-    def __init__(self, inner: _RawBranch, client: "Client") -> None:
+    def __init__(self, inner: _RawBranch, client: Client) -> None:
         self._inner = inner
         self._client = client
         self._fs = FsHandle(self._inner.fs())
@@ -577,19 +577,19 @@ class Branch:
     async def delete(self) -> None:
         await self._inner.delete()
 
-    async def pause(self) -> "Snapshot":
+    async def pause(self) -> Snapshot:
         return Snapshot(await self._inner.pause(), self._client)
 
     async def start(self) -> BranchInfo:
         return await self._inner.start()
 
-    def start_with_progress(self) -> "StartProgress":
+    def start_with_progress(self) -> StartProgress:
         return StartProgress(self._inner.start_with_progress(), self._client)
 
     async def restart(self) -> BranchInfo:
         return await self._inner.restart()
 
-    async def snapshot(self) -> "Snapshot":
+    async def snapshot(self) -> Snapshot:
         return Snapshot(await self._inner.snapshot(), self._client)
 
     async def bash(
@@ -644,10 +644,10 @@ class Branch:
         command: list[str],
         *,
         working_dir: str | None = None,
-    ) -> "ExecOutputStream":
+    ) -> ExecOutputStream:
         return self._inner.exec_stream(command, working_dir)
 
-    async def log(self) -> list["Snapshot"]:
+    async def log(self) -> list[Snapshot]:
         return [Snapshot(c, self._client) for c in await self._inner.log()]
 
     def path(self, path: str | os.PathLike[str]) -> RemotePath:
@@ -687,7 +687,7 @@ class Branch:
         snapshot_id: str | None = None,
         *,
         name: str | None = None,
-    ) -> "Branch":
+    ) -> Branch:
         raw = await self._inner.fork(snapshot_id, name)
         return Branch(raw, self._client)
 
@@ -696,7 +696,7 @@ class Branch:
         snapshot_id: str,
         *,
         name: str | None = None,
-    ) -> "ForkProgress":
+    ) -> ForkProgress:
         return ForkProgress(self._inner.fork_with_progress(snapshot_id, name), self._client)
 
     async def migrate(self, *, target_node_id: str | None = None) -> MigrationStart:
@@ -742,7 +742,7 @@ class _ProgressBase(abc.ABC):
     # them through the async-iterator protocol, so type the field by that
     # protocol rather than naming each concrete native stream class.
     _stream: typing.AsyncIterator[_NativeProgressEvent | _RawBranch]
-    _result: "Branch | None"
+    _result: Branch | None
     _exhausted: bool
 
     def __aiter__(self) -> typing.Self:
@@ -759,9 +759,9 @@ class _ProgressBase(abc.ABC):
         raise StopAsyncIteration
 
     @abc.abstractmethod
-    def _wrap_result(self, item: _RawBranch) -> "Branch": ...
+    def _wrap_result(self, item: _RawBranch) -> Branch: ...
 
-    async def _drain(self) -> "Branch":
+    async def _drain(self) -> Branch:
         # Iterating self drives __anext__, which stores the terminal branch in
         # self._result before raising StopAsyncIteration. The attribute is set
         # by a different method, so re-read it after draining rather than
@@ -780,7 +780,7 @@ class _Progress(_ProgressBase):
     def __init__(
         self,
         stream: typing.AsyncIterator[_NativeProgressEvent | _RawBranch],
-        client: "Client",
+        client: Client,
     ) -> None:
         self._stream = stream
         self._client = client
@@ -790,7 +790,7 @@ class _Progress(_ProgressBase):
     def _wrap_result(self, item: _RawBranch) -> Branch:
         return Branch(item, self._client)
 
-    async def branch(self) -> "Branch":
+    async def branch(self) -> Branch:
         result = await self._drain()
         assert isinstance(result, Branch)
         return result
@@ -801,7 +801,7 @@ class CreateProgress(_Progress):
 
 
 class StartProgress(_Progress):
-    async def info(self) -> "BranchInfo":
+    async def info(self) -> BranchInfo:
         return await (await self.branch()).info()
 
 
@@ -816,7 +816,7 @@ def _default_region() -> Region:
 # ── Snapshot ───────────────────────────────────────────────────────
 
 class Snapshot:
-    def __init__(self, inner: _RawCommit, client: "Client") -> None:
+    def __init__(self, inner: _RawCommit, client: Client) -> None:
         self._inner = inner
         self._client = client
 
@@ -831,7 +831,7 @@ class Snapshot:
         env: dict[str, str] | None = None,
         ipv4: bool = DEFAULT_CREATE_IPV4,
         l7_proxy_ports: list[int] | None = None,
-    ) -> "Snapshot":
+    ) -> Snapshot:
         client = Client(token=token, base_url=base_url)
         return await client.build_snapshot_from_oci(
             image,
@@ -871,7 +871,7 @@ class Snapshot:
         return self._inner.created_at_millis
 
     @property
-    def client(self) -> "Client":
+    def client(self) -> Client:
         return self._client
 
     async def branch(self, *, name: str | None = None) -> Branch:
@@ -962,7 +962,7 @@ class Client:
         env: dict[str, str] | None = None,
         l7_proxy_ports: list[int] | None = None,
         ipv4: bool = DEFAULT_CREATE_IPV4,
-        on_progress: "typing.Callable[[ProgressEvent], None] | None" = None,
+        on_progress: typing.Callable[[ProgressEvent], None] | None = None,
     ) -> Branch:
         progress = self.create_with_progress(
             image,
@@ -986,7 +986,7 @@ class Client:
         env: dict[str, str] | None = None,
         l7_proxy_ports: list[int] | None = None,
         ipv4: bool = DEFAULT_CREATE_IPV4,
-    ) -> "CreateProgress":
+    ) -> CreateProgress:
         stream = self._inner.create_with_progress(
             image,
             _region_slug(region),
@@ -1090,20 +1090,20 @@ async def _print_log_stream(stream: LogOutputStream) -> None:
 
 
 class _VMContext:
-    def __init__(self, coro: typing.Coroutine[typing.Any, typing.Any, "VM"]) -> None:
+    def __init__(self, coro: typing.Coroutine[typing.Any, typing.Any, VM]) -> None:
         self._task: asyncio.Task[VM] | None = None
         self._coro = coro
         self._vm: VM | None = None
 
-    def _ensure_task(self) -> asyncio.Task["VM"]:
+    def _ensure_task(self) -> asyncio.Task[VM]:
         if self._task is None:
             self._task = asyncio.ensure_future(self._coro)
         return self._task
 
-    def __await__(self) -> typing.Generator[typing.Any, None, "VM"]:
+    def __await__(self) -> typing.Generator[typing.Any, None, VM]:
         return self._ensure_task().__await__()
 
-    async def __aenter__(self) -> "VM":
+    async def __aenter__(self) -> VM:
         self._vm = await self._ensure_task()
         return self._vm
 
@@ -1158,7 +1158,7 @@ class VM:
         name: str | None = None,
         stream_output: bool = True,
     ) -> _VMContext:
-        async def _create() -> "VM":
+        async def _create() -> VM:
             branch = await snapshot.branch(name=name)
             log_task: asyncio.Task[None] | None = None
             if stream_output:
@@ -1174,7 +1174,7 @@ class VM:
         token: str | None = None,
         base_url: str | None = None,
     ) -> _VMContext:
-        async def _create() -> "VM":
+        async def _create() -> VM:
             client = Client(token=token, base_url=base_url)
             branch = await client.get(vm_id)
             return VM(client, branch)
@@ -1186,7 +1186,7 @@ class VM:
         *,
         token: str | None = None,
         base_url: str | None = None,
-    ) -> "VM | None":
+    ) -> VM | None:
         client = Client(token=token, base_url=base_url)
         branch = await client.find_by_name(name)
         if branch is None:
@@ -1254,7 +1254,7 @@ class VM:
 
     # ── Forking ─────────────────────────────────────────────────
 
-    async def fork(self, name: str | None = None) -> "VM":
+    async def fork(self, name: str | None = None) -> VM:
         forked = await self._branch.fork(name=name)
         return VM(self._client, forked)
 
@@ -1306,6 +1306,9 @@ class VM:
 
 
 __all__ = [
+    "DEFAULT_CREATE_IPV4",
+    "DEFAULT_REGION",
+    "VM",
     "ApiToken",
     "BillingStatus",
     "Branch",
@@ -1313,7 +1316,6 @@ __all__ = [
     "BranchStatus",
     "Client",
     "CommandError",
-    "Snapshot",
     "CreateProgress",
     "ExecResult",
     "ForkProgress",
@@ -1321,6 +1323,17 @@ __all__ = [
     "FsHandle",
     "FsReadResult",
     "FsWriteResult",
+    "IxAuthError",
+    "IxCapacityError",
+    "IxConflictError",
+    "IxConnectionError",
+    "IxError",
+    "IxNotFoundError",
+    "IxPaymentError",
+    "IxRateLimitError",
+    "IxTimeoutError",
+    "IxUnavailableError",
+    "IxValidationError",
     "LogEntry",
     "LogOutputStream",
     "MetricsInfo",
@@ -1332,8 +1345,6 @@ __all__ = [
     "PreviewInfo",
     "ProgressEvent",
     "Region",
-    "DEFAULT_REGION",
-    "DEFAULT_CREATE_IPV4",
     "RegionInfo",
     "RemotePath",
     "RuntimeCaptureHealthInfo",
@@ -1351,20 +1362,9 @@ __all__ = [
     "RuntimeVcpuIssueKind",
     "RuntimeVirtioMemHealthInfo",
     "RuntimeVirtioMemIssue",
-    "VM",
-    "IxError",
-    "IxAuthError",
-    "IxNotFoundError",
-    "IxValidationError",
-    "IxRateLimitError",
-    "IxConflictError",
-    "IxCapacityError",
-    "IxPaymentError",
-    "IxUnavailableError",
-    "IxConnectionError",
-    "IxTimeoutError",
     "Secret",
     "SecretsHandle",
+    "Snapshot",
     "StartProgress",
     "StartupInfo",
     "StartupMode",

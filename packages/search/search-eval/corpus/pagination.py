@@ -10,7 +10,7 @@ DEFAULT_PAGE_SIZE = 50
 
 def encode_cursor(last_id: int) -> str:
     """Encode the last seen id as an opaque base64 cursor token."""
-    return base64.urlsafe_b64encode(f"after:{last_id}".encode("utf-8")).decode("ascii")
+    return base64.urlsafe_b64encode(f"after:{last_id}".encode()).decode("ascii")
 
 
 def decode_cursor(cursor: str) -> int:

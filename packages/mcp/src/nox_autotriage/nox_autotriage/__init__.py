@@ -24,8 +24,8 @@ from linear.triage import Finding, TriageConfig, ModuleLinearPort, triage
 
 __all__ = [
     "SCHEMA_VERSION",
-    "findings_from_conformance",
     "config_from_env",
+    "findings_from_conformance",
     "run",
 ]
 

@@ -164,7 +164,7 @@ class IxVmBackend:
     cannot run from a macOS host and is left as an explicit error.
     """
 
-    def run_task(self, case: TaskCase) -> str:  # noqa: ARG002 - interface stub
+    def run_task(self, case: TaskCase) -> str:
         raise AgentError(
             "the ixvm backend is not implemented yet; run with --backend local. "
             "See packages/search/search-eval/README.md for the design."

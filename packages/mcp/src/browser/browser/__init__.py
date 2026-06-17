@@ -85,18 +85,18 @@ import time as _time
 import urllib.parse as _urlparse
 
 __all__ = [
-    "DEFAULT_ENDPOINT",
     "DEFAULT_APP",
-    "get_or_create_browser",
-    "connect",
-    "context",
-    "page",
-    "goto",
-    "shot",
-    "read",
-    "vdom",
+    "DEFAULT_ENDPOINT",
     "Vdom",
     "close",
+    "connect",
+    "context",
+    "get_or_create_browser",
+    "goto",
+    "page",
+    "read",
+    "shot",
+    "vdom",
 ]
 
 __version__ = "0.2.0"

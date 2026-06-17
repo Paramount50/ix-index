@@ -93,7 +93,7 @@ def query(index_path: str, program: str, root: str | None = None) -> dict[str, p
         columns = relation["columns"]
         out[name] = pl.DataFrame(
             relation["rows"],
-            schema={column: pl.Utf8 for column in columns},
+            schema=dict.fromkeys(columns, pl.Utf8),
         )
     return out
 

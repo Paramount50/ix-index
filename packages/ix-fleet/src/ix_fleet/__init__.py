@@ -681,7 +681,7 @@ def default_source_workdir(cwd: Path, source_root: Path) -> Path:
     try:
         return cwd.resolve().relative_to(source_root.resolve())
     except ValueError:
-        return Path(".")
+        return Path()
 
 
 # Bound a target-based `switch` (matches the old CLI `timeout=1800`). The

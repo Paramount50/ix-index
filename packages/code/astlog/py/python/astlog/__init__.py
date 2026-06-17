@@ -89,7 +89,7 @@ def _value_struct() -> pl.Struct:
 def _normalize_cell(value: Node | str) -> dict[str, object]:
     """A node dict passes through; a bare string becomes a text-only struct."""
     if isinstance(value, str):
-        cell: dict[str, object] = {field: None for field in _NODE_FIELDS}
+        cell: dict[str, object] = dict.fromkeys(_NODE_FIELDS)
         cell["text"] = value
         return cell
     return dict(value)  # the cdylib already shaped node values as the seven fields

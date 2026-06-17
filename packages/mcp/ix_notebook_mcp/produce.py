@@ -148,7 +148,7 @@ class PaneProducer:
         snapshot = {"producer": self.producer_id, "panes": panes}
         return (json.dumps(snapshot, separators=(",", ":")) + "\n").encode("utf-8")
 
-    async def start(self) -> "PaneProducer | None":
+    async def start(self) -> PaneProducer | None:
         """Bind the producer socket in the discovery directory. Best-effort: on
         failure logs to stderr and returns ``None`` so the caller keeps working."""
         try:

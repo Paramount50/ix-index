@@ -135,7 +135,7 @@ def test_non_string_literal_does_not_push() -> None:
     # A column declared/compared as non-string must not push (string-eq only),
     # so an int/float/bool literal is left to the client.
     assert push(pl.col("source") == 3) is None
-    assert push(pl.col("source") == True) is None  # noqa: E712 - exercising a bool literal
+    assert push(pl.col("source") == True) is None
 
 
 def main() -> None:

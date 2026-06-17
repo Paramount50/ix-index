@@ -24,9 +24,9 @@ from typing import Any
 import pytest
 
 # Both import paths must work.
-import linear  # noqa: E402
-from linear import triage as triage_mod  # noqa: E402
-from linear.triage import (  # noqa: E402
+import linear
+from linear import triage as triage_mod
+from linear.triage import (
     Finding,
     TriageConfig,
     TriageResult,

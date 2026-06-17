@@ -170,7 +170,7 @@ def text_parser(data: bytes) -> pl.DataFrame:
 
 
 def _normalize_host(
-    spec: "str | Mapping[str, Any]",
+    spec: str | Mapping[str, Any],
     *,
     username: str | None,
     connect_kwargs: dict[str, Any],
@@ -232,17 +232,16 @@ async def _run_one(
     The semaphore is acquired around the whole connect+run so concurrency caps
     the number of *live connections*, not just queued coroutines.
     """
-    async with sem:
-        async with asyncssh.connect(**opts) as conn:
-            # encoding=None keeps stdout as bytes so a binary payload (parquet
-            # over `cat`) survives; text parsers decode themselves.
-            result = await conn.run(command, encoding=None, check=True)
-            out = result.stdout
-            return out if isinstance(out, bytes) else bytes(out or b"")
+    async with sem, asyncssh.connect(**opts) as conn:
+        # encoding=None keeps stdout as bytes so a binary payload (parquet
+        # over `cat`) survives; text parsers decode themselves.
+        result = await conn.run(command, encoding=None, check=True)
+        out = result.stdout
+        return out if isinstance(out, bytes) else bytes(out or b"")
 
 
 async def scan(
-    hosts: Sequence["str | Mapping[str, Any]"],
+    hosts: Sequence[str | Mapping[str, Any]],
     command: str,
     *,
     parser: Parser | None = None,
@@ -346,7 +345,7 @@ async def scan(
 
 
 async def read_ndjson(
-    hosts: Sequence["str | Mapping[str, Any]"],
+    hosts: Sequence[str | Mapping[str, Any]],
     remote_path: str,
     *,
     filter_cmd: str | None = None,
@@ -365,7 +364,7 @@ async def read_ndjson(
 
 
 async def read_csv(
-    hosts: Sequence["str | Mapping[str, Any]"],
+    hosts: Sequence[str | Mapping[str, Any]],
     remote_path: str,
     *,
     filter_cmd: str | None = None,
@@ -381,7 +380,7 @@ async def read_csv(
 
 
 async def read_parquet(
-    hosts: Sequence["str | Mapping[str, Any]"],
+    hosts: Sequence[str | Mapping[str, Any]],
     remote_path: str,
     *,
     use_sftp: bool = False,
@@ -411,11 +410,10 @@ async def read_parquet(
     ]
 
     async def fetch(label: str, opts: dict[str, Any]) -> bytes:
-        async with sem:
-            async with asyncssh.connect(**opts) as conn:
-                async with conn.start_sftp_client() as sftp:
-                    async with sftp.open(remote_path, "rb") as fh:
-                        return await fh.read()
+        async with sem, asyncssh.connect(**opts) as conn:
+            async with conn.start_sftp_client() as sftp:
+                async with sftp.open(remote_path, "rb") as fh:
+                    return await fh.read()
 
     results = await asyncio.gather(
         *(fetch(label, opts) for label, opts in normalized),
@@ -444,7 +442,7 @@ async def read_parquet(
 
 
 async def read_text(
-    hosts: Sequence["str | Mapping[str, Any]"],
+    hosts: Sequence[str | Mapping[str, Any]],
     remote_path: str,
     *,
     filter_cmd: str | None = None,

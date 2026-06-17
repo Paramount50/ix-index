@@ -50,7 +50,7 @@ import polars as pl
 if TYPE_CHECKING:
     from ix_notebook_mcp.runtime import Resource
 
-__all__ = ["NixLog", "parse", "run", "build", "attrs", "eval", "ACTIVITY_TYPES", "RESULT_TYPES"]
+__all__ = ["ACTIVITY_TYPES", "RESULT_TYPES", "NixLog", "attrs", "build", "eval", "parse", "run"]
 
 __version__ = "0.1.0"
 
@@ -343,7 +343,7 @@ def parse(source: str | Iterable[str]) -> NixLog:
     return log
 
 
-def _register_live(log: NixLog) -> "Resource | None":
+def _register_live(log: NixLog) -> Resource | None:
     """Register ``log`` as a live dashboard Resource, if running in a kernel.
 
     Decoupled on purpose: outside the kernel (a test, a plain interpreter) the

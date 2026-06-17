@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     import nix as _nix_mod
     import sh as _sh_mod
 
-__all__ = ["list", "add", "remove", "prune", "Worktree"]
+__all__ = ["Worktree", "add", "list", "prune", "remove"]
 
 # `list` below intentionally shadows the builtin -- it is the natural name for the
 # listing, and nothing in this module needs the builtin by that name.
@@ -115,13 +115,13 @@ class Worktree:
     def __truediv__(self, other: str | os.PathLike[str]) -> pathlib.Path:
         return self.path / other
 
-    async def sh(self, cmd: str | builtins.list[str], **kwargs: Any) -> "_sh_mod.Output":  # noqa: ANN401 -- forwarded to sh()
+    async def sh(self, cmd: str | builtins.list[str], **kwargs: Any) -> _sh_mod.Output:  # noqa: ANN401 -- forwarded to sh()
         """Run a shell command in this worktree (bundled ``sh``, ``cwd`` threaded)."""
         from sh import sh as _sh
 
         return await _sh(cmd, cwd=str(self.path), **kwargs)
 
-    async def commit(self, message: str, *, all: bool = True) -> "_sh_mod.Output":
+    async def commit(self, message: str, *, all: bool = True) -> _sh_mod.Output:
         """Commit this worktree. With ``all`` (the default) stage everything first
         (``git add -A``), so new files are included; returns the ``git commit``
         :class:`sh.Output`."""
@@ -131,7 +131,7 @@ class Worktree:
             await _sh(["git", "-C", str(self.path), "add", "-A"], check=True, cwd=str(self.path))
         return await _sh(["git", "-C", str(self.path), "commit", "-m", message], cwd=str(self.path))
 
-    async def build(self, attr: str, *flags: str, add: bool = True, **kwargs: Any) -> "_nix_mod.NixLog":  # noqa: ANN401 -- forwarded to nix.build()
+    async def build(self, attr: str, *flags: str, add: bool = True, **kwargs: Any) -> _nix_mod.NixLog:  # noqa: ANN401 -- forwarded to nix.build()
         """``nix build`` this worktree's flake (bundled ``nix``, ``cwd`` threaded).
 
         With ``add`` (the default) ``git add -A`` runs first, because a flake only
@@ -146,7 +146,7 @@ class Worktree:
             await _sh(["git", "-C", str(self.path), "add", "-A"], check=True, cwd=str(self.path))
         return await _nix.build(attr, *flags, cwd=str(self.path), **kwargs)
 
-    async def remove(self, *, force: bool = False) -> "_sh_mod.Output":
+    async def remove(self, *, force: bool = False) -> _sh_mod.Output:
         """Remove this linked work tree (the branch is kept). ``force`` discards
         uncommitted changes in it; returns the ``git worktree remove``
         :class:`sh.Output`."""
@@ -174,7 +174,7 @@ class Worktree:
         )
 
 
-def _parse_porcelain(text: str, repo: pathlib.Path) -> "pl.DataFrame":
+def _parse_porcelain(text: str, repo: pathlib.Path) -> pl.DataFrame:
     """Parse ``git worktree list --porcelain`` (blank-line-separated stanzas)."""
     rows: builtins.list[dict[str, str | bool]] = []
     cur: dict[str, str | bool] = {}
@@ -223,7 +223,7 @@ def _parse_porcelain(text: str, repo: pathlib.Path) -> "pl.DataFrame":
     )
 
 
-def list(repo: str | os.PathLike[str] = ".") -> "pl.DataFrame":  # noqa: A001
+def list(repo: str | os.PathLike[str] = ".") -> pl.DataFrame:
     """Every linked work tree of ``repo`` as a DataFrame (path, branch, head,
     locked, prunable, current).
 
@@ -278,7 +278,7 @@ async def remove(
     *,
     repo: str | os.PathLike[str] = ".",
     force: bool = False,
-) -> "_sh_mod.Output":
+) -> _sh_mod.Output:
     """Remove the linked work tree at ``target`` (a path), keeping its branch.
 
     ``force`` discards uncommitted changes in the tree. Returns the ``git worktree
@@ -294,7 +294,7 @@ async def remove(
     return await _sh(argv, cwd=str(top))
 
 
-async def prune(repo: str | os.PathLike[str] = ".") -> "_sh_mod.Output":
+async def prune(repo: str | os.PathLike[str] = ".") -> _sh_mod.Output:
     """Prune administrative metadata for work trees whose directory is gone.
 
     Returns the ``git worktree prune`` :class:`sh.Output`.

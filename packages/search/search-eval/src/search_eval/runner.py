@@ -67,7 +67,7 @@ def run_agentic(
         progress(f"agentic: {case.id}")
         try:
             answer = agent.run_task(case)
-        except Exception as exc:  # noqa: BLE001 - record, don't abort the suite
+        except Exception as exc:
             results.append(
                 TaskResult(case=case, answer="", correct=False, reasoning="", error=str(exc))
             )

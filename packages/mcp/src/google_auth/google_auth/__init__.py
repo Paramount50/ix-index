@@ -317,7 +317,7 @@ def _consent_blocking(open_browser: bool, timeout: float) -> tuple[str, dict[str
     """
     import threading
 
-    proc = subprocess.Popen(  # noqa: S603 -- bundled gcal binary, fixed args
+    proc = subprocess.Popen(
         [_binary(), "auth", "--json"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

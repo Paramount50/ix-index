@@ -48,19 +48,19 @@ if TYPE_CHECKING:
     import httpx
 
 __all__ = [
+    "Comment",
+    "Issue",
+    "IssueAssignee",
+    "IssueState",
+    "LinearError",
+    "Project",
+    "Team",
+    "comment_create",
     "issue",
-    "issue_update",
     "issue_create",
     "issue_search",
-    "comment_create",
+    "issue_update",
     "project_create",
-    "LinearError",
-    "Issue",
-    "IssueState",
-    "IssueAssignee",
-    "Team",
-    "Project",
-    "Comment",
 ]
 
 __version__ = "0.3.0"
@@ -203,7 +203,7 @@ def _api_key() -> str:
 #
 # Production code calls _client() each time so that a key set after import
 # (common in notebooks) is always picked up.
-def _client(**kwargs: Any) -> "httpx.AsyncClient":  # noqa: ANN401 -- forwarded verbatim to httpx.AsyncClient
+def _client(**kwargs: Any) -> httpx.AsyncClient:  # noqa: ANN401 -- forwarded verbatim to httpx.AsyncClient
     """Return a fresh ``httpx.AsyncClient`` wired for the Linear GraphQL API.
 
     Keyword arguments are forwarded to the constructor, letting callers (and

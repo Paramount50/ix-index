@@ -46,14 +46,14 @@ from nox_autotriage import findings_from_conformance, config_from_env, run
 FIXTURE_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "conformance_divergences.json")
 
 
-@pytest.fixture()
+@pytest.fixture
 def report() -> dict[str, Any]:
     """Full conformance report covering all outcome kinds."""
     with open(FIXTURE_PATH) as fh:
         return json.load(fh)
 
 
-@pytest.fixture()
+@pytest.fixture
 def mismatch_report() -> dict[str, Any]:
     """Minimal report with one mismatch only."""
     return {

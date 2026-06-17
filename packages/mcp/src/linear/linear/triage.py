@@ -35,18 +35,19 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
+from collections.abc import Mapping
 
 __all__ = [
+    "MARKER_KEY",
     "Finding",
-    "TriageConfig",
-    "TriageResult",
     "LinearPort",
     "ModuleLinearPort",
+    "TriageConfig",
+    "TriageResult",
     "fingerprint",
     "marker_line",
     "triage",
-    "MARKER_KEY",
 ]
 
 # ---------------------------------------------------------------------------
@@ -99,7 +100,7 @@ class Finding:
         body_md: str,
         priority: int = 3,
         marker_fields: Mapping[str, str] | None = None,
-    ) -> "Finding":
+    ) -> Finding:
         """Convenience constructor that accepts a plain Mapping for marker_fields.
 
         ``marker_fields`` is converted to a sorted tuple of pairs so the

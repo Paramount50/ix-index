@@ -44,23 +44,24 @@ import asyncio
 import json
 import os
 import shutil
-from typing import Any, Callable, Sequence
+from typing import Any
+from collections.abc import Callable, Sequence
 
 import polars as pl
 
 __all__ = [
-    "connect",
-    "nodes",
-    "run",
-    "submit",
-    "get",
-    "put",
-    "in_kernel",
-    "spark",
-    "up",
-    "ClusterError",
     "EXEC_PORT",
     "SPARK_CONNECT_PORT",
+    "ClusterError",
+    "connect",
+    "get",
+    "in_kernel",
+    "nodes",
+    "put",
+    "run",
+    "spark",
+    "submit",
+    "up",
 ]
 
 # The fixed port each node's ix-mcp publishes its data API / `/api/exec` on, so

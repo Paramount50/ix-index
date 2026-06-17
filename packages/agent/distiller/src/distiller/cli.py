@@ -119,7 +119,7 @@ def run(args: argparse.Namespace) -> int:
         )
         try:
             result = distill.run_claude(prompt, model=args.model, claude_bin=args.claude_bin)
-        except Exception as error:  # noqa: BLE001 - one project must not sink the run
+        except Exception as error:
             print(f"[{slug}] distillation failed: {error}", file=sys.stderr)
             keep_state(project, st)
             continue

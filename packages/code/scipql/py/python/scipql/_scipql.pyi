@@ -60,22 +60,18 @@ class Relation(TypedDict):
 
 def index(project: str, output: str = ...) -> str:
     """Run rust-analyzer's SCIP indexer over ``project``; return the output path."""
-    ...
 
 
 def facts(index_path: str, root: str | None = ...) -> Facts:
     """Lower a SCIP index into its four fact relations (see ``scipql.facts``)."""
-    ...
 
 
 def query(index_path: str, program: str, root: str | None = ...) -> dict[str, Relation]:
     """Run a Soufflé ``program``; return one relation per ``.output`` declaration."""
-    ...
 
 
 def fix(index_path: str, program: str, root: str | None = ..., write: bool = ...) -> str:
     """Apply a ``fix`` program's ``edit`` relation; return the unified diff."""
-    ...
 
 
 def rename(
@@ -86,4 +82,3 @@ def rename(
     write: bool = ...,
 ) -> str:
     """Rename every occurrence whose moniker ends with ``selector``; return the diff."""
-    ...

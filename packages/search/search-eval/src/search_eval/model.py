@@ -22,7 +22,7 @@ class Hit:
     text: str
 
     @classmethod
-    def from_json(cls, obj: dict[str, Any]) -> "Hit":
+    def from_json(cls, obj: dict[str, Any]) -> Hit:
         return cls(
             path=str(obj["path"]),
             source=str(obj.get("source", "code")),

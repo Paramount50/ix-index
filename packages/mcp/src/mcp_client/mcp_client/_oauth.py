@@ -36,7 +36,8 @@ import time
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from mcp.client.auth import OAuthClientProvider

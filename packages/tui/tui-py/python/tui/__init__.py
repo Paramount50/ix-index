@@ -938,7 +938,7 @@ async def publish(path: str | None = None, *, poll: float = 0.1) -> Publisher:
 # (`Tui`, `Snapshot`, `Key`, `Pattern`, `WaitTimeout`), so it must load after
 # they are defined. Re-exported here for convenience (`from tui import Claude`);
 # `from tui.harness import Claude` works too.
-from .harness import (  # noqa: E402
+from .harness import (
     Agent as Agent,
     Claude as Claude,
     Codex as Codex,

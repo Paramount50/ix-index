@@ -33,20 +33,20 @@ if TYPE_CHECKING:
     import polars as pl
 
 __all__ = [
-    "Task",
-    "Status",
-    "Category",
     "CATEGORIES",
-    "STATUS_META",
     "CATEGORY_COLORS",
+    "SCHEMA",
+    "STATUS_META",
+    "Category",
+    "Status",
+    "Task",
+    "frame",
     "generate",
+    "load",
+    "read",
+    "seed",
     "status_of",
     "write",
-    "read",
-    "load",
-    "seed",
-    "frame",
-    "SCHEMA",
 ]
 
 Category = Literal[

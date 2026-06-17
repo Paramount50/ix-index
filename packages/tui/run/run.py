@@ -184,8 +184,7 @@ class LineRecorder:
         text = raw.decode("utf-8", errors="replace")
         if text.endswith("\n"):
             text = text[:-1]
-            if text.endswith("\r"):
-                text = text[:-1]
+            text = text.removesuffix("\r")
         delta_since_previous_line_ns = sample.elapsed_ns - self._previous_line_ended_elapsed_ns
         self._writer.write(
             {

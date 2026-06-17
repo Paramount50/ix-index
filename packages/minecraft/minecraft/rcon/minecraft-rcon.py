@@ -32,7 +32,7 @@ class RconSettings(BaseSettings):
     command: CliPositionalArg[list[str]] = _UNSET_COMMAND
 
     @classmethod
-    def settings_customise_sources(  # noqa: PLR0913
+    def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],
         init_settings: PydanticBaseSettingsSource,

@@ -63,13 +63,13 @@ import polars as pl
 
 __all__ = [
     "CHAT_DB",
-    "contacts",
     "add_contact",
-    "update_contact",
-    "delete_contact",
     "chats",
+    "contacts",
+    "delete_contact",
     "messages",
     "send",
+    "update_contact",
 ]
 
 if sys.platform != "darwin":

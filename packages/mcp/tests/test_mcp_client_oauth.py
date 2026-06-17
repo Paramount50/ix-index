@@ -36,8 +36,8 @@ import pytest_asyncio
 SRC = Path(__file__).parent / "src" / "mcp_client"
 sys.path.insert(0, str(SRC))
 
-import mcp_client  # noqa: E402
-from mcp_client import _oauth  # noqa: E402
+import mcp_client
+from mcp_client import _oauth
 
 pytestmark = pytest.mark.asyncio
 

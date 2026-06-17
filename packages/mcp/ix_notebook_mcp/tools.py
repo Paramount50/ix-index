@@ -77,7 +77,7 @@ mcp = FastMCP("ix-mcp")
 
 # One short id per live MCP session, keyed weakly by the session object so an id
 # is stable for a client's whole session and the map never pins a closed one.
-_session_ids: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+_session_ids: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 def _session_id(ctx: Context | None) -> str | None:

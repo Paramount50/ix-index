@@ -101,7 +101,7 @@ _COLUMNS: tuple[str, ...] = (
 )
 
 
-def _dtypes() -> "dict[str, _DType]":
+def _dtypes() -> dict[str, _DType]:
     import polars as pl
 
     return {
@@ -122,7 +122,7 @@ def _dtypes() -> "dict[str, _DType]":
     }
 
 
-def _to_frame(rows: "list[Hit]") -> "pl.DataFrame":
+def _to_frame(rows: list[Hit]) -> pl.DataFrame:
     try:
         import polars as pl
     except ModuleNotFoundError as exc:  # pragma: no cover - env always has polars
@@ -145,7 +145,7 @@ def _to_frame(rows: "list[Hit]") -> "pl.DataFrame":
     return df.select([*_COLUMNS, *extra])
 
 
-def _with_framed_doc(fn: "_Framed", doc: str) -> "_Framed":
+def _with_framed_doc(fn: _Framed, doc: str) -> _Framed:
     """Set ``fn.__doc__`` and return it.
 
     Assigning ``wrapper.__doc__`` directly inside ``_framed`` trips strict type
@@ -158,7 +158,7 @@ def _with_framed_doc(fn: "_Framed", doc: str) -> "_Framed":
     return fn
 
 
-def _framed(raw: "_Raw") -> "_Framed":
+def _framed(raw: _Raw) -> _Framed:
     """Wrap a native PyO3 coroutine so awaiting it yields a polars DataFrame.
 
     ``functools.wraps`` copies the binding's signature and docstring, so
@@ -167,7 +167,7 @@ def _framed(raw: "_Raw") -> "_Framed":
     """
 
     @functools.wraps(raw)
-    async def wrapper(*args: object, **kwargs: object) -> "pl.DataFrame":
+    async def wrapper(*args: object, **kwargs: object) -> pl.DataFrame:
         return _to_frame(await raw(*args, **kwargs))
 
     return _with_framed_doc(
