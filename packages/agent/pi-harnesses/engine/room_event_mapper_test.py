@@ -47,35 +47,35 @@ CREATE TABLE resources (
 
 class CaptureEmitter:
     def __init__(self) -> None:
-        self.events = []
+        self.events: list[dict[str, object]] = []
 
-    def emit(self, event):
+    def emit(self, event: dict[str, object]) -> None:
         self.events.append(event)
 
 
 class MapperTest(unittest.TestCase):
     def test_maps_pi_lifecycle_events(self) -> None:
-        self.assertEqual(mapper.map_pi_event({"type": "turn_start"})["type"], "turn_started")
+        assert mapper.map_pi_event({"type": "turn_start"})["type"] == "turn_started"
         text = mapper.map_pi_event({"type": "message_update", "delta": "hi"})
-        self.assertEqual(text["type"], "text_delta")
-        self.assertEqual(text["delta"], "hi")
+        assert text["type"] == "text_delta"
+        assert text["delta"] == "hi"
         text_start = mapper.map_pi_event(
             {"type": "message_update", "assistantMessageEvent": {"type": "text_start"}}
         )
-        self.assertEqual(text_start["type"], "pi_event")
+        assert text_start["type"] == "pi_event"
         text_delta = mapper.map_pi_event(
             {"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hi"}}
         )
-        self.assertEqual(text_delta["type"], "text_delta")
-        self.assertEqual(text_delta["delta"], "hi")
+        assert text_delta["type"] == "text_delta"
+        assert text_delta["delta"] == "hi"
         text_end = mapper.map_pi_event(
             {"type": "message_update", "assistantMessageEvent": {"type": "text_end", "delta": "hi"}}
         )
-        self.assertEqual(text_end["type"], "pi_event")
-        self.assertEqual(mapper.map_pi_event({"type": "tool_execution_start", "id": "t1"})["type"], "tool_call_started")
-        self.assertEqual(mapper.map_pi_event({"type": "turn_end"})["type"], "turn_completed")
+        assert text_end["type"] == "pi_event"
+        assert mapper.map_pi_event({"type": "tool_execution_start", "id": "t1"})["type"] == "tool_call_started"
+        assert mapper.map_pi_event({"type": "turn_end"})["type"] == "turn_completed"
 
-    def _run_lifecycle(self, events):
+    def _run_lifecycle(self, events: list[dict[str, object]]) -> list[dict[str, object]]:
         emitter = CaptureEmitter()
         lifecycle = mapper.TurnLifecycle(emitter)  # type: ignore[arg-type]
         for event in events:
@@ -95,11 +95,11 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertNotIn("error", completed[0])
-        self.assertNotIn("status", completed[0])
+        assert len(completed) == 1
+        assert "error" not in completed[0]
+        assert "status" not in completed[0]
         # The terminal turn_completed lands before agent_end, as in the raw stream.
-        self.assertEqual([event["pi_type"] for event in emitted[-2:]], ["turn_end", "agent_end"])
+        assert [event["pi_type"] for event in emitted[-2:]] == ["turn_end", "agent_end"]
 
     def test_retried_then_succeeded_emits_one_terminal_turn_completed(self) -> None:
         emitted = self._run_lifecycle(
@@ -119,12 +119,12 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertNotIn("error", completed[0])
-        self.assertNotIn("status", completed[0])
+        assert len(completed) == 1
+        assert "error" not in completed[0]
+        assert "status" not in completed[0]
         # The first attempt's turn_end is suppressed entirely; the retry
         # bookkeeping events still pass through for observability.
-        self.assertIn("auto_retry_start", [event.get("pi_type") for event in emitted])
+        assert "auto_retry_start" in [event.get("pi_type") for event in emitted]
 
     def test_all_attempts_failed_emits_one_turn_completed_with_error(self) -> None:
         failed_attempt = [
@@ -134,18 +134,12 @@ class MapperTest(unittest.TestCase):
             {"type": "turn_end"},
         ]
         emitted = self._run_lifecycle(
-            [{"type": "agent_start"}]
-            + failed_attempt
-            + [{"type": "agent_end", "willRetry": True}, {"type": "auto_retry_start", "attempt": 2}]
-            + failed_attempt
-            + [{"type": "agent_end", "willRetry": True}, {"type": "auto_retry_start", "attempt": 3}]
-            + failed_attempt
-            + [{"type": "agent_end"}]
+            [{"type": "agent_start"}, *failed_attempt, {"type": "agent_end", "willRetry": True}, {"type": "auto_retry_start", "attempt": 2}, *failed_attempt, {"type": "agent_end", "willRetry": True}, {"type": "auto_retry_start", "attempt": 3}, *failed_attempt, {"type": "agent_end"}]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertEqual(completed[0]["status"], "error")
-        self.assertEqual(completed[0]["error"], "overloaded")
+        assert len(completed) == 1
+        assert completed[0]["status"] == "error"
+        assert completed[0]["error"] == "overloaded"
 
     def test_stream_ending_after_turn_end_still_flushes(self) -> None:
         # No agent_end (pi crashed or stream cut): close() must still emit the
@@ -158,8 +152,8 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertEqual(completed[0]["error"], "boom")
+        assert len(completed) == 1
+        assert completed[0]["error"] == "boom"
 
     def test_suppressed_attempt_usage_lands_on_terminal_event(self) -> None:
         # Usage billed for a suppressed retry attempt must not vanish: it rides
@@ -178,10 +172,10 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertEqual(completed[0]["usage"], {"input": 12, "output": 40})
-        self.assertEqual(completed[0]["retried_usage"], [{"input": 10, "output": 1}])
-        self.assertNotIn("error", completed[0])
+        assert len(completed) == 1
+        assert completed[0]["usage"] == {"input": 12, "output": 40}
+        assert completed[0]["retried_usage"] == [{"input": 10, "output": 1}]
+        assert "error" not in completed[0]
 
     def test_fallback_event_does_not_double_count_its_own_usage(self) -> None:
         # Two suppressed attempts, then the stream dies: the fallback terminal
@@ -198,10 +192,10 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertEqual(completed[0]["usage"], {"input": 20})
-        self.assertEqual(completed[0]["retried_usage"], [{"input": 10}])
-        self.assertEqual(completed[0]["status"], "error")
+        assert len(completed) == 1
+        assert completed[0]["usage"] == {"input": 20}
+        assert completed[0]["retried_usage"] == [{"input": 10}]
+        assert completed[0]["status"] == "error"
 
     def test_stream_cut_after_retry_announcement_still_terminates_turn(self) -> None:
         # willRetry suppressed the attempt's turn_end, then the stream died
@@ -217,10 +211,10 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertEqual(completed[0]["status"], "error")
-        self.assertEqual(completed[0]["error"], "overloaded")
-        self.assertEqual(emitted[-1], completed[0])
+        assert len(completed) == 1
+        assert completed[0]["status"] == "error"
+        assert completed[0]["error"] == "overloaded"
+        assert emitted[-1] == completed[0]
 
     def test_stream_cut_during_second_attempt_uses_suppressed_fallback(self) -> None:
         # The retry started (turn_start arrived) but died before its turn_end:
@@ -237,9 +231,9 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 1)
-        self.assertEqual(completed[0]["status"], "error")
-        self.assertEqual(completed[0]["error"], "overloaded")
+        assert len(completed) == 1
+        assert completed[0]["status"] == "error"
+        assert completed[0]["error"] == "overloaded"
 
     def test_multi_turn_run_keeps_each_turn_completed(self) -> None:
         # Consecutive turns in one agent run are real completions, not retries.
@@ -253,12 +247,12 @@ class MapperTest(unittest.TestCase):
             ]
         )
         completed = [event for event in emitted if event["type"] == "turn_completed"]
-        self.assertEqual(len(completed), 2)
-        self.assertNotIn("error", completed[0])
+        assert len(completed) == 2
+        assert "error" not in completed[0]
 
     def test_strips_command_separator(self) -> None:
-        self.assertEqual(mapper._strip_command_separator(["--", "pi", "--mode", "json"]), ["pi", "--mode", "json"])
-        self.assertEqual(mapper._strip_command_separator(["pi"]), ["pi"])
+        assert mapper._strip_command_separator(["--", "pi", "--mode", "json"]) == ["pi", "--mode", "json"]
+        assert mapper._strip_command_separator(["pi"]) == ["pi"]
 
     def test_polls_cells_and_resources_from_store(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -295,18 +289,18 @@ class MapperTest(unittest.TestCase):
             emitter = CaptureEmitter()
             poller = mapper.StorePoller(store, 0.1, emitter)  # type: ignore[arg-type]
             poller.poll_once()
-            self.assertEqual([event["type"] for event in emitter.events], ["cell_update", "cell_update", "resource_update"])
+            assert [event["type"] for event in emitter.events] == ["cell_update", "cell_update", "resource_update"]
             execution = emitter.events[0]
-            self.assertEqual(execution["cell_kind"], "execution")
-            self.assertEqual(execution["job"]["code"], "Result.text('ok')")
-            self.assertEqual(execution["job"]["code_html"], "")
-            self.assertEqual(execution["job"]["outputs"][0]["text"], "ok")
-            self.assertEqual(emitter.events[1]["cell_kind"], "presentation")
-            self.assertEqual(emitter.events[1]["cell"]["title"], "Answer")
-            self.assertEqual(emitter.events[2]["resource"]["html"], "<pre>hi</pre>")
+            assert execution["cell_kind"] == "execution"
+            assert execution["job"]["code"] == "Result.text('ok')"
+            assert execution["job"]["code_html"] == ""
+            assert execution["job"]["outputs"][0]["text"] == "ok"
+            assert emitter.events[1]["cell_kind"] == "presentation"
+            assert emitter.events[1]["cell"]["title"] == "Answer"
+            assert emitter.events[2]["resource"]["html"] == "<pre>hi</pre>"
 
             poller.poll_once()
-            self.assertEqual(len(emitter.events), 3)
+            assert len(emitter.events) == 3
 
     def test_polls_removed_presentation_cell(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -323,7 +317,7 @@ class MapperTest(unittest.TestCase):
             emitter = CaptureEmitter()
             poller = mapper.StorePoller(store, 0.1, emitter)  # type: ignore[arg-type]
             poller.poll_once()
-            self.assertEqual(emitter.events[-1]["cell"]["id"], "cell-removed")
+            assert emitter.events[-1]["cell"]["id"] == "cell-removed"
 
             conn = sqlite3.connect(store)
             conn.execute("DELETE FROM cells WHERE id = ?", ("cell-removed",))
@@ -332,11 +326,11 @@ class MapperTest(unittest.TestCase):
 
             poller.poll_once()
             removed = emitter.events[-1]
-            self.assertEqual(removed["type"], "cell_update")
-            self.assertEqual(removed["cell_kind"], "presentation")
-            self.assertEqual(removed["id"], "cell-removed")
-            self.assertTrue(removed["removed"])
-            self.assertTrue(removed["cell"]["removed"])
+            assert removed["type"] == "cell_update"
+            assert removed["cell_kind"] == "presentation"
+            assert removed["id"] == "cell-removed"
+            assert removed["removed"]
+            assert removed["cell"]["removed"]
 
     def test_cell_query_failure_does_not_emit_removals(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -353,7 +347,7 @@ class MapperTest(unittest.TestCase):
             emitter = CaptureEmitter()
             poller = mapper.StorePoller(store, 0.1, emitter)  # type: ignore[arg-type]
             poller.poll_once()
-            self.assertEqual(emitter.events[-1]["cell"]["id"], "cell-kept")
+            assert emitter.events[-1]["cell"]["id"] == "cell-kept"
 
             conn = sqlite3.connect(store)
             conn.execute("DROP TABLE cells")
@@ -362,7 +356,7 @@ class MapperTest(unittest.TestCase):
 
             before = len(emitter.events)
             poller.poll_once()
-            self.assertEqual(len(emitter.events), before)
+            assert len(emitter.events) == before
 
     def test_spawned_command_gets_store_env(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -390,9 +384,9 @@ class MapperTest(unittest.TestCase):
                     os.environ["ENV_SEEN"] = old_env_seen
                 else:
                     os.environ.pop("ENV_SEEN", None)
-            self.assertEqual(rc, 0)
-            self.assertEqual(env_seen.read_text(), str(store))
-            self.assertEqual(os.environ.get("IX_MCP_STORE"), old)
+            assert rc == 0
+            assert env_seen.read_text() == str(store)
+            assert os.environ.get("IX_MCP_STORE") == old
 
 
 if __name__ == "__main__":

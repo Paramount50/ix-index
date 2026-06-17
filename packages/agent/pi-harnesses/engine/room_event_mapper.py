@@ -19,7 +19,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 
 Json = dict[str, Any]
@@ -244,7 +244,7 @@ def _connect(path: Path) -> sqlite3.Connection | None:
         return None
 
 
-def _load_json(value: Any, fallback: Any) -> Any:
+def _load_json(value: object, fallback: list[Any] | Json) -> list[Any] | Json:
     if not isinstance(value, str) or value == "":
         return fallback
     try:
@@ -367,8 +367,7 @@ class StorePoller:
                 "FROM executions ORDER BY started_at ASC",
             )
             if execution_rows is not None:
-                for row in execution_rows:
-                    events.append(_execution_event(row))
+                events.extend(_execution_event(row) for row in execution_rows)
 
             cell_rows = _rows(
                 conn,
@@ -386,23 +385,22 @@ class StorePoller:
                 "SELECT id, title, kind, html, status, created_at, updated_at FROM resources ORDER BY created_at ASC",
             )
             if resource_rows is not None:
-                for row in resource_rows:
-                    events.append(_resource_event(row))
+                events.extend(_resource_event(row) for row in resource_rows)
         finally:
             conn.close()
 
         if presentation_cell_ids is not None and self._presentation_cell_ids is not None:
-            for removed_id in sorted(self._presentation_cell_ids - presentation_cell_ids):
-                events.append(
-                    {
-                        "type": "cell_update",
-                        "source": "ix-mcp",
-                        "cell_kind": "presentation",
-                        "id": removed_id,
-                        "removed": True,
-                        "cell": {"id": removed_id, "removed": True},
-                    }
-                )
+            events.extend(
+                {
+                    "type": "cell_update",
+                    "source": "ix-mcp",
+                    "cell_kind": "presentation",
+                    "id": removed_id,
+                    "removed": True,
+                    "cell": {"id": removed_id, "removed": True},
+                }
+                for removed_id in sorted(self._presentation_cell_ids - presentation_cell_ids)
+            )
         if presentation_cell_ids is not None:
             self._presentation_cell_ids = presentation_cell_ids
 
@@ -421,7 +419,7 @@ def _reader(lines: queue.Queue[str | None]) -> None:
     lines.put(None)
 
 
-def _read_stream(stream, lines: queue.Queue[str | None]) -> None:
+def _read_stream(stream: TextIO, lines: queue.Queue[str | None]) -> None:
     try:
         with stream:
             for line in stream:
