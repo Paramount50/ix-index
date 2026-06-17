@@ -14,7 +14,7 @@ let
   # in the cdylib are fine: this module never leaves the Nix environment.
   tuiPythonSource = builtins.path {
     name = "tui-py-python-source";
-    path = ../tui-py/python;
+    path = ../tui/tui-py/python;
   };
   tuiModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-tui-python-module"
@@ -56,7 +56,7 @@ let
   # macOS dev.
   searchPythonSource = builtins.path {
     name = "search-py-python-source";
-    path = ../search-py/python;
+    path = ../search/search-py/python;
   };
   searchModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-search-python-module"
@@ -96,7 +96,7 @@ let
   # shared workspace graph, so it works on Linux and macOS dev alike.
   astlogPythonSource = builtins.path {
     name = "astlog-py-python-source";
-    path = ../astlog/py/python;
+    path = ../code/astlog/py/python;
   };
   astlogModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-astlog-python-module"
@@ -137,7 +137,7 @@ let
   # exposes facts/query/fix/rename over an already-built index.scip.)
   scipqlPythonSource = builtins.path {
     name = "scipql-py-python-source";
-    path = ../scipql/py/python;
+    path = ../code/scipql/py/python;
   };
   scipqlModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-scipql-python-module"
