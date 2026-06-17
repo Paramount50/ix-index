@@ -23,6 +23,9 @@ The repo is migrating every package off `ty` onto strict checking; flip a packag
 to `pyChecker = "zuban"` once its sources are fully annotated and clean. Disable
 the check (`check = false`) only when the package has a deliberate reason.
 
-Explicit annotations are also enforced repo-wide by the `ruff-ann` lint stage
-(`nix run .#lint`), scoped to an allowlist of migrated directories that grows
-until it covers the whole tree.
+Annotation and correctness enforcement is per-package, driven by that one
+`pyChecker` flag: a migrated package's build runs both checkers, an unmigrated
+(`ty`) package does not. Migration progress lives in exactly one place (the flag
+per package), not a second allowlist. Once every package is on `"zuban"`, a
+whole-repo `ruff check --select ANN .` lint stage can replace per-package
+enforcement with a single tree-wide gate.
