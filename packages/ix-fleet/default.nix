@@ -14,6 +14,7 @@ let
     pname = "ix-fleet";
     version = "0.1.0";
     srcRoot = ./.;
+    pyChecker = "zuban";
   };
 
   jsonFormat = pkgs.formats.json { };
