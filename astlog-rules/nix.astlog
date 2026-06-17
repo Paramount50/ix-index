@@ -484,6 +484,20 @@
 (lint no-path-flake-ref error
   "whole-tree `path:` flake refs copy the working tree byte-for-byte; use `.#...`, `git+file:///abs/path`, a relative `path:./<subtree>` input, or a proper flake input")
 
+;; no-parent-path: a `../` (parent-directory) path literal reaches across a
+;; directory boundary, so moving the file silently breaks the reference. Reach
+;; cross-tree through a named handle instead: `ix.<helper>` / `index.lib.<helper>`
+;; for code, `ix.paths.<root>` (or `index.lib.paths.<root>`) + a relative string
+;; for a file path, or the package registry for a sibling package. Downward
+;; `./...` paths are fine. Matches the `..` segment in a path literal only, so
+;; comments and strings (e.g. a `"../bad"` traversal-rejection test fixture) are
+;; never flagged.
+(rule (no-parent-path n)
+  (match nix "(path_expression) @n")
+  (text-match n "(^|/)\\.\\.(/|$)"))
+(lint no-parent-path error
+  "relative parent path `../` reaches across a directory; use ix.<helper> / index.lib, ix.paths.<root> + a relative string, or the package registry instead of a `../` literal")
+
 ;; no-pkgs-lib: `pkgs.lib.X` reaches through `pkgs`. Use the bare `lib`
 ;; binding (or `inherit (pkgs) lib;`).
 (rule (no-pkgs-lib n)
