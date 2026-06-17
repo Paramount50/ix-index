@@ -15,6 +15,7 @@ resources, and live namespace as Loro panes to the shared ``dashboard`` hub
 from __future__ import annotations
 
 import hmac
+import sqlite3
 
 from aiohttp import web
 
@@ -27,7 +28,7 @@ from .config import Config
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", ""})
 
 
-def build_app(config: Config, conn) -> web.Application:
+def build_app(config: Config, conn: sqlite3.Connection) -> web.Application:
     """Assemble the data API over an open store ``conn``.
 
     Split out of :func:`start` so the routes (notably the token-gated

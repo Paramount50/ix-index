@@ -1,3 +1,4 @@
+# ruff: noqa: ANN401 -- introspect handles arbitrary Python objects; Any is the correct type throughout
 """Describe the live values a cell's identifiers are bound to.
 
 Runs *inside the kernel* (imported by :mod:`ix_notebook_mcp.runtime`), so it sees
@@ -22,6 +23,7 @@ import reprlib
 import sys
 import types
 from itertools import islice
+from typing import Any
 
 # A cell can mention many names; cap how many we resolve so a huge generated cell
 # cannot blow up the per-row payload. The cell's own code bounds the realistic
@@ -72,7 +74,7 @@ def cell_bindings(code: str, ns: dict, *, max_names: int = _MAX_NAMES) -> dict[s
             continue
         try:
             out[name] = describe(ns[name])
-        except Exception:
+        except Exception:  # noqa: S112 -- intentional: skip unintrospectable values rather than failing
             # A value whose own introspection raises (an exotic __getattr__, a
             # property with side effects) simply contributes no hint.
             continue
@@ -140,7 +142,7 @@ def binding_names(code: str) -> tuple[set[str], set[str]]:
     return assigned, used
 
 
-def describe(value) -> dict:
+def describe(value: Any) -> dict:
     """A compact descriptor for one live value.
 
     Shape: ``{kind, type, summary, detail}`` plus an optional ``def`` of
@@ -275,7 +277,7 @@ def namespace_rows(
     return rows
 
 
-def _row(name, value, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> dict | None:
+def _row(name: str, value: Any, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> dict | None:
     """Build one namespace row for ``name``/``value``, the single construction
     path shared by the top level and the recursion.
 
@@ -325,7 +327,7 @@ def _elision_row(extra: int) -> dict:
     return {"name": "…", "type": "", "kind": "object", "repr": f"+{extra} more", "size": 0, "shape": ""}
 
 
-def _children(value, kind: str, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> list[dict]:
+def _children(value: Any, kind: str, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> list[dict]:
     """Rows for the entries of an expandable container, in natural order.
 
     Bounded to ``breadth`` real children plus at most one elision marker, and it
@@ -353,7 +355,7 @@ def _children(value, kind: str, *, depth: int, max_depth: int, breadth: int, bud
     return []
 
 
-def _mapping_children(value, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> list[dict]:
+def _mapping_children(value: Any, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> list[dict]:
     """``key -> value`` rows for a dict, keyed by a short rendering of the key.
 
     ``islice`` over ``value.items()`` so we touch at most ``breadth + 1`` pairs of
@@ -382,7 +384,7 @@ def _mapping_children(value, *, depth: int, max_depth: int, breadth: int, budget
     return rows
 
 
-def _sequence_children(value, *, depth: int, max_depth: int, breadth: int, budget: list[int], indexed: bool) -> list[dict]:
+def _sequence_children(value: Any, *, depth: int, max_depth: int, breadth: int, budget: list[int], indexed: bool) -> list[dict]:
     """Element rows for a list/tuple/set, ``indexed`` choosing ``"[i]"`` names
     (ordered sequences) versus the element repr (unordered sets)."""
     rows: list[dict] = []
@@ -404,7 +406,7 @@ def _sequence_children(value, *, depth: int, max_depth: int, breadth: int, budge
     return rows
 
 
-def _object_children(value, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> list[dict]:
+def _object_children(value: Any, *, depth: int, max_depth: int, breadth: int, budget: list[int]) -> list[dict]:
     """Rows for a plain object's public instance attributes.
 
     Conservative on purpose: only the instance ``__dict__`` (via ``vars``), never
@@ -428,7 +430,7 @@ def _object_children(value, *, depth: int, max_depth: int, breadth: int, budget:
             continue
         try:
             member = members[attr]
-        except Exception:
+        except Exception:  # noqa: S112 -- intentional: skip attributes whose descriptor access raises
             continue
         # Skip methods/functions bound on the instance: they are behavior, not
         # the object's data, and clutter the browsable view.
@@ -451,7 +453,7 @@ def _object_children(value, *, depth: int, max_depth: int, breadth: int, budget:
     return rows
 
 
-def _ns_shape(value, kind: str) -> str:
+def _ns_shape(value: Any, kind: str) -> str:
     """Dims for an array (``50000×784``) or frame (``rows×cols``), else empty."""
     if kind == "array":
         try:
@@ -466,13 +468,13 @@ def _ns_shape(value, kind: str) -> str:
     return ""
 
 
-def _describe_text(value, type_name: str) -> dict:
+def _describe_text(value: Any, type_name: str) -> dict:
     n = len(value)
     preview = _repr.repr(value)
     return {"kind": "text", "type": type_name, "summary": f"{preview} · {n}", "detail": preview}
 
 
-def _describe_module(value, type_name: str) -> dict:
+def _describe_module(value: Any, type_name: str) -> dict:
     name = getattr(value, "__name__", "?")
     out = {"kind": "module", "type": type_name, "summary": f"module {name}", "detail": _doc_head(value)}
     location = _source_location(value)
@@ -481,7 +483,7 @@ def _describe_module(value, type_name: str) -> dict:
     return out
 
 
-def _describe_callable(value, type_name: str) -> dict:
+def _describe_callable(value: Any, type_name: str) -> dict:
     name = getattr(value, "__name__", type_name)
     is_class = isinstance(value, type)
     try:
@@ -508,9 +510,9 @@ def _describe_callable(value, type_name: str) -> dict:
     return out
 
 
-def _describe_polars_df(value, type_name: str) -> dict:
+def _describe_polars_df(value: Any, type_name: str) -> dict:
     rows, cols = value.height, value.width
-    schema = _schema_lines(zip(value.columns, value.dtypes), cols)
+    schema = _schema_lines(zip(value.columns, value.dtypes, strict=False), cols)
     return {
         "kind": "dataframe",
         "type": type_name,
@@ -519,13 +521,13 @@ def _describe_polars_df(value, type_name: str) -> dict:
     }
 
 
-def _describe_polars_lazy(value, type_name: str) -> dict:
+def _describe_polars_lazy(value: Any, type_name: str) -> dict:
     detail = "LazyFrame (not yet collected)"
     try:
         schema = value.collect_schema()
         lines = _schema_lines(schema.items(), len(schema))
         detail = f"LazyFrame · {len(schema)} cols\n{lines}"
-    except Exception:
+    except Exception:  # noqa: S110 -- schema resolution may fail for complex lazy plans; name-only fallback
         # An optimizer that cannot resolve the schema cheaply: name only.
         pass
     return {"kind": "lazyframe", "type": type_name, "summary": "LazyFrame", "detail": detail}
@@ -537,7 +539,7 @@ def _describe_polars_lazy(value, type_name: str) -> dict:
 _MAX_SCHEMA_COLS = 24
 
 
-def _schema_lines(pairs, total: int) -> str:
+def _schema_lines(pairs: Any, total: int) -> str:
     """Up to ``_MAX_SCHEMA_COLS`` ``name: dtype`` lines from ``pairs``, with a
     ``… (+N more)`` tail when the frame is wider."""
     lines = [f"  {name}: {dtype}" for name, dtype in islice(pairs, _MAX_SCHEMA_COLS)]
@@ -546,7 +548,7 @@ def _schema_lines(pairs, total: int) -> str:
     return "\n".join(lines)
 
 
-def _describe_ndarray(value, type_name: str) -> dict:
+def _describe_ndarray(value: Any, type_name: str) -> dict:
     shape = "×".join(str(d) for d in value.shape) or "scalar"
     dtype = str(value.dtype)
     return {
@@ -557,7 +559,7 @@ def _describe_ndarray(value, type_name: str) -> dict:
     }
 
 
-def _doc_head(value) -> str:
+def _doc_head(value: Any) -> str:
     """The first line of an object's docstring, if any."""
     doc = inspect.getdoc(value)
     if not doc:
@@ -566,7 +568,7 @@ def _doc_head(value) -> str:
     return first if len(first) <= 120 else first[:119] + "…"
 
 
-def _source_location(value) -> str | None:
+def _source_location(value: Any) -> str | None:
     """``"file:line"`` for a value with on-disk source, else None.
 
     This is the go-to-definition payload: where the function, class, or module is
@@ -598,7 +600,7 @@ def _compact_int(n: int) -> str:
     return str(n)
 
 
-def _looks_like_polars_df(value) -> bool:
+def _looks_like_polars_df(value: Any) -> bool:
     return (
         type(value).__module__.split(".", 1)[0] == "polars"
         and hasattr(value, "height")
@@ -608,7 +610,7 @@ def _looks_like_polars_df(value) -> bool:
     )
 
 
-def _looks_like_polars_lazy(value) -> bool:
+def _looks_like_polars_lazy(value: Any) -> bool:
     return (
         type(value).__module__.split(".", 1)[0] == "polars"
         and type(value).__name__ == "LazyFrame"
@@ -616,7 +618,7 @@ def _looks_like_polars_lazy(value) -> bool:
     )
 
 
-def _looks_like_ndarray(value) -> bool:
+def _looks_like_ndarray(value: Any) -> bool:
     return (
         type(value).__module__.split(".", 1)[0] == "numpy"
         and hasattr(value, "shape")

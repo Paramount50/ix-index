@@ -1,3 +1,4 @@
+# ruff: noqa: ANN401 -- runtime handles arbitrary Python objects; Any is the correct type throughout
 """Kernel-side runtime: the part that runs *inside* the ipykernel.
 
 It is loaded once per kernel by the shipped IPython startup script
@@ -31,6 +32,7 @@ import ast
 import asyncio
 import base64
 import binascii
+import contextlib
 import contextvars
 import dataclasses
 import inspect
@@ -38,13 +40,14 @@ import json
 import os
 import pathlib
 import re
+import signal
 import sys
 import time
 import traceback
 import types
 import uuid
 from collections.abc import Callable, Mapping
-from typing import overload
+from typing import TYPE_CHECKING, Any, overload
 
 from . import registry
 
@@ -130,20 +133,18 @@ def _rename_current_job(name: str) -> None:
         return
     job.name = name
     if _store is not None and _store_conn is not None:
-        try:
+        with contextlib.suppress(Exception):  # best-effort: a store write must not abort user code
             _store.rename(_store_conn, id=job.id, name=name)
-        except Exception:
-            pass
 
 
 class _Tee:
     """sys.stdout/err replacement that routes each write to the *current task's*
     job buffer (so concurrent jobs keep separate output) plus the real stream."""
 
-    def __init__(self, original):
+    def __init__(self, original: Any) -> None:
         self._original = original
 
-    def write(self, s):
+    def write(self, s: str) -> int:
         job = _ix_current.get()
         if job is not None:
             # Job output is captured here (and persisted to the store) rather than
@@ -153,14 +154,11 @@ class _Tee:
             return len(s)
         return self._original.write(s)
 
-    def flush(self):
-        try:
+    def flush(self) -> None:
+        with contextlib.suppress(Exception):  # flush failures on the wrapped kernel stream are non-fatal
             self._original.flush()
-        except Exception:
-            # Flush failures on the wrapped kernel stream are non-fatal.
-            pass
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         return getattr(self._original, name)
 
 
@@ -190,7 +188,7 @@ class Job:
     """A single ``python_exec`` execution: an awaitable handle over the asyncio
     task running the code, with its captured output, result, and status."""
 
-    def __init__(self, code: str, name: str | None = None, budget: float = 15.0, kind: str = "cell"):
+    def __init__(self, code: str, name: str | None = None, budget: float = 15.0, kind: str = "cell") -> None:
         self.id = uuid.uuid4().hex[:8]
         self.code = code
         self.name = name or self.id
@@ -344,7 +342,7 @@ class Job:
         return self.status == "done"
 
     @property
-    def result(self):
+    def result(self) -> Result | None:
         """This run's final value -- the `Result` the cell produced (or the one
         auto-wrapped from a bare displayable final expression like a DataFrame).
 
@@ -381,10 +379,10 @@ class Job:
             await asyncio.wait({self.task}, timeout=timeout)
         return self
 
-    def __await__(self):
+    def __await__(self) -> Any:
         # `await jobs['id']` should yield the job's result, but the runner task
         # returns None, so wait for it then hand back the captured result.
-        async def _await_result():
+        async def _await_result() -> Result | None:
             await self.task
             return self._result
 
@@ -398,7 +396,7 @@ class Job:
         return head + ("\n" + out if out else "")
 
 
-def _llm_text(value):
+def _llm_text(value: Any) -> str | None:
     """Coerce a model-facing text field to ``str`` (or None to keep a default).
 
     ``llm_result`` flows into string paths (the job summary, ``Job.tail``
@@ -416,7 +414,7 @@ def _llm_text(value):
     return _safe_repr(value)
 
 
-def _result_from_text(cls, value, *, html: str | None = None) -> Result:
+def _result_from_text(cls: type, value: Any, *, html: str | None = None) -> Result:
     """The ``Result.text(...)`` constructor body (see :class:`_TextDescriptor`):
     a Result that shows the same text to the human and the model. Pass ``html``
     to give the human a richer view than the plain text."""
@@ -497,7 +495,7 @@ class Result:
     # value (so you never lose one to a silent positional). For full control give
     # the keywords, which always win: `Result(user_html=..., llm_result=...,
     # llm_images=[...])`.
-    def __init__(self, *values, user_html=None, llm_result=None, llm_images=None):
+    def __init__(self, *values: Any, user_html: str | None = None, llm_result: str | None = None, llm_images: list | None = None) -> None:
         llm_result = _llm_text(llm_result)
         if user_html is not None:
             self.user_html = user_html
@@ -535,7 +533,7 @@ class Result:
         return cls(user_html=user, llm_result=msg)
 
     @classmethod
-    def of(cls, value, *, llm_result: str | None = None) -> Result:
+    def of(cls, value: Any, *, llm_result: str | None = None) -> Result:
         """Wrap any value: render it richly for the human (a DataFrame as a
         table, a figure as an image, anything else as its display HTML or repr)
         and hand the model concise text. For a polars DataFrame the model text is
@@ -639,7 +637,7 @@ class Result:
             user = f'<pre class="ix-result">{_escape_html(text_view)}</pre>'
         return cls(user_html=user, llm_result=text_view)
 
-    def _repr_mimebundle_(self, **_kwargs) -> dict:
+    def _repr_mimebundle_(self, **_kwargs: Any) -> dict:
         # IPython's display protocol: html is the human view (the dashboard
         # prefers it); IX_LLM_MIME carries the model's text+images, which the
         # server unpacks and the dashboard ignores; text/plain is the fallback.
@@ -662,7 +660,7 @@ class Result:
         return self.llm_result or ""
 
 
-def _as_frame_if_tabular(value):
+def _as_frame_if_tabular(value: Any) -> Any:
     """A mapping (a config dict, counts) or a list of mappings (records) is
     tabular: render it as a polars frame -- a styled table for the human, compact
     CSV for you -- rather than a raw dict/list repr. Anything else is returned
@@ -679,12 +677,10 @@ def _as_frame_if_tabular(value):
         # recursive nushell-style sub-table rather than a clipped repr. Scalar or
         # heterogeneous values fall back to the flat key/value repr below.
         if all(isinstance(v, Mapping) for v in vals):
-            try:
+            with contextlib.suppress(Exception):  # best-effort: fall back to flat repr on any polars error
                 return pl.DataFrame(
                     {"key": [str(k) for k in value], "value": pl.Series([dict(v) for v in vals])}
                 )
-            except Exception:
-                pass
         return pl.DataFrame(
             {"key": [str(k) for k in value], "value": [_safe_repr(v) for v in value.values()]}
         )
@@ -706,14 +702,14 @@ def _as_frame_if_tabular(value):
     return value
 
 
-def _is_rich_element(value) -> bool:
+def _is_rich_element(value: Any) -> bool:
     """True if ``value`` carries its own rich view (a DataFrame, a figure/image,
     an htpy element, or a Result), so flattening it into a one-column frame would
     throw that view away. Plain scalars and containers are not rich."""
     return isinstance(value, Result) or _is_polars_df(value) or _is_displayable(value)
 
 
-def _is_multi_rich(value) -> bool:
+def _is_multi_rich(value: Any) -> bool:
     """True for a non-empty list/tuple that carries at least one rich element, so
     ``Result.of`` should stack each element's view instead of coercing the whole
     sequence to a single table. A list/tuple of plain scalars (or of mappings)
@@ -722,7 +718,7 @@ def _is_multi_rich(value) -> bool:
     return isinstance(value, (list, tuple)) and bool(value) and any(_is_rich_element(v) for v in value)
 
 
-def _result_from_values(values, *, llm_result=None):
+def _result_from_values(values: Any, *, llm_result: str | None = None) -> Result:
     """Render several values as one Result: each value's rich view stacked for the
     human (so `Result(a, b)` shows BOTH, never just the first), their reprs joined
     for you. `llm_result` overrides the joined model text."""
@@ -750,7 +746,7 @@ class Resource:
     sidebar) when its ``alive`` predicate reports the source is gone.
     """
 
-    def __init__(self, id, title, kind, render, alive=None):
+    def __init__(self, id: str, title: str, kind: str, render: Any, alive: Any = None) -> None:
         self.id = id
         self.title = title
         self.kind = kind
@@ -792,7 +788,7 @@ class Resource:
 
 
 def register_resource(
-    source=None, *, title=None, render=None, id=None, kind="html", alive=None
+    source: Any = None, *, title: str | None = None, render: Any = None, id: str | None = None, kind: str = "html", alive: Any = None
 ) -> Resource:
     """Register a live HTML resource for the dashboard sidebar.
 
@@ -863,13 +859,13 @@ class Cells:
         self._rev = 0
         self._synced = -1
 
-    def _render(self, value, title: str | None) -> list:
+    def _render(self, value: Any, title: str | None) -> list:
         bundle = _result_bundle(value)
         if bundle is not None and bundle.get("data"):
             return [bundle]
         return [{"data": {"text/plain": _safe_repr(value)}, "metadata": {}}]
 
-    def _find(self, key) -> int:
+    def _find(self, key: int | str) -> int:
         """Resolve an int index or a string id to a list index, or -1."""
         if isinstance(key, int):
             return key if -len(self._items) <= key < len(self._items) else -1
@@ -878,7 +874,7 @@ class Cells:
                 return i
         return -1
 
-    def add(self, value, *, title: str | None = None, id: str | None = None) -> str:
+    def add(self, value: Any, *, title: str | None = None, id: str | None = None) -> str:
         """Append a cell (or replace the one with ``id``); return its id."""
         outputs = self._render(value, title)
         idx = self._find(id) if id is not None else -1
@@ -895,7 +891,7 @@ class Cells:
     # append is the list-flavoured spelling of add.
     append = add
 
-    def set(self, key, value, *, title: str | None = None) -> str:
+    def set(self, key: int | str, value: Any, *, title: str | None = None) -> str:
         """Replace the cell at ``key`` (an int index or a string id) in place."""
         idx = self._find(key)
         if idx < 0:
@@ -906,7 +902,7 @@ class Cells:
         self._rev += 1
         return self._items[idx].id
 
-    def remove(self, key) -> None:
+    def remove(self, key: int | str) -> None:
         """Drop the cell at ``key`` (an int index or a string id)."""
         idx = self._find(key)
         if idx < 0:
@@ -920,13 +916,13 @@ class Cells:
             self._items = []
             self._rev += 1
 
-    def __setitem__(self, key, value) -> None:
+    def __setitem__(self, key: int | str, value: Any) -> None:
         if isinstance(key, str):
             self.add(value, id=key)
         else:
             self.set(key, value)
 
-    def __getitem__(self, key) -> _Cell:
+    def __getitem__(self, key: int | str) -> _Cell:
         idx = self._find(key)
         if idx < 0:
             raise KeyError(f"no cell {key!r}")
@@ -935,7 +931,7 @@ class Cells:
     def __len__(self) -> int:
         return len(self._items)
 
-    def __iter__(self):
+    def __iter__(self) -> Any:
         return iter(self._items)
 
     def __repr__(self) -> str:
@@ -955,12 +951,9 @@ class Cells:
             {"id": c.id, "title": c.title, "position": i, "outputs": c.outputs}
             for i, c in enumerate(self._items)
         ]
-        try:
+        with contextlib.suppress(Exception):  # best-effort: store write must not raise into user code
             _store.replace_cells(_store_conn, rows)
             self._synced = self._rev
-        except Exception:
-            # Best-effort mirror: a store write must not raise into user code.
-            pass
 
 
 cells = Cells()
@@ -1025,12 +1018,9 @@ class Session:
         dashboard's selector picks it up. Best-effort, like ``cells._sync``."""
         if self._rev == self._synced or _store is None or _store_conn is None:
             return
-        try:
+        with contextlib.suppress(Exception):  # best-effort: store write must not raise into user code
             _store.set_session(_store_conn, name=self.name, client=self._client)
             self._synced = self._rev
-        except Exception:
-            # A store write must never raise into user code.
-            pass
 
 
 session = Session()
@@ -1041,7 +1031,7 @@ session = Session()
 _NESTED_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
 
 
-def _has_toplevel_yield(nodes) -> bool:
+def _has_toplevel_yield(nodes: Any) -> bool:
     """True if a ``yield``/``yield from`` appears at the cell's own top level
     (not inside a nested def, lambda, or class). Such a cell is run as a
     generator: each ``yield Result(...)`` streams a result to both the human and
@@ -1168,14 +1158,11 @@ def _display_result(result: Result) -> None:
     yielding cell needs no separate plumbing."""
     from IPython.display import display
 
-    try:
+    with contextlib.suppress(Exception):  # best-effort: formatter failure must not abort the run
         display(result)
-    except Exception:
-        # Rich display is best-effort; a formatter failure must not abort the run.
-        pass
 
 
-def _is_displayable(value) -> bool:
+def _is_displayable(value: Any) -> bool:
     """True if a value carries its own rich rendering: an IPython rich repr
     (a polars DataFrame, a ``view.Code``, ...), an htpy-style ``__html__``, or a
     figure/image that renders through a registered formatter. Plain scalars,
@@ -1197,7 +1184,7 @@ def _is_displayable(value) -> bool:
             return True
     # Figures/axes/images render via a registered formatter, not a method.
     module = type(value).__module__ or ""
-    return module.startswith("matplotlib") or module.startswith("PIL")
+    return module.startswith(("matplotlib", "PIL"))
 
 
 def _current_line(job: Job) -> int | None:
@@ -1275,7 +1262,7 @@ def _error_line(exc: BaseException, job: Job) -> int | None:
 async def _runner(job: Job, ns: dict) -> None:
     token = _ix_current.set(job)
     if _store is not None and _store_conn is not None:
-        try:
+        with contextlib.suppress(Exception):  # best-effort: store write must not abort the job
             _store.start(
                 _store_conn,
                 id=job.id,
@@ -1285,9 +1272,6 @@ async def _runner(job: Job, ns: dict) -> None:
                 budget=job.budget,
                 kind=job.kind,
             )
-        except Exception:
-            # Best-effort logging: a store write must never abort the job.
-            pass
     try:
         # Compile inside the runner so a SyntaxError is recorded as a job error
         # (status + traceback in the store/dashboard) instead of escaping __ix_run.
@@ -1299,7 +1283,7 @@ async def _runner(job: Job, ns: dict) -> None:
             # human (the job's captured outputs) and the model (iopub). Any
             # value can be yielded; a non-Result renders through Result.of,
             # exactly like a trailing expression.
-            exec(code_obj, ns)
+            exec(code_obj, ns)  # noqa: S102 -- intentional: executing compiled user cell code
             agen = ns.pop("__ix_cell__")()
             job._aobj = agen  # sampled by _current_line while suspended
             emitted = 0
@@ -1315,7 +1299,7 @@ async def _runner(job: Job, ns: dict) -> None:
             # trailing value to return.
             job._result = None
         else:
-            maybe = eval(code_obj, ns)
+            maybe = eval(code_obj, ns)  # noqa: S307 -- intentional: evaluating compiled user cell code
             if inspect.iscoroutine(maybe):
                 job._aobj = maybe  # sampled by _current_line while suspended
                 await maybe
@@ -1387,7 +1371,7 @@ def _persist_final(job: Job) -> None:
     # Record this run's name references first, so the snapshot below already shows
     # the just-finished job among each name's assigned_in/used_in.
     _record_refs(job)
-    try:
+    with contextlib.suppress(Exception):  # best-effort: persist final status; must not raise during cleanup
         result_repr = None if job._result is None else _safe_repr(job._result)
         _store.finish(
             _store_conn,
@@ -1402,9 +1386,6 @@ def _persist_final(job: Job) -> None:
             bindings=_cell_bindings(job),
             namespace=_namespace_snapshot(job),
         )
-    except Exception:
-        # Best-effort logging: persisting the final status must not raise during cleanup.
-        pass
 
 
 def _cell_bindings(job: Job) -> dict:
@@ -1459,7 +1440,7 @@ def _record_refs(job: Job) -> None:
     mislead."""
     if job.status != "done":
         return
-    try:
+    with contextlib.suppress(Exception):  # best-effort: attribution failure must not abort
         from .introspect import binding_names
 
         assigned, used = binding_names(job.code)
@@ -1467,8 +1448,6 @@ def _record_refs(job: Job) -> None:
             _push_ref(name, "assigned_in", job.id)
         for name in used:
             _push_ref(name, "used_in", job.id)
-    except Exception:
-        pass
 
 
 def _namespace_snapshot(job: Job) -> list:
@@ -1485,7 +1464,7 @@ def _namespace_snapshot(job: Job) -> list:
         return []
 
 
-def _safe_repr(value) -> str:
+def _safe_repr(value: Any) -> str:
     try:
         return repr(value)
     except Exception:
@@ -1530,7 +1509,7 @@ def _ansi_to_html(text: str) -> str:
 _DF_LLM_ROWS = 200
 
 
-def _is_polars_df(value) -> bool:
+def _is_polars_df(value: Any) -> bool:
     """True for a polars DataFrame, by duck typing. runtime.py stays import-light
     (polars is the user's to bring), so it never imports polars to check."""
     return (
@@ -1541,7 +1520,7 @@ def _is_polars_df(value) -> bool:
     )
 
 
-def _frame_view(value):
+def _frame_view(value: Any) -> Any:
     """A non-DataFrame value that opts into the table protocol by exposing
     ``_ix_to_frame_()`` returning a polars DataFrame (e.g. an fff ``GrepResult``
     or ``SearchResult``). Returns that frame, else None. Lets a rich result type
@@ -1557,13 +1536,13 @@ def _frame_view(value):
     return frame if _is_polars_df(frame) else None
 
 
-def _df_llm_text(df) -> str:
+def _df_llm_text(df: Any) -> str:
     """A polars DataFrame as compact text for the model: a shape + dtype header
     then CSV, with cell values never truncated (only the row count is bounded by
     ``_DF_LLM_ROWS``). CSV is denser than the boxed repr and drops no value, so
     the agent reads the real data instead of a width-clipped table."""
     try:
-        schema = ", ".join(f"{name}:{dtype}" for name, dtype in zip(df.columns, df.dtypes))
+        schema = ", ".join(f"{name}:{dtype}" for name, dtype in zip(df.columns, df.dtypes, strict=False))
         rows, cols = df.shape
         body = df.head(_DF_LLM_ROWS).write_csv().rstrip("\n")
         more = f"\n... ({rows - _DF_LLM_ROWS} more rows)" if rows > _DF_LLM_ROWS else ""
@@ -1573,7 +1552,7 @@ def _df_llm_text(df) -> str:
         return _safe_repr(df)
 
 
-def _png_bytes(img) -> bytes:
+def _png_bytes(img: Any) -> bytes:
     """Encode a Pillow image as an optimized PNG (lossless)."""
     import io
 
@@ -1584,7 +1563,7 @@ def _png_bytes(img) -> bytes:
     return buf.getvalue()
 
 
-def _jpeg_bytes(img, quality: int) -> bytes:
+def _jpeg_bytes(img: Any, quality: int) -> bytes:
     """Encode a Pillow image as JPEG at ``quality``, flattening any alpha onto a
     white background (JPEG has no alpha) so transparency does not turn black."""
     import io
@@ -1673,7 +1652,7 @@ def _encode_image_b64(b64: str, mime: str) -> dict:
     return _encode_image_bytes(raw, mime)
 
 
-def _image_bytes_mime(value) -> str | None:
+def _image_bytes_mime(value: Any) -> str | None:
     """The image mime of raw ``bytes``/``bytearray`` by magic number (PNG or
     JPEG), else None. Lets a bare ``await page.screenshot()`` -- which returns raw
     image bytes -- auto-render as an image instead of dumping a ~50k-char repr."""
@@ -1686,7 +1665,7 @@ def _image_bytes_mime(value) -> str | None:
     return None
 
 
-def _coerce_image(value) -> dict | None:
+def _coerce_image(value: Any) -> dict | None:
     """Coerce one ``Result.llm_images`` item to a downscaled ``{"mime", "data"}``
     (base64), or None if it is not an image we can encode. Accepts raw PNG/JPEG
     bytes, a base64 / data-URI string, a path to an image file, a matplotlib
@@ -1707,9 +1686,9 @@ def _coerce_image(value) -> dict | None:
             mime = head[5:].split(";", 1)[0] or "image/png"
             return _encode_image_b64(payload, mime)
         # A filesystem path to an image.
-        if len(s) < 4096 and os.path.isfile(s):
+        if len(s) < 4096 and Path(s).is_file():
             try:
-                raw = open(s, "rb").read()
+                raw = Path(s).read_bytes()
             except OSError:
                 return None
             mime = "image/jpeg" if s.lower().endswith((".jpg", ".jpeg")) else "image/png"
@@ -1728,7 +1707,7 @@ def _coerce_image(value) -> dict | None:
         if callable(repr_fn):
             try:
                 out = repr_fn()
-            except Exception:
+            except Exception:  # noqa: S112 -- intentional: skip methods that fail; try the next repr
                 continue
             if out is None:
                 continue
@@ -1781,7 +1760,7 @@ def _normalize_bundle(data: dict, metadata: dict | None = None) -> dict:
     return {"data": out, "metadata": metadata or {}}
 
 
-def _result_bundle(value) -> dict | None:
+def _result_bundle(value: Any) -> dict | None:
     """Render a job's result through IPython's display machinery (a polars
     DataFrame yields text/html, a matplotlib Figure image/png) for the dashboard."""
     if _shell is None:
@@ -1811,7 +1790,7 @@ _vmkit_mod = None
 _vmkit_probed = False
 
 
-def _tui_module():
+def _tui_module() -> Any:
     """The ``tui`` module if importable, cached. None when it is not available."""
     global _tui_mod, _tui_probed
     if not _tui_probed:
@@ -1826,7 +1805,7 @@ def _tui_module():
     return _tui_mod
 
 
-def _tui_renderer(term):
+def _tui_renderer(term: Any) -> Any:
     async def render() -> str:
         snap = await term.snapshot()
         return snap.to_html()
@@ -1864,7 +1843,7 @@ def _discover_tui_resources() -> None:
         )
 
 
-def _vmkit_module():
+def _vmkit_module() -> Any:
     """The ``vmkit`` module if importable, cached. None when unavailable.
 
     vmkit is darwin-only in the interpreter, so on other platforms this provider
@@ -1882,7 +1861,7 @@ def _vmkit_module():
     return _vmkit_mod
 
 
-def _vmkit_renderer(driver):
+def _vmkit_renderer(driver: Any) -> Any:
     async def render() -> str:
         # The capture is a blocking pipe round trip; keep it off the event loop.
         return await asyncio.to_thread(driver.resource_html)
@@ -1938,7 +1917,7 @@ def _api_rows() -> list[dict]:
     module's public surface, with signature and a one-line summary."""
     rows: list[dict] = []
 
-    def add(where: str, name: str, obj, summary: str | None = None) -> None:
+    def add(where: str, name: str, obj: Any, summary: str | None = None) -> None:
         if inspect.iscoroutinefunction(obj):
             kind = "async"
         elif inspect.isclass(obj):
@@ -1972,7 +1951,7 @@ def _api_rows() -> list[dict]:
     for mod_name in _API_MODULES:
         try:
             mod = __import__(mod_name)
-        except Exception:
+        except Exception:  # noqa: S112 -- intentional: absent module drops from catalog; discovery must not raise
             # A module that is absent or fails to import just drops out of the
             # catalog; discovery must never raise.
             continue
@@ -1991,21 +1970,19 @@ def _api_rows() -> list[dict]:
     for lib_name in (lib.name for lib in registry.LIBRARIES):
         sig = lib_name
         summary = "bundled library -- import and use it directly (help() / its own docs)"
-        try:
+        with contextlib.suppress(Exception):  # best-effort: absent library stays in catalog, just without version
             mod = __import__(lib_name)
             version = getattr(mod, "__version__", "")
             if version:
                 sig = f"{lib_name} {version}"
-            doc = (inspect.getdoc(mod) or "").strip().split("\n", 1)[0]
-            if doc:
-                summary = doc
-        except Exception:
-            pass
+            doc_text = (inspect.getdoc(mod) or "").strip().split("\n", 1)[0]
+            if doc_text:
+                summary = doc_text
         rows.append({"where": "library", "name": lib_name, "kind": "library", "sig": sig, "summary": summary})
     return rows
 
 
-def doc(obj) -> Result:
+def doc(obj: Any) -> Result:
     """The signature and docstring of any object, RETURNED (not printed) as a
     Result -- so the documented "everything through Result" path also works for
     reading docs. ``help()`` only writes to stdout (not your channel) and returns
@@ -2022,7 +1999,7 @@ def doc(obj) -> Result:
     return Result.text(f"{sig}\n\n{body}" if sig else body)
 
 
-def api(filter: str | None = None):
+def api(filter: str | None = None) -> Any:
     """A live catalog of every helper the kernel gives you: the always-present
     namespace builtins (`Result`, `cells`, `jobs`, `sh`, ...) and the public
     surface of each bundled module (`fff`, `view`, `nix`, `fleet`, ...), each with
@@ -2105,11 +2082,8 @@ async def _sweep_resources() -> None:
     now = time.time()
     for res in list(resources.values()):
         if not res.alive():
-            try:
+            with contextlib.suppress(Exception):  # best-effort: store write must not kill the loop
                 _store.close_resource(_store_conn, id=res.id, updated_at=now)
-            except Exception:
-                # Best-effort: a store write must not kill the loop.
-                pass
             resources.pop(res.id, None)
             continue
         status = "live"
@@ -2125,7 +2099,7 @@ async def _sweep_resources() -> None:
                 + _escape_html(res.error)
                 + "</pre>"
             )
-        try:
+        with contextlib.suppress(Exception):  # best-effort: store write must not kill the loop
             _store.upsert_resource(
                 _store_conn,
                 id=res.id,
@@ -2136,9 +2110,6 @@ async def _sweep_resources() -> None:
                 created_at=res.created,
                 updated_at=now,
             )
-        except Exception:
-            # Best-effort live render: a store write must not kill the loop.
-            pass
 
 
 async def _flusher() -> None:
@@ -2152,20 +2123,17 @@ async def _flusher() -> None:
         for job in list(jobs.values()):
             if job.running():
                 job.line = _current_line(job)
-                try:
+                with contextlib.suppress(Exception):  # best-effort: store write must not kill the loop
                     _store.update_output(
                         _store_conn, job.id, job.output, job._displays or None, line=job.line
                     )
-                except Exception:
-                    # Best-effort live output: a store write must not kill the loop.
-                    pass
         await _sweep_resources()
         cells._sync()
         session._sync()
         if _SESSION and _snapshot_dirty and not _snapshot_busy and not _restoring:
             # Fire-and-forget so a multi-second dump of a big namespace never
             # stalls the live-output mirroring this loop exists for.
-            asyncio.ensure_future(_snapshot_tick())
+            asyncio.ensure_future(_snapshot_tick())  # noqa: RUF006 -- fire-and-forget background task; loop owns the lifecycle
 
 
 # --------------------------------------------------------------------------- #
@@ -2215,7 +2183,7 @@ def _mark_snapshot_dirty() -> None:
         _snapshot_dirty = True
 
 
-def _dill():
+def _dill() -> Any:
     """The serializer for checkpoints: dill (handles functions/classes defined
     in cells, the common case for an agent session), else stdlib pickle so a
     bare interpreter without dill still checkpoints plain data."""
@@ -2361,7 +2329,7 @@ async def _snapshot_tick() -> None:
     _snapshot_dirty = False
     try:
         await _snapshot_now()
-    except Exception:
+    except Exception:  # noqa: S110 -- best-effort: previous checkpoint stays in place; finally always runs
         # Leave the previous checkpoint in place; replay covers the gap on
         # reopen. The next finished cell re-marks dirty, so this also cannot
         # spin on a persistently failing dump.
@@ -2419,7 +2387,7 @@ async def _restore_body() -> None:
     load_failed: list[str] = []
     if snap is not None:
         try:
-            named = pickle.loads(snap["blob"])
+            named = pickle.loads(snap["blob"])  # noqa: S301 -- trusted data: blob is written by this process only
         except Exception as exc:
             print(f"session restore: checkpoint decode failed ({exc}); replaying the full log")
             named, snap = {}, None
@@ -2428,7 +2396,7 @@ async def _restore_body() -> None:
                 try:
                     ns[name] = loader.loads(payload)
                     restored.append(name)
-                except Exception:
+                except Exception:  # noqa: PERF203 -- per-name restore; individual failures tracked in load_failed
                     load_failed.append(name)
     since = snap["created_at"] if snap is not None else None
     rows: list[dict] = []
@@ -2449,10 +2417,8 @@ async def _restore_body() -> None:
     if _SESSION:
         # Fold the replayed state into a fresh checkpoint so the NEXT reopen is
         # all-instant (and replays never feed future replays).
-        try:
+        with contextlib.suppress(Exception):  # best-effort: skip checkpoint failure during restore
             await _snapshot_now()
-        except Exception:
-            pass
     parts = [f"{len(restored)} names restored instantly"]
     if snap is not None and snap.get("skipped"):
         parts.append(f"{len(snap['skipped'])} not in checkpoint ({', '.join(s['name'] for s in snap['skipped'][:10])})")
@@ -2593,11 +2559,8 @@ def _emit(job: Job) -> None:
     # On success job._result is always a Result (the runner enforces it); display
     # it so the server can unpack the model view and the dashboard the human one.
     if job.status == "done" and job._result is not None:
-        try:
+        with contextlib.suppress(Exception):  # best-effort: rich display failure must not block the summary
             display(job._result)
-        except Exception:
-            # Rich display is best-effort; failures must not block the summary.
-            pass
 
 
 async def __ix_exec(
@@ -2610,7 +2573,7 @@ async def __ix_exec(
     _emit(job)
 
 
-def _existing_file(value) -> pathlib.Path | None:
+def _existing_file(value: Any) -> pathlib.Path | None:
     """``value`` as a :class:`pathlib.Path` when it is a string naming an
     existing file, else None. The one rule `__ix_read` applies to both the raw
     ``target`` and to a string an expression evaluates to."""
@@ -2623,7 +2586,7 @@ def _existing_file(value) -> pathlib.Path | None:
         return None
 
 
-def _tilde(path) -> str:
+def _tilde(path: Any) -> str:
     """An absolute path with the home directory collapsed to ``~`` for a compact,
     privacy-friendly note (``/Users/me/.ix/trace/x`` -> ``~/.ix/trace/x``)."""
     text = str(path)
@@ -2661,7 +2624,7 @@ _NAMED_EXTS = {"dockerfile": "docker", "makefile": "make"}
 _DEFAULT_EXT_COLOR = "#8a8a92"
 
 
-def _file_icon_svg(path, *, px: int = 16) -> str:
+def _file_icon_svg(path: Any, *, px: int = 16) -> str:
     """An inline-SVG file icon for the read note: a document with a folded corner
     and the extension on a category-colored ribbon. Works for any extension."""
     name = pathlib.Path(path).name
@@ -2695,7 +2658,7 @@ def _value_icon_svg(*, px: int = 16) -> str:
     )
 
 
-async def __ix_read(target, start=None, end=None, session=None) -> Result:
+async def __ix_read(target: Any, start: int | None = None, end: int | None = None, session: str | None = None) -> Result:
     """Read a file (or evaluate a kernel value) FOR THE MODEL, quietly.
 
     Returns a Result whose ``llm_result`` is the full text the model receives and
@@ -2715,7 +2678,7 @@ async def __ix_read(target, start=None, end=None, session=None) -> Result:
         # naming an existing file (`os.path.join(...)`, a variable holding a
         # path), the same file rule applies to it -- an expression yielding a
         # path reads the file, never echoes the path string back.
-        value = eval(target, ns) if isinstance(target, str) else target
+        value = eval(target, ns) if isinstance(target, str) else target  # noqa: S307 -- intentional: evaluating user-provided expression in kernel namespace
         path = _existing_file(value)
     if path is not None:
         # Off the loop: a large file read is blocking I/O, the one thing that
@@ -2744,7 +2707,7 @@ async def __ix_read(target, start=None, end=None, session=None) -> Result:
 
 
 
-def _install_display_capture(shell) -> None:
+def _install_display_capture(shell: Any) -> None:
     """Route display() / rich auto-display made *inside a job* to that job's output
     list (still forwarding to IOPub for the agent's reply), so the dashboard can
     show images and HTML tables, not just text."""
@@ -2753,7 +2716,7 @@ def _install_display_capture(shell) -> None:
         return
     original = pub.publish
 
-    def publish(data, metadata=None, **kwargs):
+    def publish(data: Any, metadata: Any = None, **kwargs: Any) -> Any:
         job = _ix_current.get()
         if job is not None and isinstance(data, dict) and JOB_MIME not in data:
             bundle = _normalize_bundle(data, metadata)
@@ -2765,7 +2728,7 @@ def _install_display_capture(shell) -> None:
     pub._ix_wrapped = True
 
 
-def _figure_png(fig) -> bytes:
+def _figure_png(fig: Any) -> bytes:
     import io
 
     buf = io.BytesIO()
@@ -2773,7 +2736,7 @@ def _figure_png(fig) -> bytes:
     return buf.getvalue()
 
 
-def _register_rich_formatters(shell) -> None:
+def _register_rich_formatters(shell: Any) -> None:
     """Make the bundled view objects render richly in the dashboard.
 
     Two gaps in a bare ipykernel: it only wires the inline matplotlib png
@@ -2783,19 +2746,13 @@ def _register_rich_formatters(shell) -> None:
     element handed to ``cells.add``/``Result.of`` falls back to its ``repr``
     (``<Element '<div ...>...'>``) instead of rendering. Register both lazily by
     type name so importing matplotlib or htpy stays the user's choice."""
-    try:
+    with contextlib.suppress(Exception):  # no display formatter (non-IPython host) or matplotlib too old to wire
         png = shell.display_formatter.formatters["image/png"]
         png.for_type_by_name("matplotlib.figure", "Figure", _figure_png)
-    except Exception:
-        # No display formatter (non-IPython host) or a matplotlib too old to wire.
-        pass
-    try:
+    with contextlib.suppress(Exception):  # no display formatter, or htpy/markupsafe layout mismatch
         html = shell.display_formatter.formatters["text/html"]
         html.for_type_by_name("htpy._elements", "BaseElement", lambda el: el.__html__())
         html.for_type_by_name("markupsafe", "Markup", str)
-    except Exception:
-        # No display formatter, or an htpy/markupsafe layout this does not match.
-        pass
 
 
 _user_ns: dict | None = None
@@ -2822,13 +2779,13 @@ def _install_signal_handlers() -> None:
 
     trace_path = os.environ.get("IX_MCP_KERNEL_TRACE")
     if trace_path:
-        _trace_file = open(trace_path, "w")  # truncates any stale dump from a prior kernel
+        _trace_file = Path(trace_path).open("w")  # trace file must remain open for faulthandler; cannot use context manager
         # enable() handles fatal signals (SIGSEGV/SIGABRT) -> stderr; register()
         # adds the on-demand SIGUSR1 all-thread dump the kernel_trace tool reads.
         faulthandler.enable()
         faulthandler.register(signal.SIGUSR1, file=_trace_file, all_threads=True, chain=False)
 
-    def _break(signum, frame):
+    def _break(signum: int, frame: Any) -> None:
         # Only raise while a job is on the stack; a stray signal to an idle kernel
         # must not blow up the event loop. The handler runs in the interrupted
         # frame's context, so it sees the running job's ContextVar. Flag the job so
@@ -2839,12 +2796,8 @@ def _install_signal_handlers() -> None:
             job.interrupted_by_watchdog = True
             raise KeyboardInterrupt("ix: cell exceeded its budget while blocking the event loop")
 
-    try:
+    with contextlib.suppress(ValueError):  # signal.signal only works on main thread; tests call install() off it
         signal.signal(signal.SIGUSR2, _break)
-    except ValueError:
-        # signal.signal only works on the main thread; the in-process unit tests
-        # call install() off the main thread. Only the real kernel needs rescue.
-        pass
 
 
 def install(user_ns: dict | None = None) -> None:
@@ -2893,11 +2846,9 @@ def install(user_ns: dict | None = None) -> None:
     target["session"] = session
     # Seed the default session label with this kernel's working directory; the
     # connecting client's identity is folded in later (see Kernel.set_client).
-    try:
-        session._workdir = os.path.basename(os.getcwd()) or ""
+    with contextlib.suppress(OSError):
+        session._workdir = Path.cwd().name or ""
         session._rev += 1  # ensure the first flush mirrors the default to the store
-    except OSError:
-        pass
     target["resources"] = resources
     target["Resource"] = Resource
     target["register_resource"] = register_resource
@@ -2910,12 +2861,10 @@ def install(user_ns: dict | None = None) -> None:
     # `sh` is a bundled, callable module (see packages/mcp/src/sh). Bind it here
     # so `await sh(cmd)` works with no import, the way Result/cells/jobs do; an
     # explicit `import sh` returns the same object, so both styles agree.
-    try:
+    with contextlib.suppress(Exception):  # sh may be absent outside the bundled interpreter; skip it
         import sh as _sh_module
+
         target["sh"] = _sh_module
-    except Exception:
-        # Outside the bundled interpreter the module may be absent; skip it.
-        pass
     # Pre-bind the two most-reached-for bundled modules so `fff.grep(...)` and
     # `view.ls(...)` work with no import, the way Result/cells/jobs/sh do (an
     # explicit `import fff` returns the same object, so both styles agree). Both
@@ -2923,10 +2872,8 @@ def install(user_ns: dict | None = None) -> None:
     # imports fff), so binding them here costs nothing; heavier modules (nix,
     # fleet, search) stay import-on-demand to keep the namespace lean.
     for _mod_name in registry.preimport_names():
-        try:
+        with contextlib.suppress(Exception):  # best-effort per-module import; continue on missing modules
             target[_mod_name] = __import__(_mod_name)
-        except Exception:
-            pass
     # The kernel is async-first and polars-first: nearly every session reaches
     # for asyncio (ensure_future / sleep), json (every CLI's --json output), and
     # pl within its first cells, and a NameError on `asyncio` in an async kernel
@@ -2934,12 +2881,10 @@ def install(user_ns: dict | None = None) -> None:
     # sh/fff/view; an explicit import returns the same module.
     target["asyncio"] = asyncio
     target["json"] = json
-    try:
+    with contextlib.suppress(Exception):  # polars may be absent; skip binding pl
         import polars as _polars_mod
 
         target["pl"] = _polars_mod
-    except Exception:
-        pass
     target["api"] = api
 
     # Everything in the namespace up to here is the runtime's own surface plus
@@ -2951,8 +2896,5 @@ def install(user_ns: dict | None = None) -> None:
     # user names; refs accumulate as runs touch them).
     _name_refs.clear()
 
-    try:
+    with contextlib.suppress(RuntimeError):  # no event loop yet (sync context): flusher is optional
         asyncio.get_event_loop().create_task(_flusher())
-    except RuntimeError:
-        # No loop yet (e.g. install from a sync context): the flusher is optional.
-        pass

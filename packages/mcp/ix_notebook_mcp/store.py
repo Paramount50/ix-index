@@ -12,6 +12,7 @@ writer.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 import time
@@ -115,31 +116,21 @@ def _migrate(conn: sqlite3.Connection) -> None:
     # error means the other won, which is fine. This is a logical error, not
     # SQLITE_BUSY, so busy_timeout does not cover it.
     if "bindings" not in have:
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):
             conn.execute("ALTER TABLE executions ADD COLUMN bindings TEXT NOT NULL DEFAULT '{}'")
-        except sqlite3.OperationalError:
-            pass
     if "budget" not in have:
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):
             conn.execute("ALTER TABLE executions ADD COLUMN budget REAL NOT NULL DEFAULT 15")
-        except sqlite3.OperationalError:
-            pass
     for column in ("line", "error_line"):
         if column not in have:
-            try:
+            with contextlib.suppress(sqlite3.OperationalError):
                 conn.execute(f"ALTER TABLE executions ADD COLUMN {column} INTEGER")
-            except sqlite3.OperationalError:
-                pass
     if "kind" not in have:
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):
             conn.execute("ALTER TABLE executions ADD COLUMN kind TEXT NOT NULL DEFAULT 'cell'")
-        except sqlite3.OperationalError:
-            pass
     if "namespace" not in have:
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):
             conn.execute("ALTER TABLE executions ADD COLUMN namespace TEXT NOT NULL DEFAULT '[]'")
-        except sqlite3.OperationalError:
-            pass
 
 
 def start(
@@ -246,7 +237,7 @@ def recent(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
     # Running jobs sort first so a long-running job is never dropped by the limit
     # (a finished-jobs backlog could otherwise push it past LIMIT); then newest.
     rows = conn.execute(
-        f"SELECT {_EXEC_COLUMNS} "
+        f"SELECT {_EXEC_COLUMNS} "  # noqa: S608 -- _EXEC_COLUMNS is a module-level constant, not user input
         "FROM executions ORDER BY (status = 'running') DESC, started_at DESC LIMIT ?",
         (limit,),
     ).fetchall()
@@ -284,7 +275,7 @@ def get(conn: sqlite3.Connection, id: str) -> dict | None:
     to render that run's rich outputs inline with the tool call."""
     conn.row_factory = sqlite3.Row
     row = conn.execute(
-        f"SELECT {_EXEC_COLUMNS} FROM executions WHERE id = ?", (id,)
+        f"SELECT {_EXEC_COLUMNS} FROM executions WHERE id = ?", (id,)  # noqa: S608 -- _EXEC_COLUMNS is a module-level constant, not user input
     ).fetchone()
     return _exec_row(row) if row is not None else None
 
@@ -488,7 +479,7 @@ def replayable(conn: sqlite3.Connection, since: float | None) -> list[dict]:
     anchor = "" if since is None else " AND ended_at > ?"
     params = () if since is None else (since,)
     rows = conn.execute(
-        "SELECT id, name, code FROM executions "
+        "SELECT id, name, code FROM executions "  # noqa: S608 -- anchor is one of "" or " AND ended_at > ?", not user input
         f"WHERE status = 'done' AND kind = 'cell'{anchor} ORDER BY started_at ASC",
         params,
     ).fetchall()

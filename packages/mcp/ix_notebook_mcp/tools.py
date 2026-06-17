@@ -29,6 +29,7 @@ restates a tool by hand.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import threading
@@ -153,12 +154,8 @@ async def _identify_client_once(ctx: Context | None) -> None:
     if not label:
         return
     _client_identified = True  # latch before awaiting so a concurrent first call skips
-    try:
+    with contextlib.suppress(Exception):  # no kernel yet or transient error: label is a convenience
         await current_kernel().set_client(label)
-    except Exception:
-        # No kernel yet (an embedder driving the tools directly) or a transient
-        # kernel error: the label is a convenience, never worth failing a tool call.
-        pass
 
 
 def _first_sentence(text: str) -> str:
@@ -176,8 +173,7 @@ def _tools_overview() -> str:
     instructions never restate by hand what each tool's own description already
     says: register a `@mcp.tool` and it lists itself here automatically."""
     lines = ["The MCP tools you can call (each carries its own fuller description):"]
-    for tool in mcp._tool_manager.list_tools():
-        lines.append(f"- `{tool.name}`: {_first_sentence(tool.description)}.")
+    lines.extend(f"- `{tool.name}`: {_first_sentence(tool.description)}." for tool in mcp._tool_manager.list_tools())
     return "\n".join(lines)
 
 
@@ -233,10 +229,8 @@ def _open_dashboard_once() -> None:
         return
 
     def _open() -> None:
-        try:
+        with contextlib.suppress(Exception):  # browser unavailable (headless/SSH): best-effort pop
             webbrowser.open(url)
-        except Exception:
-            pass
 
     threading.Thread(target=_open, name="ix-mcp-open-dashboard", daemon=True).start()
 

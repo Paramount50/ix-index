@@ -121,7 +121,7 @@ def runtime_dir() -> Path:
     Hardened against an untrusted shared base (/tmp): fail closed if a
     pre-existing one is a symlink, not ours, or group/other accessible (CWE-377).
     """
-    base = os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp"
+    base = os.environ.get("XDG_RUNTIME_DIR") or os.environ.get("TMPDIR") or "/tmp"  # noqa: S108 -- temp dir is hardened by the mkdir+stat checks below
     path = Path(base) / "ix-mcp"
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     info = path.lstat()

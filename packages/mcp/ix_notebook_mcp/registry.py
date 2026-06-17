@@ -90,7 +90,7 @@ MODULES: tuple[Module, ...] = (
         credential=Credential(
             service="Mixedbread",
             env=("MXBAI_API_KEY",),
-            token_path="~/.mgrep/token.json",
+            token_path="~/.mgrep/token.json",  # noqa: S106 -- path to token file, not a hardcoded secret
             login="run `mgrep login`",
             url="https://www.mixedbread.com",
         ),
@@ -158,7 +158,7 @@ MODULES: tuple[Module, ...] = (
         # lives at this documented path (mode 0600).
         credential=Credential(
             service="Google",
-            token_path="~/.config/google/token.json",
+            token_path="~/.config/google/token.json",  # noqa: S106 -- path to token file, not a hardcoded secret
             login="call `await google_auth.login()` in a cell",
         ),
     ),
@@ -179,7 +179,7 @@ MODULES: tuple[Module, ...] = (
         credential=Credential(
             service="Slack",
             env=("SLACK_USER_TOKEN", "SLACK_TOKEN"),
-            token_path="~/.config/slack/token",
+            token_path="~/.config/slack/token",  # noqa: S106 -- path to token file, not a hardcoded secret
             login="call `slack.login(token)` in a cell",
             url="https://api.slack.com/authentication/token-types#user",
         ),

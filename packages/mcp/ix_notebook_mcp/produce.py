@@ -41,7 +41,7 @@ def discovery_dir() -> Path:
     if runtime := os.environ.get("XDG_RUNTIME_DIR"):
         return Path(runtime) / "ix-dash"
     user = os.environ.get("USER", "shared")
-    return Path(f"/tmp/ix-dash-{user}")
+    return Path(f"/tmp/ix-dash-{user}")  # noqa: S108 -- fallback temp dir when XDG_RUNTIME_DIR is unavailable; path is user-scoped
 
 
 def socket_path() -> Path:
@@ -157,7 +157,7 @@ class PaneProducer:
             _reap_stale_socket(path)
             self._server = await asyncio.start_unix_server(self._handle, path=str(path))
             with contextlib.suppress(OSError):
-                os.chmod(path, 0o600)
+                path.chmod(0o600)
             self._path = path
             return self
         except OSError as error:
@@ -182,7 +182,7 @@ class PaneProducer:
         try:
             while True:
                 async with self._cond:
-                    await self._cond.wait_for(lambda: self._version != last)
+                    await self._cond.wait_for(lambda: self._version != last)  # noqa: B023 -- last is intentionally captured by reference; it updates each iteration to track the last seen version
                     line, last = self._line, self._version
                 writer.write(line)
                 await writer.drain()
@@ -219,7 +219,7 @@ def _ensure_dir(directory: Path) -> None:
     if not directory.exists():
         directory.mkdir(parents=True, exist_ok=True)
         with contextlib.suppress(OSError):
-            os.chmod(directory, 0o700)
+            directory.chmod(0o700)
 
 
 def _reap_stale_socket(path: Path) -> None:

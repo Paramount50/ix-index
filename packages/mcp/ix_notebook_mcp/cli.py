@@ -34,12 +34,13 @@ import subprocess
 import sys
 import time
 import webbrowser
+from collections.abc import Callable
 from pathlib import Path
 
 from .config import Config, runtime_dir, set_config
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
-_WILDCARD_HOSTS = {"0.0.0.0", "::"}
+_WILDCARD_HOSTS = {"0.0.0.0", "::"}  # noqa: S104 -- deliberate set of wildcard host strings for comparison
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -137,7 +138,7 @@ def _bindable(host: str, port: int) -> bool:
                 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 sock.bind(sockaddr)
             return True
-        except OSError:
+        except OSError:  # noqa: PERF203 -- try-except is required to probe bindability per address family
             continue
     return False
 
@@ -168,7 +169,7 @@ def _store_path(dashboard_port: int) -> Path:
 
 def _tailscale_status() -> dict | None:
     tailscale = shutil.which("tailscale") or next(
-        (p for p in ("/usr/local/bin/tailscale", "/usr/bin/tailscale") if os.path.exists(p)), None
+        (p for p in ("/usr/local/bin/tailscale", "/usr/bin/tailscale") if Path(p).exists()), None
     )
     if not tailscale:
         return None
@@ -227,7 +228,7 @@ def _resolve_ssh_auth_sock(
     current: str | None,
     home: Path,
     platform: str,
-    exists=os.path.exists,
+    exists: Callable[[str], bool] = lambda p: Path(p).exists(),
 ) -> str | None:
     """Return the 1Password agent socket path to use instead of *current*, or
     ``None`` if no substitution should be made.
@@ -263,7 +264,7 @@ def _exec_token() -> str | None:
     if token:
         return token.strip()
     path = os.environ.get("IX_MCP_EXEC_TOKEN_FILE")
-    if path and os.path.exists(path):
+    if path and Path(path).exists():
         return Path(path).read_text().strip()
     return None
 

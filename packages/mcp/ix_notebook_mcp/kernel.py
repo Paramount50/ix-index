@@ -15,6 +15,7 @@ inspects ``jobs`` gets serviced promptly.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import signal
 from pathlib import Path
@@ -30,7 +31,7 @@ _READY_TIMEOUT = 60.0
 TRACE_ENV = "IX_MCP_KERNEL_TRACE"
 
 
-def _wedged_summary(budget: float, grace: float, deadline: float, interrupted: bool) -> dict:
+def _wedged_summary(budget: float, grace: float, deadline: float, *, interrupted: bool) -> dict:
     """A per-call summary, shaped like ``runtime._job_summary``, returned when a
     cell blocks the kernel past ``deadline``. The server renders it like any
     other summary, so the caller gets a clear, actionable message rather than an
@@ -130,7 +131,7 @@ class Kernel:
         )
 
     async def _execute(
-        self, code: str, timeout: float, on_locked=None
+        self, code: str, timeout: float, on_locked: object = None
     ) -> tuple[list[dict], dict | None]:
         async with self._lock:
             # `on_locked` fires once the shell channel is held: a caller that
@@ -176,7 +177,7 @@ class Kernel:
                     # cell, so fire the same SIGUSR2 watchdog the outer timeout
                     # path uses to break the blocked frame and free the channel.
                     await self._interrupt()
-                except BaseException:
+                except BaseException:  # noqa: S110 -- any drain error is acceptable; we just need the socket read to finish before releasing the lock
                     # Any other drain error: we only need the socket read to
                     # finish before releasing the lock.
                     pass
@@ -211,19 +212,15 @@ class Kernel:
             return await self._execute(wrapper, timeout=deadline)
         except TimeoutError:
             interrupted = await self._interrupt()
-            return [], _wedged_summary(budget, grace, deadline, interrupted)
+            return [], _wedged_summary(budget, grace, deadline, interrupted=interrupted)
 
     async def set_client(self, client: str) -> None:
         """Tell the kernel which MCP client connected, so the session label can
         default to it. Runs as a raw shell request (not ``__ix_exec``), so it
         leaves no job/card behind — it only pokes ``session._set_client``. The
         server calls this once, when the client identifies itself."""
-        try:
+        with contextlib.suppress(Exception):  # session label is a convenience; must not break the tool call
             await self._execute(f"session._set_client({client!r})", timeout=10.0)
-        except Exception:
-            # The session label is a convenience; a failure here must never break
-            # the tool call that triggered identification.
-            pass
 
     async def _interrupt(self) -> bool:
         """Break a synchronous call wedging the kernel's event loop. ipykernel's
@@ -242,7 +239,7 @@ class Kernel:
             return False
         return True
 
-    async def restore_session(self, on_locked=None, timeout: float = 1800.0) -> str:
+    async def restore_session(self, on_locked: object = None, timeout: float = 1800.0) -> str:
         """Reopen a session in the kernel: load the latest checkpoint and replay
         the gap (``__ix_restore`` in the runtime). Returns the printed summary.
         ``on_locked`` fires once the request holds the shell channel, so the
@@ -254,12 +251,8 @@ class Kernel:
     async def snapshot_session(self) -> None:
         """Best-effort final checkpoint at shutdown, so the last cells' state is
         in the file even if the debounced checkpoint had not fired yet."""
-        try:
+        with contextlib.suppress(Exception):  # shutdown must proceed; periodic checkpoint plus replay guarantee a correct reopen
             await self._execute("await __ix_snapshot()", timeout=60.0)
-        except Exception:
-            # Shutdown must proceed; the periodic checkpoint plus replay already
-            # guarantee a correct (if slower) reopen.
-            pass
 
     async def restart(self) -> None:
         if self._km is not None:

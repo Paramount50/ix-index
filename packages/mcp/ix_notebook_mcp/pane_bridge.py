@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import html
 import json
+import sqlite3
 from pathlib import Path
 
 from . import store
@@ -75,7 +76,7 @@ def _is_rich(out: dict) -> bool:
     )
 
 
-def _panes(conn) -> list[dict]:
+def _panes(conn: sqlite3.Connection) -> list[dict]:
     """The MCP's current pane set, mapped from the store."""
     panes: list[dict] = []
     # A reserved pane carrying this session's identity. It rides under this
@@ -132,15 +133,15 @@ def _panes(conn) -> list[dict]:
             panes.append(
                 html_pane(f"cell/{cell['id']}", cell.get("title") or "cell", rendered, subtitle="cell")
             )
-    for res in store.live_resources(conn):
-        panes.append(
-            html_pane(
-                f"resource/{res['id']}",
-                res.get("title") or res["id"],
-                res.get("html") or "",
-                subtitle=res.get("kind") or "",
-            )
+    panes.extend(
+        html_pane(
+            f"resource/{res['id']}",
+            res.get("title") or res["id"],
+            res.get("html") or "",
+            subtitle=res.get("kind") or "",
         )
+        for res in store.live_resources(conn)
+    )
     rows = store.latest_namespace(conn)
     if rows:
         panes.append(data_pane("namespace", "Namespace", "namespace", rows))

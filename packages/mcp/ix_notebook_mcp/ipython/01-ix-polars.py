@@ -23,8 +23,8 @@ pl.Config.set_tbl_width_chars(160)
 try:
     import view
 
-    pl.DataFrame._repr_html_ = lambda self: view.df_html(self)
-except Exception:
+    pl.DataFrame._repr_html_ = view.df_html
+except Exception:  # noqa: S110 -- view is always bundled; pass keeps startup safe if absent
     # `view` should always be bundled; if it is not, fall back to polars' default
     # HTML repr rather than breaking startup.
     pass

@@ -62,14 +62,10 @@ def _rev(jobs: list[dict], cells: list[dict], resources: list[dict]) -> str:
     when this differs. Built from each row's id and last-write time (``ended_at``
     / ``updated_at``) plus a running job's live ``output`` length, so an in-flight
     job streaming output advances the marker without hashing whole payloads."""
-    parts: list[str] = []
-    for j in jobs:
-        parts.append(
-            f"j{j['id']}:{j.get('status')}:{j.get('ended_at') or len(j.get('output') or '')}"
-            f":{j.get('line')}"
-        )
-    for c in cells:
-        parts.append(f"c{c['id']}:{c.get('updated_at')}")
-    for r in resources:
-        parts.append(f"r{r['id']}:{r.get('updated_at')}:{r.get('status')}")
+    parts: list[str] = [
+        f"j{j['id']}:{j.get('status')}:{j.get('ended_at') or len(j.get('output') or '')}:{j.get('line')}"
+        for j in jobs
+    ]
+    parts.extend(f"c{c['id']}:{c.get('updated_at')}" for c in cells)
+    parts.extend(f"r{r['id']}:{r.get('updated_at')}:{r.get('status')}" for r in resources)
     return str(hash(tuple(parts)))

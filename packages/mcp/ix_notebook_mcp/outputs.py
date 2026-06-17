@@ -11,7 +11,6 @@ from __future__ import annotations
 import base64
 import os
 import re
-from typing import Any
 
 import nbformat
 from mcp import types as mcp_types
@@ -107,7 +106,7 @@ def to_mcp(outputs: list[dict]) -> list[Content]:
     return content or [text("(no output)")]
 
 
-def text(value: Any) -> mcp_types.TextContent:
+def text(value: str | list[str]) -> mcp_types.TextContent:
     rendered = _ANSI.sub("", value if isinstance(value, str) else "".join(value))
     if len(rendered) <= MAX_TEXT_CHARS:
         return mcp_types.TextContent(type="text", text=rendered)
@@ -128,7 +127,7 @@ def text(value: Any) -> mcp_types.TextContent:
     return mcp_types.TextContent(type="text", text=rendered)
 
 
-def _image(mime: str, data: Any) -> Content:
+def _image(mime: str, data: str | bytes) -> Content:
     """One image as an MCP image block -- unless its decoded size exceeds
     ``MAX_IMAGE_BYTES``, in which case it is dropped with a short text note rather
     than flooding the reply with base64. ``data`` is base64 text or raw bytes."""
