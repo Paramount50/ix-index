@@ -23,7 +23,9 @@
   - `groups`, `extras`: uv dependency groups and extras to install.
   - `dev`, `allGroups`, `allExtras`: dependency selection shortcuts.
   - `exportFlags`, `pipInstallFlags`, `buildFlags`: extra uv flags.
-  - `check`, `pythonPlatform`, `typeCheckPaths`, `typeCheckArgs`: ty knobs.
+  - `check`, `pyChecker`, `pythonPlatform`, `typeCheckPaths`, `typeCheckArgs`:
+    type-check knobs. `pyChecker` is "ty" (default, legacy), "zuban", or "mypy";
+    "zuban"/"mypy" run that checker `--strict` plus `ruff check --select ANN`.
   - `extraNativeBuildInputs`: extra packages on PATH for the build.
   - `runtimeLibraryInputs`: shared libraries made visible to binary wheels.
   - `fetcherOpts`: per-package fetcher overrides for locked distributions.
@@ -63,6 +65,14 @@ pkgs:
   pipInstallFlags ? [ ],
   buildFlags ? [ ],
   check ? true,
+  # Build-time Python checker, one of "ty" | "zuban" | "mypy". "ty" is the
+  # legacy gradual checker and the default during the repo-wide migration to
+  # strict checking. "zuban" and "mypy" run that checker in `--strict` mode
+  # (correctness) plus `ruff check --select ANN` (explicit annotations); a
+  # package flips off "ty" once its sources are fully annotated and clean. The
+  # default becomes "zuban" and the ty branch is removed once every package has
+  # migrated. Switching a package between checkers is a one-word change here.
+  pyChecker ? "ty",
   pythonPlatform ? "linux",
   typeCheckPaths ? [ "." ],
   extraPaths ? [ ],
@@ -106,6 +116,51 @@ let
   ++ extraSearchPathArgs
   ++ typeCheckArgs
   ++ typeCheckPaths;
+  # zuban/mypy strict args. The venv interpreter is passed in the phase string
+  # (it interpolates the `$out` shell variable, so it cannot go through
+  # escapeShellArgs). `--strict` also enables disallow-untyped-defs in both, so
+  # missing signatures fail here too.
+  strictCheckArgs = [
+    "--python-version"
+    python.pythonVersion
+    "--platform"
+    pythonPlatform
+  ]
+  ++ typeCheckArgs
+  ++ typeCheckPaths;
+  # ruff flake8-annotations (ANN): the dedicated explicit-annotation gate
+  # (ANN201 explicit returns, ANN001 arg types, ...), which the type checkers do
+  # not own. Runs alongside the strict correctness checkers.
+  ruffPhase = "ruff check --select ANN ${lib.escapeShellArgs typeCheckPaths}";
+  pyCheckers = {
+    ty = {
+      inputs = [ pkgs.ty ];
+      phase = ''ty check --python "$out/venv/bin/python" ${lib.escapeShellArgs tyCheckArgs}'';
+    };
+    zuban = {
+      inputs = [
+        pkgs.zuban
+        pkgs.ruff
+      ];
+      phase = ''
+        zuban check --strict --python-executable "$out/venv/bin/python" ${lib.escapeShellArgs strictCheckArgs}
+        ${ruffPhase}
+      '';
+    };
+    mypy = {
+      inputs = [
+        pkgs.mypy
+        pkgs.ruff
+      ];
+      phase = ''
+        mypy --strict --python-executable "$out/venv/bin/python" ${lib.escapeShellArgs strictCheckArgs}
+        ${ruffPhase}
+      '';
+    };
+  };
+  selectedChecker =
+    pyCheckers.${pyChecker}
+      or (throw "buildUvApplication: unknown pyChecker \"${pyChecker}\" (expected \"ty\", \"zuban\", or \"mypy\")");
   exportArgs = [
     "--frozen"
     "--no-emit-project"
@@ -161,7 +216,7 @@ pkgs.stdenvNoCC.mkDerivation (_: {
   ]
   ++ extraNativeBuildInputs;
 
-  nativeInstallCheckInputs = [ pkgs.ty ];
+  nativeInstallCheckInputs = selectedChecker.inputs;
 
   dontConfigure = true;
   dontBuild = true;
@@ -198,7 +253,7 @@ pkgs.stdenvNoCC.mkDerivation (_: {
   installCheckPhase = ''
     runHook preInstallCheck
 
-    ty check --python "$out/venv/bin/python" ${lib.escapeShellArgs tyCheckArgs}
+    ${selectedChecker.phase}
 
     runHook postInstallCheck
   '';

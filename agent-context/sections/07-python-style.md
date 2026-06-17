@@ -1,7 +1,7 @@
 ---
 name: python-style
 disclosure: progressive
-description: "Python conventions: uv projects, buildUvApplication, writePythonApplication, ty type-checking. Use when writing or packaging Python."
+description: "Python conventions: uv projects, buildUvApplication, writePythonApplication, type-checking (ty/zuban/mypy) and ruff ANN. Use when writing or packaging Python."
 ---
 
 ## Python style
@@ -15,5 +15,14 @@ without PyPI dependencies or multiple source files. Once a script needs
 dependencies, console entry points, or a package layout, give it the uv project
 shape.
 
-The Python helpers run `ty` by default. Disable the check only when the package
-has a deliberate reason.
+The Python helpers run a type checker at build time, selected with `pyChecker`:
+`"ty"` (default, the legacy gradual checker), `"zuban"`, or `"mypy"`. The
+`"zuban"`/`"mypy"` options run that checker `--strict` (correctness, including
+disallow-untyped-defs) plus `ruff check --select ANN` (explicit annotations).
+The repo is migrating every package off `ty` onto strict checking; flip a package
+to `pyChecker = "zuban"` once its sources are fully annotated and clean. Disable
+the check (`check = false`) only when the package has a deliberate reason.
+
+Explicit annotations are also enforced repo-wide by the `ruff-ann` lint stage
+(`nix run .#lint`), scoped to an allowlist of migrated directories that grows
+until it covers the whole tree.

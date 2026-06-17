@@ -14,8 +14,10 @@ let
     - `args`: literal argv prefix prepended to user args at runtime.
     - `runtimeInputs`: extra packages prepended to PATH at runtime.
     - `python`: Python interpreter package. Defaults to `pkgs.python314`.
-    - `check`, `pythonPlatform`: ty knobs.
-    - `extraPaths`: extra import roots for ty.
+    - `check`, `pyChecker`, `pythonPlatform`: type-check knobs. `pyChecker` is
+      "ty" (default, legacy), "zuban", or "mypy"; "zuban"/"mypy" run that checker
+      `--strict` plus `ruff check --select ANN`.
+    - `extraPaths`: extra import roots for the checker.
     - `meta`: standard derivation meta, with `mainProgram` defaulted.
   */
   writePythonApplication =
@@ -27,6 +29,10 @@ let
       runtimeInputs ? [ ],
       python ? pkgs.python314,
       check ? true,
+      # "ty" (default, legacy), "zuban", or "mypy". "zuban"/"mypy" run that
+      # checker `--strict` plus `ruff check --select ANN`. See buildUvApplication
+      # for the repo-wide migration.
+      pyChecker ? "ty",
       pythonPlatform ? "linux",
       extraPaths ? [ "${python}/${python.sitePackages}" ],
       meta ? { },
@@ -54,6 +60,25 @@ let
       ]
       ++ extraSearchPathArgs
       ++ [ "${src}" ];
+      # zuban/mypy resolve extra import roots from MYPYPATH rather than a flag.
+      mypyPath = lib.concatStringsSep ":" extraPaths;
+      ruffAnnPhase = "${lib.getExe' pkgs.ruff "ruff"} check --select ANN ${lib.escapeShellArg "${src}"}";
+      # `zuban` needs the `check` subcommand; `mypy` is invoked directly. Both
+      # accept --strict / --python-executable / --python-version / --platform.
+      strictPhase = checker: subcommand: ''
+        MYPYPATH=${lib.escapeShellArg mypyPath} ${lib.getExe' checker (lib.getName checker)} ${subcommand}--strict \
+          --python-executable ${lib.escapeShellArg (lib.getExe python)} \
+          --python-version ${python.pythonVersion} --platform ${pythonPlatform} ${lib.escapeShellArg "${src}"}
+        ${ruffAnnPhase}
+      '';
+      pyCheckers = {
+        ty = "${lib.getExe pkgs.ty} ${lib.escapeShellArgs tyCheckArgs}";
+        zuban = strictPhase pkgs.zuban "check ";
+        mypy = strictPhase pkgs.mypy "";
+      };
+      checkerPhase =
+        pyCheckers.${pyChecker}
+          or (throw "writePythonApplication: unknown pyChecker \"${pyChecker}\" (expected \"ty\", \"zuban\", or \"mypy\")");
     in
     pkgs.writeTextFile {
       inherit name;
@@ -71,9 +96,7 @@ let
         sys.argv = ${argv} + sys.argv[1:]
         runpy.run_path("${srcPath}", run_name="__main__")
       '';
-      checkPhase = lib.optionalString check ''
-        ${lib.getExe pkgs.ty} ${lib.escapeShellArgs tyCheckArgs}
-      '';
+      checkPhase = lib.optionalString check checkerPhase;
       meta = meta // {
         mainProgram = meta.mainProgram or name;
       };

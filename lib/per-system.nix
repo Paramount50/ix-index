@@ -35,11 +35,12 @@ let
   # up in the `lint` derivation build, not at `nix run` time.
   lintStage = ix.writeNushellApplication pkgs {
     name = "lint-stage";
-    meta.description = "One lint stage (nixfmt | statix | deadnix | astlog | astlog-rust); driven by `lint`";
+    meta.description = "One lint stage (nixfmt | statix | deadnix | astlog | astlog-rust | ruff-ann); driven by `lint`";
     runtimeInputs = [
       pkgs.deadnix
       pkgs.fd
       pkgs.nixfmt
+      pkgs.ruff
       pkgs.statix
       repoPackages.astlog
     ];
@@ -93,8 +94,30 @@ let
           astlog scan astlog-rules/cargo.astlog ...$cargo_files
         }
       }
+      # ruff flake8-annotations (ANN): the repo-wide explicit-annotation gate
+      # (ANN201 explicit returns, ANN001 arg types, ...). Scoped to an allowlist
+      # of migrated directories that grows as each package is annotated and
+      # flipped off the legacy `ty` checker; once every package is clean this
+      # becomes a whole-repo `ruff check --select ANN .`. Keeping the gate green
+      # from the first commit is why it is an allowlist, not the whole tree.
+      def "main ruff-ann" [] {
+        let dirs = (
+          [
+            packages/search/search-py/python
+            packages/code/astlog/py/python
+            packages/code/scipql/py/python
+            packages/polars-sftp/python
+            packages/tui/tui-py/src
+            packages/minecraft/minecraft/probe/src
+          ]
+          | where {|d| $d | path exists}
+        )
+        if ($dirs | is-not-empty) {
+          ruff check --select ANN ...$dirs
+        }
+      }
       def main [] {
-        error make { msg: "specify a stage: nixfmt | statix | deadnix | astlog | astlog-rust" }
+        error make { msg: "specify a stage: nixfmt | statix | deadnix | astlog | astlog-rust | ruff-ann" }
       }
     '';
   };
@@ -120,6 +143,10 @@ let
       "astlog-rust".command = [
         (lib.getExe lintStage)
         "astlog-rust"
+      ];
+      "ruff-ann".command = [
+        (lib.getExe lintStage)
+        "ruff-ann"
       ];
     };
   };
