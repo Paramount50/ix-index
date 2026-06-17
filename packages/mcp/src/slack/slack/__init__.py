@@ -44,9 +44,10 @@ import pathlib
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, cast
+from typing import Any
 
 import polars as pl
+from pydantic import BaseModel, ConfigDict
 
 __all__ = [
     "SlackError",
@@ -151,6 +152,34 @@ _SEARCH_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "text": pl.Utf8,
     "permalink": pl.Utf8,
 }
+
+
+class _SlackProfile(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    display_name: str | None = None
+    real_name: str | None = None
+
+
+class _SlackMember(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str | None = None
+    profile: _SlackProfile | None = None
+
+
+class _SlackImChannel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+
+
+class _SlackChannel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    name: str | None = None
 
 
 class SlackError(RuntimeError):
@@ -355,15 +384,15 @@ def _resolve_user(name_or_id: str, token: str) -> str:
         if cursor:
             params["cursor"] = cursor
         data = _api_call("users.list", token, params)
-        for u in data.get("members", []):
-            prof: dict[str, Any] = u.get("profile") or {}
+        for u in [_SlackMember.model_validate(m) for m in data.get("members", [])]:
+            prof = u.profile
             names = {
-                (u.get("name") or "").lower(),
-                (prof.get("display_name") or "").lower(),
-                (prof.get("real_name") or "").lower(),
+                (u.name or "").lower(),
+                (prof.display_name or "").lower() if prof else "",
+                (prof.real_name or "").lower() if prof else "",
             }
             if want and want in names:
-                return cast(str, u["id"])
+                return u.id
         cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
         if not cursor:
             break
@@ -376,7 +405,9 @@ def _resolve_user(name_or_id: str, token: str) -> str:
 def _open_im(user_id: str, token: str) -> str:
     """Return the DM channel ID for ``user_id`` (opening it if needed)."""
     data = _api_call("conversations.open", token, {"users": user_id})
-    return cast(str, (data.get("channel") or {}).get("id", ""))
+    raw_channel: dict[str, Any] = data.get("channel") or {}
+    channel = _SlackImChannel.model_validate(raw_channel)
+    return channel.id
 
 
 def _resolve_channel_by_name(name: str, token: str) -> str | None:
@@ -392,9 +423,9 @@ def _resolve_channel_by_name(name: str, token: str) -> str | None:
         if cursor:
             params["cursor"] = cursor
         data = _api_call("conversations.list", token, params)
-        for ch in data.get("channels", []):
-            if ch.get("name", "").lower() == want:
-                return cast("str | None", ch["id"])
+        for ch in [_SlackChannel.model_validate(c) for c in data.get("channels", [])]:
+            if (ch.name or "").lower() == want:
+                return ch.id
         cursor = (data.get("response_metadata") or {}).get("next_cursor") or ""
         if not cursor:
             break
