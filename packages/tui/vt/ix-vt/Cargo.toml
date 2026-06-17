@@ -8,10 +8,11 @@ repository = "https://github.com/indexable-inc/index"
 publish = true
 
 [dependencies]
-# `version` alongside `path` so `cargo publish -p ix-vt` accepts the dependency
-# (a path-only dep is rejected for a `publish = true` crate); the path is used
-# for in-workspace builds and the version for the published manifest.
-ix-vt-sys = { path = "../ix-vt-sys", version = "0.1.0" }
+# Inherited from the root [workspace.dependencies], which carries both the path
+# (for in-workspace builds) and `version = "0.1.0"` (so `cargo publish -p ix-vt`
+# accepts the dependency: a path-only dep is rejected for a `publish = true`
+# crate). Declaring it once there is what `no-cargo-path-dep` enforces.
+ix-vt-sys.workspace = true
 
 [lints]
 workspace = true

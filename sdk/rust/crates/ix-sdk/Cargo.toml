@@ -21,10 +21,11 @@ path = "src/bin/probe.rs"
 
 [dependencies]
 # The dependency edge Cargo resolves against the metadata stub
-# (`../../vendor/ix-sdk-wire`). At nix build time the cargo-unit seam injects the
-# prebuilt rlib+rmeta (from R2) over this unit, so the SDK links the prebuilt
-# artifact with no `ix-sdk-wire` source in its closure.
-ix-sdk-wire = { path = "../../vendor/ix-sdk-wire" }
+# (`vendor/ix-sdk-wire`, declared in this workspace's [workspace.dependencies]).
+# At nix build time the cargo-unit seam injects the prebuilt rlib+rmeta (from R2)
+# over this unit, so the SDK links the prebuilt artifact with no `ix-sdk-wire`
+# source in its closure. Inherited (not a member-table path) per no-cargo-path-dep.
+ix-sdk-wire.workspace = true
 
 [lints]
 workspace = true

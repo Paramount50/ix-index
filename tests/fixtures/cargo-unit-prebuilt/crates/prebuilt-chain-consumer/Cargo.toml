@@ -12,4 +12,7 @@ path = "src/main.rs"
 # purely as mid's transitive dep, which is the path depUnits auto-injection
 # exercises.
 [dependencies]
+# Fixture exercises cargo-unit's path-dep resolution; the explicit `path` edge is
+# the thing under test, not a real workspace dep.
+# astlog-ignore: no-cargo-path-dep
 prebuilt-mid = { path = "../prebuilt-mid" }

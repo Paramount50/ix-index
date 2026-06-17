@@ -163,6 +163,8 @@ google-auth = { path = "packages/google/auth" }
 google-calendar = { path = "packages/google/calendar" }
 google-gmail = { path = "packages/google/gmail" }
 indexbench = { path = "packages/indexbench" }
+ix-vt = { path = "packages/tui/vt/ix-vt" }
+ix-vt-sys = { path = "packages/tui/vt/ix-vt-sys", version = "0.1.0" }
 kitty = { path = "packages/terminal/kitty" }
 lake-iceberg = { path = "packages/search/lake/iceberg" }
 color-eyre = "0.6"

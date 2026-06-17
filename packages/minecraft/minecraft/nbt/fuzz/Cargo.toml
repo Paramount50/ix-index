@@ -11,10 +11,16 @@ cargo-fuzz = true
 # `cargo --workspace` graph and `nix flake check` does not see the fuzz crate.
 [workspace]
 
+# The crate under fuzz, declared once here and inherited below with
+# `minecraft-nbt.workspace = true` (no-cargo-path-dep forbids the path in the
+# member [dependencies] table).
+[workspace.dependencies]
+minecraft-nbt = { path = ".." }
+
 [dependencies]
 libfuzzer-sys = "0.4"
 serde_json = "1"
-minecraft-nbt = { path = ".." }
+minecraft-nbt.workspace = true
 
 [[bin]]
 name = "decode_document"

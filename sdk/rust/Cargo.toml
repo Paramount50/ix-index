@@ -19,6 +19,14 @@ members = [
 ]
 resolver = "3"
 
+# Local-crate path declared once here; `crates/ix-sdk` inherits it with
+# `ix-sdk-wire.workspace = true` (no-cargo-path-dep forbids the path in the
+# member table). Path-only and version-free, exactly as the member declared it,
+# so the resolved dependency edge - and the cargo-unit unit hash the prebuilt
+# R2 injection keys on - is unchanged.
+[workspace.dependencies]
+ix-sdk-wire = { path = "vendor/ix-sdk-wire" }
+
 # `public-rlib` inherits `release`, and the cargo-unit hash folds in
 # debug-assertions and overflow-checks, which `public-rlib` does NOT override.
 # ix's `[profile.release]` turns BOTH on, so this workspace's release base must

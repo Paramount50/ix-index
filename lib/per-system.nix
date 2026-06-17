@@ -79,8 +79,19 @@ let
           ]
           | where {|d| $d | path exists}
         )
-        if ($dirs | is-empty) { return }
-        astlog scan astlog-rules/rust.astlog ...$dirs
+        if ($dirs | is-not-empty) {
+          astlog scan astlog-rules/rust.astlog ...$dirs
+        }
+        # The Cargo/workspace rules (astlog-rules/cargo.astlog, TOML grammar) run
+        # over every Cargo.toml in the repo: `no-cargo-path-dep` bans inter-crate
+        # `path` deps in member tables so local crates are declared once in a
+        # [workspace.dependencies] and inherited with `workspace = true`. A
+        # separate ruleset because the `astlog-rules` self-test maps one source
+        # extension per ruleset (rust.astlog -> .rs, cargo.astlog -> .toml).
+        let cargo_files = (fd --hidden --glob Cargo.toml | lines)
+        if ($cargo_files | is-not-empty) {
+          astlog scan astlog-rules/cargo.astlog ...$cargo_files
+        }
       }
       def main [] {
         error make { msg: "specify a stage: nixfmt | statix | deadnix | astlog | astlog-rust" }
@@ -869,10 +880,11 @@ let
                 }
                 check_ruleset "$root/nix.astlog" nix
                 check_ruleset "$root/rust.astlog" rs
+                check_ruleset "$root/cargo.astlog" toml
                 # Every fixture dir must back a lint in one of the rulesets.
                 for dir in "$tests"/*/; do
                   rule=$(basename "$dir")
-                  if ! grep -q "^(lint $rule " "$root/nix.astlog" "$root/rust.astlog"; then
+                  if ! grep -q "^(lint $rule " "$root/nix.astlog" "$root/rust.astlog" "$root/cargo.astlog"; then
                     echo "fixture dir astlog-rules/tests/$rule matches no lint" >&2
                     fail=1
                   fi
