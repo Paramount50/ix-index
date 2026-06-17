@@ -1,4 +1,5 @@
 defmodule Service do
+  @moduledoc false
   # A @spec for a *different* function must not exempt `call`: name-matching
   # means this still fires (the pre-negation rule wrongly stayed silent here).
   @spec other() :: :ok

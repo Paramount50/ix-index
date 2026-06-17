@@ -1,4 +1,5 @@
 defmodule Service do
+  @moduledoc false
   @spec call(integer()) :: integer()
   def call(x), do: x
 

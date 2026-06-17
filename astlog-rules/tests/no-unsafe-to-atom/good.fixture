@@ -1,0 +1,9 @@
+defmodule SafeAtom do
+  @moduledoc false
+
+  # to_existing_atom/1 only resolves atoms that already exist, so it cannot grow
+  # the table; the rule must stay silent on it (and on a same-named function in
+  # an unrelated module).
+  @spec parse(String.t()) :: atom()
+  def parse(s), do: String.to_existing_atom(s)
+end

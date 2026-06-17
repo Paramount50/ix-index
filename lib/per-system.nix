@@ -94,13 +94,15 @@ let
           astlog scan astlog-rules/cargo.astlog ...$cargo_files
         }
       }
-      # The Elixir type-discipline rules (astlog-rules/elixir.astlog): a struct
-      # needs a `@type`, and a public `def` needs a preceding `@spec` (behaviour
-      # callbacks marked `@impl` are exempt) — the lint-level nudge toward the
-      # shape Elixir 1.18's set-theoretic checker can check. Run over every
-      # package's `lib/` Elixir, not a hand-maintained directory list: the only
-      # scoping is to `lib/` itself, because `mix.exs` build functions and
-      # `test/` ExUnit helpers are not the type-checked runtime surface and
+      # The Elixir lint rules (astlog-rules/elixir.astlog), two families. Type
+      # discipline: a struct needs a `@type`, a public `def` needs a preceding
+      # `@spec` (behaviour callbacks marked `@impl` are exempt), and a module
+      # needs a `@moduledoc` — the lint-level nudge toward the shape Elixir
+      # 1.18's set-theoretic checker can check. Correctness/security: no unsafe
+      # dynamic atom creation (atom-table DoS), no leftover `IO.inspect`. Run
+      # over every package's `lib/` Elixir, not a hand-maintained directory list:
+      # the only scoping is to `lib/` itself, because `mix.exs` build functions
+      # and `test/` ExUnit helpers are not the type-checked runtime surface and
       # speccing them would be noise. `fd` already skips gitignored `_build`/`deps`.
       def "main astlog-elixir" [] {
         let files = (
