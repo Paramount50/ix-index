@@ -36,8 +36,11 @@ class Item(BaseModel):
     id: str
     title: str
     body: str
-    outcome: str  # success | failure | mixed
-    scope: str  # user | shared
+    # Defaults match the old total=False TypedDict loader's .get() fallbacks in
+    # corpus.py ("mixed" / "shared") so legacy state files that omit these
+    # fields still validate rather than raising ValidationError.
+    outcome: str = "mixed"  # success | failure | mixed
+    scope: str = "shared"  # user | shared
     sessions: list[str] = []
     first_seen: float = 0.0
     last_updated: float = 0.0

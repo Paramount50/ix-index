@@ -11,6 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .types import State
 
 
@@ -28,10 +30,17 @@ def load(out_dir: Path, user: str, slug: str) -> State:
         return State()
     if not isinstance(data, dict):
         return State()
-    # The file is external (a prior run's output, possibly hand-edited); the
-    # model fills any keys an older schema omitted (defaults) and drops keys a
-    # newer schema added (extra="ignore") before the State shape is trusted.
-    return State.model_validate(data)
+    try:
+        # The file is external (a prior run's output, possibly hand-edited); the
+        # model fills any keys an older schema omitted (defaults) and drops keys a
+        # newer schema added (extra="ignore") before the State shape is trusted.
+        return State.model_validate(data)
+    except ValidationError:
+        # A legacy or hand-edited file that is valid JSON but fails schema
+        # validation (e.g. an items[] entry with an unrecognised type that
+        # cannot coerce) degrades to a fresh empty state rather than crashing,
+        # matching the "corrupt file → empty state" contract above.
+        return State()
 
 
 def save(out_dir: Path, user: str, slug: str, state: State) -> Path:

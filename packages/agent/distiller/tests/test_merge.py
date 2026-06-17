@@ -1,6 +1,7 @@
 """Incremental-merge tests: stable ids, update-not-rewrite, caps."""
 
 import itertools
+import json
 
 from distiller import distill
 from distiller.types import Item, SessionRecord
@@ -100,3 +101,53 @@ def test_prompt_starts_with_sentinel():
     # sentinel (self-distillation guard); the prompt must keep that coupling.
     prompt = distill.build_prompt("/p", [], ["### session x"])
     assert prompt.startswith(distill.PROMPT_SENTINEL)
+
+
+# ---------------------------------------------------------------------------
+# Regression: state.load() must not crash on legacy/invalid state files.
+# ---------------------------------------------------------------------------
+
+
+def test_load_legacy_item_missing_scope_and_outcome(tmp_path):
+    """A state file whose items[] omit 'scope'/'outcome' (total=False legacy)
+    must load cleanly with the old-loader defaults, not raise ValidationError.
+    """
+    from distiller import state as state_mod
+
+    legacy = {
+        "project": "/home/u/repo",
+        "items": [
+            # Missing 'scope' and 'outcome' -- what the old TypedDict produced.
+            {"id": "df-aaa", "title": "Old lesson", "body": "Do the thing."}
+        ],
+        "distilled_sessions": {},
+        "session_outcomes": {},
+    }
+    state_path = tmp_path / "state" / "u" / "repo.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps(legacy))
+
+    loaded = state_mod.load(tmp_path, "u", "repo")
+    assert len(loaded.items) == 1
+    item = loaded.items[0]
+    assert item.id == "df-aaa"
+    # Defaults must match the old .get() fallbacks from corpus.py.
+    assert item.scope == "shared"
+    assert item.outcome == "mixed"
+
+
+def test_load_schema_invalid_json_returns_empty(tmp_path):
+    """A state file that is valid JSON but fails pydantic schema validation
+    (e.g. items is a string instead of a list) returns an empty State rather
+    than propagating a ValidationError.
+    """
+    from distiller import state as state_mod
+
+    bad = {"project": "/p", "items": "not-a-list"}
+    state_path = tmp_path / "state" / "u" / "repo.json"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(json.dumps(bad))
+
+    loaded = state_mod.load(tmp_path, "u", "repo")
+    assert loaded.items == []
+    assert loaded.project is None
