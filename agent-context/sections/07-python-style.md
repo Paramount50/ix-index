@@ -18,18 +18,27 @@ shape.
 The Python helpers run a type checker at build time, selected with `pyChecker`,
 which **defaults to `"zuban"`**: `zuban check --strict` (correctness, including
 disallow-untyped-defs) plus `ruff check` with the shared
-[`lib/build/ruff-ann.nix`](lib/build/ruff-ann.nix) selector (`ANN` explicit
-annotations + `TID251` no-`typing.cast`). So a new uv app or
-`writePythonApplication` script must be fully annotated and pass strict checking
-out of the box. Set `pyChecker = "ty"` (the older gradual checker) or `"mypy"`
-for a deliberate reason; disable entirely with `check = false` only when
-justified.
+[`lib/build/ruff-ann.nix`](lib/build/ruff-ann.nix) selector. So a new uv app or
+`writePythonApplication` script must be fully annotated and pass the lints out of
+the box. Set `pyChecker = "ty"` (the older gradual checker) or `"mypy"` for a
+deliberate reason; disable entirely with `check = false` only when justified.
 
-Enforcement is per-package via the build gate. The one remaining package on a
-mixed footing is `packages/mcp` (its own `strictTypecheck` gate covers the
-migrated modules; the rest is tracked in ENG-3136). Once mcp is fully clean, a
-whole-repo `ruff check --select ANN .` lint stage can replace per-package
-enforcement with a single tree-wide gate.
+The ruff selector is a high-signal "really good lints" set (one source of truth
+in `ruff-ann.nix`, consumed by every gate): the bug-catchers and modernizers
+`B`/`ASYNC`/`SIM`/`RET`/`C4`/`PIE`/`UP`/`RUF`/`PERF`/`FURB`/`PLE`/`PLW`/`LOG`/`G`/
+`DTZ`/`FLY`/`ISC`, the security family `S` (bandit), `PTH` (pathlib), `PT`
+(pytest), `FBT` (boolean-trap), plus `ANN` (explicit annotations; `ANN401` bans
+bare `typing.Any`) and `TID251` (no `typing.cast`). Contextual/noisy members are
+globally ignored (`S101` asserts, `S603`/`S607` fixed-arg subprocess, `PLW0603`
+caches, `ISC001`, `RUF001/2/3`); pure-stylistic families (`TRY003`, `EM`, `T201`,
+`N`, `ARG`, `D`) are not selected. A genuine false positive opts out per line with
+an annotated `# noqa: <rule> -- <reason>`, never a blanket silence.
+
+Enforcement is two-layer, sharing that one selector: each package's build gate
+runs it over the package, and a repo-wide `ruff` lint stage
+(`lib/per-system.nix`, in `nix run .#lint` + the CI `lint` check) runs it over
+**every** tracked `.py` — including `tools/`, `users/`, `skills/`, `sdk/`,
+`examples/`, `lib/` that no package gate covers.
 
 `typing.Any` in annotations is already banned everywhere by `ruff ANN401`, and
 `typing.cast` is banned by `ruff TID251`: a cast lies to the type checker at zero

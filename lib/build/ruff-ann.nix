@@ -1,26 +1,34 @@
-# Single source of truth for the repo's ruff "explicit + safe" lint selector.
-#
-# Every Python build gate runs `ruff check ${ruffAnnArgs} <targets>` with these
-# args so the policy never drifts across call sites:
+# Single source of truth for the repo's ruff lint policy, consumed by every
+# Python gate so it never drifts across call sites:
 #   lib/build/uv-application.nix   (all uv apps)
 #   lib/util/writers.nix          (writePythonApplication scripts)
 #   packages/mcp/default.nix      (bundled-module strict gate)
 #   packages/agent/distiller/default.nix
 #   sdk/python/default.nix
+#   lib/per-system.nix            (the repo-wide `ruff` lint stage, over ALL .py)
 #
-# Selected rules:
-#   * ANN    -- flake8-annotations: explicit annotations everywhere (ANN001 arg
-#               types, ANN201 return types, ANN401 bans bare `typing.Any`).
-#   * TID251 -- flake8-tidy-imports banned-api: bans `typing.cast`. cast lies to
-#               the type checker at zero runtime cost, so a wrong cast is a
-#               latent bug no checker can catch. Parse untrusted/JSON data into a
-#               pydantic model at the boundary instead, or fix the real type. The
-#               rare genuinely-unavoidable case (e.g. casting a test double to
-#               its interface) opts out per-file with `# noqa: TID251` + a reason.
+# Philosophy: a high-signal "really good lints" set -- every rule family that
+# catches real bugs, security issues, or stale idioms -- and NOT the stylistic
+# rules that would only generate noqa noise. Highlights: B (bugbear, incl.
+# mutable-default args), ASYNC (blocking calls in async fns), S (bandit
+# security), PTH (pathlib), PT (pytest), UP (pyupgrade), plus the original
+# ANN (explicit annotations, ANN401 bans bare `typing.Any`) and TID251.
 #
-# The ban is configured inline (`--config`) rather than via a checked-in
-# ruff.toml because per-package builds run ruff inside sandboxes that do not
-# contain the repo root, so an on-disk config would never be discovered.
+# `ignore` drops the contextual/noisy members of selected families so we never
+# need per-file ignores (the inline-config sandbox gate has no ruff.toml):
+#   S101 asserts (used in tests + runtime), S603/S607 deliberate fixed-arg
+#   subprocess calls, S311 non-crypto random, PLW0603 module-lifetime caches,
+#   ISC001 (formatter owns it), RUF001/2/3 ambiguous-unicode false positives.
+# Deliberately NOT selected (pure style): TRY003, EM, T201, N, ARG, D.
+#
+# TID251 bans `typing.cast`: it lies to the type checker at zero runtime cost, so
+# a wrong cast is a latent bug no checker can catch. Parse untrusted/JSON data
+# into a pydantic model at the boundary instead, or fix the real type; the rare
+# genuinely-unavoidable case (e.g. a test double) opts out with `# noqa: TID251`.
+#
+# Config is passed inline (`--config`/`--select`/`--ignore`) rather than via a
+# checked-in ruff.toml because per-package builds run ruff inside sandboxes that
+# do not contain the repo root, so an on-disk config would never be discovered.
 { lib }:
 let
   banMessage =
@@ -29,10 +37,49 @@ let
     + "boundary, or fix the real type. Only for an unavoidable case (e.g. a test "
     + "double): add a `# noqa: TID251` with a reason.";
   banConfig = ''lint.flake8-tidy-imports.banned-api."typing.cast".msg = "${banMessage}"'';
+  # Bug-catchers + security + pathlib + pytest + the original explicit-annotation
+  # and no-cast gates. TID251 here is redundant with the banned-api config below
+  # but makes the ban explicit in the selector.
+  select = [
+    "ANN"
+    "TID251"
+    "B"
+    "ASYNC"
+    "C4"
+    "SIM"
+    "RET"
+    "PIE"
+    "UP"
+    "RUF"
+    "PERF"
+    "FURB"
+    "PLE"
+    "PLW"
+    "LOG"
+    "G"
+    "DTZ"
+    "FLY"
+    "ISC"
+    "S"
+    "PTH"
+    "PT"
+    "FBT"
+  ];
+  ignore = [
+    "S101"
+    "S603"
+    "S607"
+    "S311"
+    "PLW0603"
+    "ISC001"
+    "RUF001"
+    "RUF002"
+    "RUF003"
+  ];
 in
 {
-  inherit banMessage banConfig;
+  inherit banMessage banConfig select ignore;
   # Drop-in replacement for the old bare `--select ANN`:
   #   ruff check ${ruffAnnArgs} <targets>
-  ruffAnnArgs = "--select ANN,TID251 --config ${lib.escapeShellArg banConfig}";
+  ruffAnnArgs = "--select ${lib.concatStringsSep "," select} --ignore ${lib.concatStringsSep "," ignore} --config ${lib.escapeShellArg banConfig}";
 }

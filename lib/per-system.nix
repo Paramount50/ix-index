@@ -35,11 +35,12 @@ let
   # up in the `lint` derivation build, not at `nix run` time.
   lintStage = ix.writeNushellApplication pkgs {
     name = "lint-stage";
-    meta.description = "One lint stage (nixfmt | statix | deadnix | astlog | astlog-rust); driven by `lint`";
+    meta.description = "One lint stage (nixfmt | statix | deadnix | astlog | astlog-rust | astlog-elixir | ruff); driven by `lint`";
     runtimeInputs = [
       pkgs.deadnix
       pkgs.fd
       pkgs.nixfmt
+      pkgs.ruff
       pkgs.statix
       repoPackages.astlog
     ];
@@ -111,8 +112,24 @@ let
           astlog scan astlog-rules/elixir.astlog ...$files
         }
       }
+      # Repo-wide Python lint: the shared ruff selector (bug-catchers + security +
+      # pathlib + pytest + explicit annotations + no `typing.cast`; see
+      # lib/build/ruff-ann.nix) over EVERY tracked .py, so non-package dirs
+      # (tools/, users/, skills/, sdk/, examples/, lib/) are covered too, not just
+      # the per-package build gates. `fd` skips gitignored paths; `.claude` (agent
+      # worktrees and assets) is filtered out explicitly.
+      def "main ruff" [] {
+        let py_files = (
+          fd --extension py
+          | lines
+          | where {|p| not ($p | str starts-with ".claude/") }
+        )
+        if ($py_files | is-not-empty) {
+          ruff check ${ix.ruffAnnArgs} ...$py_files
+        }
+      }
       def main [] {
-        error make { msg: "specify a stage: nixfmt | statix | deadnix | astlog | astlog-rust | astlog-elixir" }
+        error make { msg: "specify a stage: nixfmt | statix | deadnix | astlog | astlog-rust | astlog-elixir | ruff" }
       }
     '';
   };
@@ -142,6 +159,10 @@ let
       "astlog-elixir".command = [
         (lib.getExe lintStage)
         "astlog-elixir"
+      ];
+      ruff.command = [
+        (lib.getExe lintStage)
+        "ruff"
       ];
     };
   };
