@@ -5,8 +5,9 @@ let
 
     Wraps `src` in a launcher script that prepends `runtimeInputs` to PATH
     and runs the file under `python`. When `check` is true (default), the
-    derivation also runs `ty` over `src` during the build, so type regressions
-    fail the build instead of surfacing at runtime.
+    derivation also runs `zuban check --strict` + `ruff check --select ANN` over
+    `src` during the build, so type and annotation regressions fail the build
+    instead of surfacing at runtime.
 
     Arguments:
     - `name`: derivation name and `/bin/<name>` executable.
@@ -15,7 +16,7 @@ let
     - `runtimeInputs`: extra packages prepended to PATH at runtime.
     - `python`: Python interpreter package. Defaults to `pkgs.python314`.
     - `check`, `pyChecker`, `pythonPlatform`: type-check knobs. `pyChecker` is
-      "ty" (default, legacy), "zuban", or "mypy"; "zuban"/"mypy" run that checker
+      "zuban" (default), "ty" (legacy), or "mypy"; "zuban"/"mypy" run that checker
       `--strict` plus `ruff check --select ANN`.
     - `extraPaths`: extra import roots for the checker.
     - `meta`: standard derivation meta, with `mainProgram` defaulted.
@@ -29,10 +30,9 @@ let
       runtimeInputs ? [ ],
       python ? pkgs.python314,
       check ? true,
-      # "ty" (default, legacy), "zuban", or "mypy". "zuban"/"mypy" run that
-      # checker `--strict` plus `ruff check --select ANN`. See buildUvApplication
-      # for the repo-wide migration.
-      pyChecker ? "ty",
+      # "zuban" (default), "ty" (legacy), or "mypy". "zuban"/"mypy" run that
+      # checker `--strict` plus `ruff check --select ANN`. See buildUvApplication.
+      pyChecker ? "zuban",
       pythonPlatform ? "linux",
       extraPaths ? [ "${python}/${python.sitePackages}" ],
       meta ? { },

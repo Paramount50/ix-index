@@ -15,17 +15,16 @@ without PyPI dependencies or multiple source files. Once a script needs
 dependencies, console entry points, or a package layout, give it the uv project
 shape.
 
-The Python helpers run a type checker at build time, selected with `pyChecker`:
-`"ty"` (default, the legacy gradual checker), `"zuban"`, or `"mypy"`. The
-`"zuban"`/`"mypy"` options run that checker `--strict` (correctness, including
-disallow-untyped-defs) plus `ruff check --select ANN` (explicit annotations).
-The repo is migrating every package off `ty` onto strict checking; flip a package
-to `pyChecker = "zuban"` once its sources are fully annotated and clean. Disable
-the check (`check = false`) only when the package has a deliberate reason.
+The Python helpers run a type checker at build time, selected with `pyChecker`,
+which **defaults to `"zuban"`**: `zuban check --strict` (correctness, including
+disallow-untyped-defs) plus `ruff check --select ANN` (explicit annotations). So
+a new uv app or `writePythonApplication` script must be fully annotated and pass
+strict checking out of the box. Set `pyChecker = "ty"` (the older gradual
+checker) or `"mypy"` for a deliberate reason; disable entirely with
+`check = false` only when justified.
 
-Annotation and correctness enforcement is per-package, driven by that one
-`pyChecker` flag: a migrated package's build runs both checkers, an unmigrated
-(`ty`) package does not. Migration progress lives in exactly one place (the flag
-per package), not a second allowlist. Once every package is on `"zuban"`, a
+Enforcement is per-package via the build gate. The one remaining package on a
+mixed footing is `packages/mcp` (its own `strictTypecheck` gate covers the
+migrated modules; the rest is tracked in ENG-3136). Once mcp is fully clean, a
 whole-repo `ruff check --select ANN .` lint stage can replace per-package
 enforcement with a single tree-wide gate.

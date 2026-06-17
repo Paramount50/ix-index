@@ -7,8 +7,9 @@
   `uv lock` and do not maintain a separate Nix dependency hash. Locked
   distributions are fetched into a wheelhouse, installed offline into a virtual
   environment, and the local project is built as a wheel before installation.
-  Type checking runs by default with `ty` after install against the installed
-  virtual environment, matching `writePythonApplication`.
+  Type checking runs by default with `zuban check --strict` plus `ruff check
+  --select ANN` after install against the installed virtual environment, matching
+  `writePythonApplication`. Set `pyChecker` to "ty" or "mypy" to switch.
 
   The default path supports registry packages with `wheels` or `sdist` entries
   in `uv.lock`. Projects that use a non-uv build backend may need to pass a
@@ -24,7 +25,7 @@
   - `dev`, `allGroups`, `allExtras`: dependency selection shortcuts.
   - `exportFlags`, `pipInstallFlags`, `buildFlags`: extra uv flags.
   - `check`, `pyChecker`, `pythonPlatform`, `typeCheckPaths`, `typeCheckArgs`:
-    type-check knobs. `pyChecker` is "ty" (default, legacy), "zuban", or "mypy";
+    type-check knobs. `pyChecker` is "zuban" (default), "ty" (legacy), or "mypy";
     "zuban"/"mypy" run that checker `--strict` plus `ruff check --select ANN`.
   - `extraNativeBuildInputs`: extra packages on PATH for the build.
   - `runtimeLibraryInputs`: shared libraries made visible to binary wheels.
@@ -65,14 +66,12 @@ pkgs:
   pipInstallFlags ? [ ],
   buildFlags ? [ ],
   check ? true,
-  # Build-time Python checker, one of "ty" | "zuban" | "mypy". "ty" is the
-  # legacy gradual checker and the default during the repo-wide migration to
-  # strict checking. "zuban" and "mypy" run that checker in `--strict` mode
-  # (correctness) plus `ruff check --select ANN` (explicit annotations); a
-  # package flips off "ty" once its sources are fully annotated and clean. The
-  # default becomes "zuban" and the ty branch is removed once every package has
-  # migrated. Switching a package between checkers is a one-word change here.
-  pyChecker ? "ty",
+  # Build-time Python checker, one of "zuban" (default) | "ty" | "mypy".
+  # "zuban"/"mypy" run that checker in `--strict` mode (correctness) plus
+  # `ruff check --select ANN` (explicit annotations); "ty" is the older gradual
+  # checker, kept selectable for a package with a deliberate reason. Switching a
+  # package between checkers is a one-word change here.
+  pyChecker ? "zuban",
   pythonPlatform ? "linux",
   typeCheckPaths ? [ "." ],
   extraPaths ? [ ],
