@@ -1,14 +1,16 @@
 {
   callPackage,
   git,
+  ix,
   pi-coding-agent,
-  # Pinned bare `pi` binary (see ../shared/mk-pi-harness.nix). Override here
+  # Pinned bare `pi` binary (see the shared mk-pi-harness.nix). Override here
   # to swap the pi the wrapper execs.
   pi ? pi-coding-agent,
 }:
 let
-  mkPiHarness = callPackage ../shared/mk-pi-harness.nix { inherit pi; };
-  models = import ../shared/models.nix;
+  shared = ix.paths.packagesRoot + "/agent/pi-harnesses/shared";
+  mkPiHarness = callPackage (shared + "/mk-pi-harness.nix") { inherit pi; };
+  models = import (shared + "/models.nix");
 in
 mkPiHarness {
   name = "pi-beam";
@@ -17,11 +19,11 @@ mkPiHarness {
   extensions = [ ./extension/beam.ts ];
   libFiles = [
     ./runner/fanout.js
-    ../shared/ext-lib/scoring.js
+    (shared + "/ext-lib/scoring.js")
   ];
   # Branch subprocesses load this by absolute path; it must NOT be auto-loaded
   # into the main executor (which is not turn-capped).
-  auxFiles = [ ../shared/ext-lib/turn-cap.js ];
+  auxFiles = [ (shared + "/ext-lib/turn-cap.js") ];
 
   inherit models;
   defaultModel = "claude";
@@ -33,5 +35,5 @@ mkPiHarness {
   runtimeInputs = [ git ];
 
   checkFiles = [ ./test/scoring.test.mjs ];
-  checkLib = [ ../shared/ext-lib/scoring.js ];
+  checkLib = [ (shared + "/ext-lib/scoring.js") ];
 }

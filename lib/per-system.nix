@@ -26,6 +26,7 @@ let
   packageRegistry = import (paths.packagesRoot + "/registry.nix") {
     inherit lib;
     root = paths.packagesRoot;
+    inherit (ix.lists) findDuplicates;
   };
 
   # Each lint stage is one subcommand on a single binary so the spec keys
@@ -632,7 +633,7 @@ let
     fileset = fs.intersection (fs.gitTracked paths.root) (paths.root + "/astlog-rules");
   };
 
-  tests = import paths.tests { inherit nixpkgs ix; };
+  tests = import paths.tests { inherit nixpkgs ix paths; };
 
   exampleFleets = ix.exampleFleetsFor { hostSystem = system; };
 

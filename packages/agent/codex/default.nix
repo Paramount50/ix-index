@@ -69,7 +69,7 @@ let
   # config into every codex session.
   mcpStdioServers =
     lib.filterAttrs (_: def: (def.transport or "stdio") == "stdio")
-      (import ../common.nix { inherit lib ix repoPackages; }).houseServers;
+      (import (ix.paths.packagesRoot + "/agent/common.nix") { inherit lib ix repoPackages; }).houseServers;
   spec = (formats.json { }).generate "codex-launch-spec.json" {
     target = lib.getExe codex;
     config_dir_env = "CODEX_HOME";

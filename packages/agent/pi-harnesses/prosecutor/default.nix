@@ -1,14 +1,16 @@
 {
   callPackage,
   git,
+  ix,
   pi-coding-agent,
-  # Pinned bare `pi` binary (see ../shared/mk-pi-harness.nix). Override here
+  # Pinned bare `pi` binary (see the shared mk-pi-harness.nix). Override here
   # to swap the pi the wrapper execs.
   pi ? pi-coding-agent,
 }:
 let
-  mkPiHarness = callPackage ../shared/mk-pi-harness.nix { inherit pi; };
-  models = import ../shared/models.nix;
+  shared = ix.paths.packagesRoot + "/agent/pi-harnesses/shared";
+  mkPiHarness = callPackage (shared + "/mk-pi-harness.nix") { inherit pi; };
+  models = import (shared + "/models.nix");
 in
 mkPiHarness {
   name = "pi-prosecutor";
@@ -16,9 +18,9 @@ mkPiHarness {
 
   extensions = [ ./extension/prosecutor.ts ];
   libFiles = [
-    ../shared/ext-lib/trust.js
-    ../shared/ext-lib/child-agent.js
-    ../shared/ext-lib/probes.js
+    (shared + "/ext-lib/trust.js")
+    (shared + "/ext-lib/child-agent.js")
+    (shared + "/ext-lib/probes.js")
   ];
 
   inherit models;
@@ -38,5 +40,5 @@ mkPiHarness {
   runtimeInputs = [ git ];
 
   checkFiles = [ ./test/trust.test.mjs ];
-  checkLib = [ ../shared/ext-lib/trust.js ];
+  checkLib = [ (shared + "/ext-lib/trust.js") ];
 }

@@ -301,6 +301,7 @@
         andrewgazelka = import ./users/andrewgazelka/home.nix {
           indexPackages = system: (collect "packages").${system};
           portableServicesModule = ix.portableServices.homeModule;
+          inherit ix;
         };
         # Reusable workstation module: draw one Minecraft boss bar per in-flight
         # GitHub Actions run across a set of repos (green = running, filled by
@@ -311,6 +312,7 @@
         ci-bars = import ./packages/minecraft/bossbar-overlay/ci-bars-home-module.nix {
           indexPackages = system: (collect "packages").${system};
           portableServicesModule = ix.portableServices.homeModule;
+          inherit ix;
         };
         # Workstation-facing module to sync corpus sources (agent/shell history,
         # Slack/Linear exports, git repos) to an S3/R2 parquet archive and/or

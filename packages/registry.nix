@@ -1,6 +1,11 @@
-{ lib, root }:
+{
+  lib,
+  root,
+  # `findDuplicates` from lib/util/lists.nix, threaded in by callers (this file
+  # is the package-registry bootstrap, so it cannot reach the assembled `ix`).
+  findDuplicates,
+}:
 let
-  inherit (import ../lib/util/lists.nix { inherit lib; }) findDuplicates;
 
   relativePath = path: lib.removePrefix "${builtins.toString root}/" (builtins.toString path);
 

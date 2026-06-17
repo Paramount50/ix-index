@@ -4,6 +4,7 @@
 # jq, btop, bpftrace, lsof, ncdu, pv, file, and the gnutar/gzip/zstd trio
 # needed to stay `ix up`-switchable.
 {
+  ix,
   lib,
   pkgs,
   ...
@@ -13,7 +14,7 @@
   # live in one reusable module so the base image and `index.lib.mkDev` cannot
   # drift. `ix.dev.agents.{claude,codex}` default to true, so importing it ships
   # both. See lib/dev/agents.nix for the wrapper and policy rationale.
-  imports = [ ../../../lib/dev/agents.nix ];
+  imports = [ (ix.paths.root + "/lib/dev/agents.nix") ];
 
   ix.image.name = lib.mkOptionDefault "development-base";
 

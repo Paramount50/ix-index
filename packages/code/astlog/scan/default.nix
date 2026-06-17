@@ -11,13 +11,14 @@
 # four-stage local lint run (nixfmt | statix | deadnix | astlog | astlog-rust);
 # this package is the externally consumable surface.
 {
+  ix,
   writeNushellApplication,
   repoPackages,
   fd,
   git,
 }:
 let
-  rules = ../../../../astlog-rules/nix.astlog;
+  rules = ix.paths.root + "/astlog-rules/nix.astlog";
 in
 writeNushellApplication {
   name = "astlog-scan";

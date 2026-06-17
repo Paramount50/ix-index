@@ -51,6 +51,7 @@
 {
   indexPackages,
   portableServicesModule,
+  ix,
 }:
 {
   config,
@@ -82,7 +83,7 @@ let
   # native bash territory, so they use the shared escape hatch instead of
   # Nushell. The script body gets `set -euo pipefail` and runtimeInputs on
   # PATH, and `bash -n` + shellcheck run in the build.
-  inherit (import ../../lib/util/writers.nix { inherit lib; }) writeBashApplication;
+  inherit (ix) writeBashApplication;
 
   # Shared announcement helper: plays an optional Minecraft sound then speaks
   # text, detached into its own session (POSIX setsid via perl) so a switch
@@ -169,8 +170,8 @@ let
   # The CI progress bars are a standalone reusable component, not personal glue:
   # this just composes it (imported below, turned on in config). Anyone can do
   # the same with `services.ciBars = { enable = true; repos = [ ... ]; }`.
-  ciBarsModule = import ../../packages/minecraft/bossbar-overlay/ci-bars-home-module.nix {
-    inherit indexPackages portableServicesModule;
+  ciBarsModule = import (ix.paths.packagesRoot + "/minecraft/bossbar-overlay/ci-bars-home-module.nix") {
+    inherit indexPackages portableServicesModule ix;
   };
 in
 {

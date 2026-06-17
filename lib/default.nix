@@ -30,6 +30,7 @@ let
   packageRegistry = import (paths.packagesRoot + "/registry.nix") {
     inherit lib;
     root = paths.packagesRoot;
+    inherit (lists) findDuplicates;
   };
   packagePath =
     id:

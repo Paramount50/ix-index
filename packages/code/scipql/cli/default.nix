@@ -20,7 +20,7 @@ let
   # Bake the repo's pinned toolchain (same channel as rust-toolchain.toml) so
   # `scipql index` runs the exact rust-analyzer the repo builds against, with
   # rust-src for sysroot analysis, plus cargo/rustc for `cargo metadata`.
-  toolchainFile = lib.importTOML ../../../../rust-toolchain.toml;
+  toolchainFile = lib.importTOML (ix.paths.root + "/rust-toolchain.toml");
   nightlyDate = lib.removePrefix "nightly-" toolchainFile.toolchain.channel;
   rustToolchain = ix.languages.rust.toolchain pkgs {
     channel = "nightly";

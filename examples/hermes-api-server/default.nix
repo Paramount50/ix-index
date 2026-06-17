@@ -17,7 +17,7 @@ index.lib.mkFleet {
     groups = [ eastWestGroup ];
     modules = [
       index.lib.hermesAgent.nixosModules.default
-      ../hermes-agent/hermes.nix
+      (index.lib.paths.examples + "/hermes-agent/hermes.nix")
       ./api-server.nix
     ];
   };

@@ -89,7 +89,7 @@
   # `{ }` bakes no flag.
   mcpServers ?
     ix.mcp.toClaudeJson
-      (import ../common.nix { inherit lib ix repoPackages; }).houseServers,
+      (import (ix.paths.packagesRoot + "/agent/common.nix") { inherit lib ix repoPackages; }).houseServers,
 
   # Text APPENDED to Claude Code's stock system prompt. The string is
   # materialized to a store file and baked into the wrapper as
@@ -107,7 +107,7 @@
   # ../system-prompt.nix: the shokunin craft ethos plus the pre-v1
   # backward-compatibility engineering rule, plus a preference for working in git
   # worktrees); set to `null` to bake no flag and ship the stock prompt alone.
-  appendSystemPrompt ? (import ../common.nix { inherit lib ix repoPackages; }).systemPrompt,
+  appendSystemPrompt ? (import (ix.paths.packagesRoot + "/agent/common.nix") { inherit lib ix repoPackages; }).systemPrompt,
 
   # Only the flake package set injects the Nushell writer; the overlay eval
   # context does not. The updater is a maintainer-facing flake output, so the

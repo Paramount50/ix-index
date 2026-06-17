@@ -14,7 +14,7 @@ let
   # in the cdylib are fine: this module never leaves the Nix environment.
   tuiPythonSource = builtins.path {
     name = "tui-py-python-source";
-    path = ../tui/tui-py/python;
+    path = ix.paths.packagesRoot + "/tui/tui-py/python";
   };
   tuiModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-tui-python-module"
@@ -56,7 +56,7 @@ let
   # macOS dev.
   searchPythonSource = builtins.path {
     name = "search-py-python-source";
-    path = ../search/search-py/python;
+    path = ix.paths.packagesRoot + "/search/search-py/python";
   };
   searchModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-search-python-module"
@@ -96,7 +96,7 @@ let
   # shared workspace graph, so it works on Linux and macOS dev alike.
   astlogPythonSource = builtins.path {
     name = "astlog-py-python-source";
-    path = ../code/astlog/py/python;
+    path = ix.paths.packagesRoot + "/code/astlog/py/python";
   };
   astlogModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-astlog-python-module"
@@ -137,7 +137,7 @@ let
   # exposes facts/query/fix/rename over an already-built index.scip.)
   scipqlPythonSource = builtins.path {
     name = "scipql-py-python-source";
-    path = ../code/scipql/py/python;
+    path = ix.paths.packagesRoot + "/code/scipql/py/python";
   };
   scipqlModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-scipql-python-module"
@@ -178,7 +178,7 @@ let
   # alike.
   flecsQueryPythonSource = builtins.path {
     name = "flecs-query-py-python-source";
-    path = ../flecs-query/py/python;
+    path = ix.paths.packagesRoot + "/flecs-query/py/python";
   };
   flecsQueryModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-flecs-query-python-module"
@@ -264,7 +264,7 @@ let
   # or `gmail auth` / `gcal auth` on the host.
   ixGooglePythonSource = builtins.path {
     name = "ix-google-python-source";
-    path = ../google/py/python;
+    path = ix.paths.packagesRoot + "/google/py/python";
   };
   ixGoogleModule = pkgs.python3.pkgs.toPythonModule (
     pkgs.runCommand "ix-google-python-module"

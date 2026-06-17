@@ -21,6 +21,7 @@
 {
   indexPackages,
   portableServicesModule,
+  ix,
 }:
 {
   config,
@@ -46,7 +47,7 @@ let
   # bash process control (the perl flock guard), so it uses the shared escape
   # hatch instead of Nushell. The script body gets `set -euo pipefail` and
   # runtimeInputs on PATH, and `bash -n` + shellcheck run in the build.
-  inherit (import ../../../lib/util/writers.nix { inherit lib; }) writeBashApplication;
+  inherit (ix) writeBashApplication;
 
   ciBars = writeBashApplication pkgs {
     name = "ci-bars";
