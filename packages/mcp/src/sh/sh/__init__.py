@@ -78,6 +78,7 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import contextlib
 import html as _html
 import json as _json
 import os
@@ -243,7 +244,7 @@ class Output(_ResultBase):
         """The escape-stripped output split into lines (trailing newline dropped)."""
         return self.text.splitlines()
 
-    def json(self):
+    def json(self) -> object:
         """Parse the command's output (``.text``) as a single JSON document.
 
         For a tool with a JSON mode (``gh ... --json``, ``cargo metadata``,
@@ -275,7 +276,7 @@ class Output(_ResultBase):
             raise ShellError(self)
         return [_json.loads(line) for line in self.text.splitlines() if line.strip()]
 
-    def df(self):
+    def df(self) -> object:
         """The command's JSON output as a polars DataFrame: the one-liner for any
         CLI with a JSON mode.
 
@@ -352,19 +353,19 @@ class Output(_ResultBase):
         # success with `.ok`, emptiness with `len(out)`.
         return True
 
-    def __getitem__(self, key) -> str:
+    def __getitem__(self, key: int | slice) -> str:
         return self.text[key]
 
     def __len__(self) -> int:
         return len(self.text)
 
-    def __contains__(self, item) -> bool:
+    def __contains__(self, item: object) -> bool:
         return item in self.text
 
-    def __add__(self, other) -> str:
+    def __add__(self, other: str) -> str:
         return self.text + other
 
-    def __radd__(self, other) -> str:
+    def __radd__(self, other: str) -> str:
         return other + self.text
 
 
@@ -379,10 +380,8 @@ def _terminate(proc: asyncio.subprocess.Process) -> None:
         os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         # Process already gone, or no group to signal: kill the child directly.
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
 
 
 class _EchoStripper:
@@ -569,10 +568,8 @@ async def sh(
         _terminate(proc)
         # The group is dead, so the pipe closes and this reap returns promptly;
         # bound it anyway so a wedged reap can never hang the job past its timeout.
-        try:
+        with contextlib.suppress(asyncio.TimeoutError):
             await asyncio.wait_for(proc.wait(), 2.0)
-        except asyncio.TimeoutError:
-            pass
         raise TimeoutError(f"command timed out after {timeout}s: {shown}") from None
     except asyncio.CancelledError:
         # The awaiting task was cancelled (jobs['<id>'].cancel()): take the child
@@ -608,7 +605,7 @@ import functools as _functools
 
 class _CallableModule(_types.ModuleType):
     @_functools.wraps(sh)
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: object, **kwargs: object) -> object:
         return sh(*args, **kwargs)
 
 

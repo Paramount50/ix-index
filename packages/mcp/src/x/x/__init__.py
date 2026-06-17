@@ -33,6 +33,7 @@ signed out. Cross-platform.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from typing import Any
 
@@ -285,7 +286,5 @@ async def posts(
             pl.col("time").str.to_datetime(time_zone="UTC", strict=False)
         ).select(list(_SCHEMA))
     finally:
-        try:
+        with contextlib.suppress(Exception):
             await page.close()
-        except Exception:
-            pass

@@ -278,23 +278,21 @@ def read(path: str | Path) -> list[Task]:
         deps: dict[str, list[str]] = {}
         for r in con.execute("SELECT task_id, depends_on FROM deps"):
             deps.setdefault(r["task_id"], []).append(r["depends_on"])
-        rows: list[Task] = []
-        for r in con.execute(
-            "SELECT id, title, category, estimate, complete, active FROM tasks"
-            " ORDER BY id"
-        ):
-            rows.append(
-                Task(
-                    id=r["id"],
-                    title=r["title"],
-                    category=r["category"],
-                    estimate=r["estimate"],
-                    complete=bool(r["complete"]),
-                    active=bool(r["active"]),
-                    deps=tuple(deps.get(r["id"], ())),
-                )
+        return [
+            Task(
+                id=r["id"],
+                title=r["title"],
+                category=r["category"],
+                estimate=r["estimate"],
+                complete=bool(r["complete"]),
+                active=bool(r["active"]),
+                deps=tuple(deps.get(r["id"], ())),
             )
-        return rows
+            for r in con.execute(
+                "SELECT id, title, category, estimate, complete, active FROM tasks"
+                " ORDER BY id"
+            )
+        ]
     finally:
         con.close()
 

@@ -29,7 +29,7 @@ import json as _json
 import os
 import pathlib
 import subprocess
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import polars as pl
@@ -70,6 +70,7 @@ def _git_ignored(root: pathlib.Path, rels: list[str]) -> set[str]:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,  # exit 0=some-ignored, 1=none, 128=not-a-repo: all non-fatal
         )
     except (OSError, subprocess.SubprocessError):
         return set()
@@ -275,7 +276,7 @@ def _fmt_nested(value: Any, dtype: pl.DataType | pl.datatypes.DataTypeClass) -> 
             cols = [f.name for f in inner.fields]
             ftypes = [f.dtype for f in inner.fields]
             rows = [
-                [_fmt_cell((e or {}).get(c), ft)[0] for c, ft in zip(cols, ftypes)]
+                [_fmt_cell((e or {}).get(c), ft)[0] for c, ft in zip(cols, ftypes, strict=True)]
                 for e in items
             ]
             return _nested_table(cols, rows) + more
@@ -347,13 +348,13 @@ def _df_html_impl(df: pl.DataFrame, max_rows: int) -> str:
         f'{_c("head")};white-space:nowrap">'
         f'<div style="color:{_c("text")};font-weight:600">{_html.escape(c)}</div>'
         f'<div style="color:{_c("muted")};font-size:10px">{_html.escape(str(dt))}</div></th>'
-        for c, dt in zip(cols, dtypes)
+        for c, dt in zip(cols, dtypes, strict=True)
     )
     body = []
     for i, row in enumerate(df.head(max_rows).iter_rows()):
         bg = _c("alt") if i % 2 else _c("panel")
         cells = ""
-        for value, dtype in zip(row, dtypes):
+        for value, dtype in zip(row, dtypes, strict=True):
             cell, align = _fmt_cell(value, dtype)
             a = {"l": "left", "r": "right", "c": "center"}[align]
             cells += (
@@ -495,7 +496,7 @@ def ls(path: str | os.PathLike[str] = ".", *, all: bool = False) -> pl.DataFrame
         try:
             st = p.stat()
             size = st.st_size if p.is_file() else None
-            mtime = datetime.fromtimestamp(st.st_mtime)
+            mtime = datetime.fromtimestamp(st.st_mtime, tz=UTC)
         except OSError:
             size, mtime = None, None
         kind = "dir" if p.is_dir() else ("link" if p.is_symlink() else "file")

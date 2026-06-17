@@ -62,6 +62,7 @@ def _run(repo: str | os.PathLike[str], *args: str) -> subprocess.CompletedProces
         ["git", "-C", str(repo), *args],
         capture_output=True,
         text=True,
+        check=False,  # caller inspects .returncode
     )
 
 

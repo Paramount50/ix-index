@@ -55,6 +55,8 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from collections.abc import Iterator
+from typing import Any
 
 __all__ = [
     "CodeMap",
@@ -177,7 +179,7 @@ _BOOL = ctypes.c_bool
 _RESULT_P = ctypes.POINTER(_Result)
 
 
-def _bind(name: str, restype, argtypes: list) -> None:
+def _bind(name: str, restype: object, argtypes: list) -> None:
     fn = getattr(_lib, name)
     fn.restype = restype
     fn.argtypes = argtypes
@@ -248,7 +250,7 @@ _bind("fff_grep_match_get_context_after", _CP, [_VP, _U32])
 # ── result envelope helpers ──────────────────────────────────────────────────
 
 
-def _consume(result_ptr) -> tuple[int | None, int]:
+def _consume(result_ptr: Any) -> tuple[int | None, int]:  # noqa: ANN401 -- ctypes pointer type has no stable Python annotation
     """Read and free a `*FffResult`, returning `(handle, int_value)`.
 
     Frees only the envelope (and its error string); the `handle` payload, when
@@ -271,7 +273,7 @@ def _str(value: bytes | None) -> str | None:
     return value.decode("utf-8", "replace") if value else None
 
 
-def _encode(value) -> bytes | None:
+def _encode(value: str | bytes | os.PathLike | None) -> bytes | None:
     if value is None:
         return None
     return os.fspath(value).encode("utf-8")
@@ -319,7 +321,7 @@ def _validate_grep_args(
 # ── result types ─────────────────────────────────────────────────────────────
 
 
-def _polars():
+def _polars() -> Any:  # noqa: ANN401 -- returns the polars module object or None; no stable type for a module
     """The bundled ``polars`` module, or None. fff's core carries no polars
     dependency; the ``.df``/HTML views are a convenience for the ix-mcp kernel
     (where polars is always present), so import it lazily and degrade to text
@@ -355,7 +357,7 @@ class FileHit:
     def abspath(self) -> str:
         """The absolute filesystem path (``root`` joined with the relative
         ``path``), or ``path`` unchanged when no root is known."""
-        return os.path.join(self.root, self.path) if self.root else self.path
+        return str(Path(self.root) / self.path) if self.root else self.path
 
     def __fspath__(self) -> str:
         return self.abspath
@@ -367,13 +369,13 @@ class SearchResult:
     total_matched: int
     total_files: int
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[FileHit]:
         return iter(self.hits)
 
     def __len__(self) -> int:
         return len(self.hits)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int | slice) -> FileHit | SearchResult:
         """Index a single ``FileHit`` (``result[0]``) or slice into a new
         ``SearchResult`` (``result[:10]``), so the result composes like a list."""
         if isinstance(index, slice):
@@ -384,7 +386,7 @@ class SearchResult:
         return self.hits[index]
 
     @property
-    def df(self):
+    def df(self) -> Any:  # noqa: ANN401 -- returns polars.DataFrame; polars not a hard dep, avoid import at top level
         """The hits as a ``polars.DataFrame`` (composes with the polars API and
         renders as the dashboard's styled table). Requires polars."""
         pl = _polars()
@@ -414,7 +416,7 @@ class SearchResult:
             },
         ).with_columns(pl.from_epoch("modified", time_unit="s"))
 
-    def _ix_to_frame_(self):
+    def _ix_to_frame_(self) -> Any:  # noqa: ANN401 -- polars.DataFrame or None; polars not a hard dep
         """Kernel table protocol: render as this polars frame for both the human
         (styled HTML) and the model (compact CSV). None when polars is absent so
         the kernel falls back to the text repr."""
@@ -463,7 +465,7 @@ class GrepMatch:
     def abspath(self) -> str:
         """The absolute path of the matched file (``root`` joined with the
         relative ``path``), or ``path`` unchanged when no root is known."""
-        return os.path.join(self.root, self.path) if self.root else self.path
+        return str(Path(self.root) / self.path) if self.root else self.path
 
     def __fspath__(self) -> str:
         return self.abspath
@@ -476,13 +478,13 @@ class GrepResult:
     total_files_searched: int
     next_file_offset: int
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[GrepMatch]:
         return iter(self.matches)
 
     def __len__(self) -> int:
         return len(self.matches)
 
-    def __getitem__(self, index):
+    def __getitem__(self, index: int | slice) -> GrepMatch | GrepResult:
         """Index a single ``GrepMatch`` (``result[0]``) or slice into a new
         ``GrepResult`` (``result[:10]``), so the result composes like a list."""
         if isinstance(index, slice):
@@ -496,7 +498,7 @@ class GrepResult:
         return self.matches[index]
 
     @property
-    def df(self):
+    def df(self) -> Any:  # noqa: ANN401 -- returns polars.DataFrame; polars not a hard dep, avoid import at top level
         """The matches as a ``polars.DataFrame`` (composes with the polars API
         and renders as the dashboard's styled table). Requires polars."""
         pl = _polars()
@@ -524,7 +526,7 @@ class GrepResult:
             },
         )
 
-    def _ix_to_frame_(self):
+    def _ix_to_frame_(self) -> Any:  # noqa: ANN401 -- polars.DataFrame or None; polars not a hard dep
         """Kernel table protocol: render as this polars frame for both the human
         (styled HTML) and the model (compact CSV). None when polars is absent so
         the kernel falls back to the text repr."""
@@ -562,15 +564,15 @@ class FileFinder:
     def __init__(
         self,
         *,
-        root,
+        root: str | os.PathLike,
         ai_mode: bool = True,
         watch: bool = False,
         content_indexing: bool = False,
         mmap_cache: bool = False,
-        frecency_db=None,
-        history_db=None,
+        frecency_db: str | os.PathLike | None = None,
+        history_db: str | os.PathLike | None = None,
     ) -> None:
-        self._root = os.path.abspath(os.fspath(root))
+        self._root = str(Path(os.fspath(root)).resolve())
         opts = _CreateOptions()
         opts.version = _OPTIONS_VERSION
         opts.base_path = _encode(self._root)
@@ -594,14 +596,13 @@ class FileFinder:
     def __enter__(self) -> FileFinder:
         return self
 
-    def __exit__(self, *_exc) -> None:
+    def __exit__(self, *_exc: object) -> None:
         self.close()
 
     def __del__(self) -> None:
-        try:
+        import contextlib
+        with contextlib.suppress(Exception):
             self.close()
-        except Exception:
-            pass
 
     def _check_open(self) -> None:
         if self._closed:
@@ -640,7 +641,7 @@ class FileFinder:
         finally:
             _lib.fff_free_string(ctypes.c_void_p(handle))
 
-    def health_check(self, test_path=None) -> dict:
+    def health_check(self, test_path: str | os.PathLike | None = None) -> dict:
         self._check_open()
         handle, _ = _consume(_lib.fff_health_check(self._handle, _encode(test_path)))
         try:
@@ -657,7 +658,7 @@ class FileFinder:
         query: str,
         limit: int = 100,
         page: int = 0,
-        current_file=None,
+        current_file: str | os.PathLike | None = None,
         max_threads: int = 0,
     ) -> SearchResult:
         """Fuzzy file search, ranked by match score combined with frecency."""
@@ -688,7 +689,7 @@ class FileFinder:
         pattern: str,
         limit: int = 100,
         page: int = 0,
-        current_file=None,
+        current_file: str | os.PathLike | None = None,
         max_threads: int = 0,
     ) -> SearchResult:
         """Literal glob filter (e.g. `*.rs`, `src/**`), ranked by frecency."""
@@ -856,19 +857,19 @@ class FileFinder:
     # with other async jobs, without blocking them. Same arguments as the sync
     # methods; ``await ff.grep_async("TODO")``.
 
-    async def search_async(self, *args, **kwargs) -> SearchResult:
+    async def search_async(self, *args: Any, **kwargs: Any) -> SearchResult:  # noqa: ANN401 -- pass-through to search(); mirrors its signature dynamically
         return await asyncio.to_thread(self.search, *args, **kwargs)
 
-    async def glob_async(self, *args, **kwargs) -> SearchResult:
+    async def glob_async(self, *args: Any, **kwargs: Any) -> SearchResult:  # noqa: ANN401 -- pass-through to glob()
         return await asyncio.to_thread(self.glob, *args, **kwargs)
 
-    async def grep_async(self, *args, **kwargs) -> GrepResult:
+    async def grep_async(self, *args: Any, **kwargs: Any) -> GrepResult:  # noqa: ANN401 -- pass-through to grep()
         return await asyncio.to_thread(self.grep, *args, **kwargs)
 
-    async def multi_grep_async(self, *args, **kwargs) -> GrepResult:
+    async def multi_grep_async(self, *args: Any, **kwargs: Any) -> GrepResult:  # noqa: ANN401 -- pass-through to multi_grep()
         return await asyncio.to_thread(self.multi_grep, *args, **kwargs)
 
-    async def wait_for_scan_async(self, *args, **kwargs) -> bool:
+    async def wait_for_scan_async(self, *args: Any, **kwargs: Any) -> bool:  # noqa: ANN401 -- pass-through to wait_for_scan()
         return await asyncio.to_thread(self.wait_for_scan, *args, **kwargs)
 
     def _read_grep(self, handle: int | None) -> GrepResult:
@@ -927,13 +928,13 @@ _cache: OrderedDict[str, FileFinder] = OrderedDict()
 _cache_lock = threading.Lock()
 
 
-def finder(*, root, **kwargs) -> FileFinder:
+def finder(*, root: str | os.PathLike, **kwargs: Any) -> FileFinder:  # noqa: ANN401 -- forwards all FileFinder kwargs
     """Construct a `FileFinder` (does not scan; call `wait_for_scan` yourself)."""
     return FileFinder(root=root, **kwargs)
 
 
-def _cached(root) -> FileFinder:
-    key = os.path.abspath(os.fspath(root))
+def _cached(root: str | os.PathLike) -> FileFinder:
+    key = str(Path(os.fspath(root)).resolve())
     with _cache_lock:
         existing = _cache.get(key)
         if existing is not None and not existing._closed:
@@ -956,7 +957,7 @@ def _cached(root) -> FileFinder:
         return ff
 
 
-def _split_path(path) -> tuple[str, str | None]:
+def _split_path(path: str | os.PathLike) -> tuple[str, str | None]:
     """Split a search `path` into a directory root and an optional single-file
     name.
 
@@ -966,11 +967,11 @@ def _split_path(path) -> tuple[str, str | None]:
     (fff-c can't content-index a lone file as a root, and its indexer skips
     dotfiles and ignored paths). A directory passes through unscoped.
     """
-    fspath = os.path.expanduser(os.fspath(path))
-    if os.path.isfile(fspath):
-        absolute = os.path.abspath(fspath)
-        return os.path.dirname(absolute), os.path.basename(absolute)
-    return fspath, None
+    p = Path(os.fspath(path)).expanduser()
+    if p.is_file():
+        absolute = p.resolve()
+        return str(absolute.parent), absolute.name
+    return str(p), None
 
 
 def _is_unindexable_root(directory: str) -> bool:
@@ -981,11 +982,11 @@ def _is_unindexable_root(directory: str) -> bool:
     rejects them up front (mirrors the `dirs::home_dir()` / `parent()` check in
     fff-core's ``FilePicker::new``).
     """
-    resolved = os.path.abspath(directory)
-    if os.path.dirname(resolved) == resolved:  # filesystem root ("/", "C:\\")
+    resolved = Path(directory).resolve()
+    if resolved.parent == resolved:  # filesystem root ("/", "C:\\")
         return True
-    home = os.path.abspath(os.path.expanduser("~"))
-    return os.path.normcase(resolved) == os.path.normcase(home)
+    home = Path("~").expanduser().resolve()
+    return resolved == home
 
 
 def _refuse_unindexable_dir(root: str) -> FffError:
@@ -996,8 +997,8 @@ def _refuse_unindexable_dir(root: str) -> FffError:
     (whose suggestion nudges toward shelling out to ``grep``) with guidance that
     keeps you on the fast in-process tool: name a file or a scoped subdir.
     """
-    resolved = os.path.abspath(root)
-    what = "filesystem root" if os.path.dirname(resolved) == resolved else "home directory"
+    resolved = Path(root).resolve()
+    what = "filesystem root" if resolved.parent == resolved else "home directory"
     return FffError(
         f"refusing to index the {what} ({resolved}) whole: it would walk a huge "
         "tree and flood the file watcher. Search a specific file (e.g. "
@@ -1017,14 +1018,14 @@ def _isolated_file_finder(abspath: str, tmp: str, *, content_indexing: bool) -> 
     definitions, binary detection). ``copy2`` preserves size and mtime. Results
     come back keyed by the copy's name, so callers remap them to the real one.
     """
-    copy_name = os.path.basename(abspath).lstrip(".") or "file"
-    shutil.copy2(abspath, os.path.join(tmp, copy_name))
+    copy_name = Path(abspath).name.lstrip(".") or "file"
+    shutil.copy2(abspath, Path(tmp) / copy_name)
     ff = FileFinder(root=tmp, watch=False, content_indexing=content_indexing)
     ff.wait_for_scan(10_000)
     return ff
 
 
-def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
+def find(query: str, path: str | os.PathLike = ".", *, limit: int = 100) -> SearchResult:
     """Fuzzy file search over `path=` (root directory or file), reusing a cached watched index.
 
     `path` may be a directory (searched whole) or a single file (searched on its
@@ -1037,14 +1038,13 @@ def find(query: str, path=".", *, limit: int = 100) -> SearchResult:
         if _is_unindexable_root(root):
             raise _refuse_unindexable_dir(root)
         return _cached(root).search(query=query, limit=limit)
-    with tempfile.TemporaryDirectory(prefix="ix-fff-file-") as tmp:
-        with _isolated_file_finder(os.path.join(root, only), tmp, content_indexing=False) as ff:
-            result = ff.search(query=query, limit=limit)
+    with tempfile.TemporaryDirectory(prefix="ix-fff-file-") as tmp, _isolated_file_finder(str(Path(root) / only), tmp, content_indexing=False) as ff:
+        result = ff.search(query=query, limit=limit)
     hits = [replace(h, path=only, name=only, root=root) for h in result.hits][:limit]
     return SearchResult(hits=hits, total_matched=len(hits), total_files=len(hits))
 
 
-def tree(path=".", *, glob: str = "**", limit: int = 10_000) -> SearchResult:
+def tree(path: str | os.PathLike = ".", *, glob: str = "**", limit: int = 10_000) -> SearchResult:
     """The file tree under `path=` as data: every (gitignore-aware) file with its
     size and mtime, reusing a cached watched index.
 
@@ -1065,7 +1065,7 @@ def tree(path=".", *, glob: str = "**", limit: int = 10_000) -> SearchResult:
     if only is not None:
         # A single file is a one-row tree; stat it directly rather than spinning
         # up an isolated index.
-        stat = os.stat(os.path.join(root, only))
+        stat = (Path(root) / only).stat()
         hit = FileHit(
             path=only,
             name=only,
@@ -1081,12 +1081,12 @@ def tree(path=".", *, glob: str = "**", limit: int = 10_000) -> SearchResult:
     return _cached(root).glob(pattern=glob, limit=limit)
 
 
-async def atree(path=".", *, glob: str = "**", limit: int = 10_000) -> SearchResult:
+async def atree(path: str | os.PathLike = ".", *, glob: str = "**", limit: int = 10_000) -> SearchResult:
     """Async file-tree listing: runs off the event loop (non-blocking)."""
     return await asyncio.to_thread(tree, path=path, glob=glob, limit=limit)
 
 
-def grep(query: str | list[str], path=".", *, mode: str = "plain", limit: int = 50, glob: str | None = None) -> GrepResult:
+def grep(query: str | list[str], path: str | os.PathLike = ".", *, mode: str = "plain", limit: int = 50, glob: str | None = None) -> GrepResult:
     """Content grep over `path=` (root directory or file), reusing a cached watched (content-indexed) index.
 
     `query` and `path` are positional like the shell's `grep PATTERN PATH`
@@ -1146,9 +1146,8 @@ def grep(query: str | list[str], path=".", *, mode: str = "plain", limit: int = 
         if _is_unindexable_root(root):
             raise _refuse_unindexable_dir(root)
         return _run(_cached(root))
-    with tempfile.TemporaryDirectory(prefix="ix-fff-file-") as tmp:
-        with _isolated_file_finder(os.path.join(root, only), tmp, content_indexing=True) as ff:
-            result = _run(ff)
+    with tempfile.TemporaryDirectory(prefix="ix-fff-file-") as tmp, _isolated_file_finder(str(Path(root) / only), tmp, content_indexing=True) as ff:
+        result = _run(ff)
     matches = [replace(m, path=only, name=only, root=root) for m in result.matches]
     return GrepResult(
         matches=matches,
@@ -1158,12 +1157,12 @@ def grep(query: str | list[str], path=".", *, mode: str = "plain", limit: int = 
     )
 
 
-async def afind(query: str, path=".", *, limit: int = 100) -> SearchResult:
+async def afind(query: str, path: str | os.PathLike = ".", *, limit: int = 100) -> SearchResult:
     """Async fuzzy file search: runs off the event loop (non-blocking)."""
     return await asyncio.to_thread(find, query=query, path=path, limit=limit)
 
 
-async def agrep(query: str | list[str], path=".", *, mode: str = "plain", limit: int = 50, glob: str | None = None) -> GrepResult:
+async def agrep(query: str | list[str], path: str | os.PathLike = ".", *, mode: str = "plain", limit: int = 50, glob: str | None = None) -> GrepResult:
     """Async content grep: runs off the event loop (non-blocking)."""
     return await asyncio.to_thread(grep, query=query, path=path, mode=mode, limit=limit, glob=glob)
 
@@ -1193,7 +1192,7 @@ class CodeMap:
         return [m for m in self.matches if m.is_definition]
 
     @property
-    def df(self):
+    def df(self) -> Any:  # noqa: ANN401 -- returns polars.DataFrame; polars not a hard dep, avoid import at top level
         """The map as a nested ``polars.DataFrame``: one row per file, with the
         per-file matches as a ``list[struct]`` of (line, col, def, content), and
         ``defs``/``hits`` counts. Requires polars. (For a flat table use
@@ -1295,7 +1294,7 @@ class CodeMap:
         )
 
 
-def map(*, query: str | list[str], path, mode: str = "plain", limit: int = 200, glob: str | None = None) -> CodeMap:
+def map(*, query: str | list[str], path: str | os.PathLike, mode: str = "plain", limit: int = 200, glob: str | None = None) -> CodeMap:
     """Content grep grouped into a :class:`CodeMap`: hits per file with
     definitions ranked first. A glanceable answer to "where is X defined and
     used?" built straight on :func:`grep`. Accepts the same ``glob`` filter as
@@ -1303,7 +1302,7 @@ def map(*, query: str | list[str], path, mode: str = "plain", limit: int = 200, 
     return CodeMap(query=query, matches=grep(query=query, path=path, mode=mode, limit=limit, glob=glob).matches)
 
 
-async def amap(*, query: str | list[str], path, mode: str = "plain", limit: int = 200, glob: str | None = None) -> CodeMap:
+async def amap(*, query: str | list[str], path: str | os.PathLike, mode: str = "plain", limit: int = 200, glob: str | None = None) -> CodeMap:
     """Async :func:`map`: the same code map, off the event loop."""
     res = await agrep(query=query, path=path, mode=mode, limit=limit, glob=glob)
     return CodeMap(query=query, matches=res.matches)
