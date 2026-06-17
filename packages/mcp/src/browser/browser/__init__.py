@@ -85,6 +85,13 @@ import sys as _sys
 import time as _time
 import urllib.parse as _urlparse
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # Playwright is imported lazily at runtime (see `_ensure_playwright`); these
+    # are type-only so callers (e.g. the gated `x` module) see the real Page API
+    # on the values these functions return instead of an opaque `object`.
+    from playwright.async_api import Browser, BrowserContext, Page
 
 __all__ = [
     "DEFAULT_APP",
@@ -194,7 +201,7 @@ async def get_or_create_browser(
     app: str = DEFAULT_APP,
     user_data_dir: str | None = None,
     timeout: float = 30.0,
-) -> object:
+) -> Browser:
     """Connect to a browser already listening on ``endpoint``, or launch a real,
     **visible** (never headless) browser there and connect to it. Returns the live
     Playwright ``Browser``.
@@ -240,7 +247,7 @@ async def get_or_create_browser(
     return await connect(endpoint)
 
 
-async def connect(endpoint: str = DEFAULT_ENDPOINT) -> object:
+async def connect(endpoint: str = DEFAULT_ENDPOINT) -> Browser:
     """Connect to a running browser's CDP endpoint (or reuse the cached connection)
     and return the Playwright ``Browser``. ``endpoint`` is the DevTools HTTP URL
     ``http://host:port`` -- the default is the standard CDP port 9222.
@@ -368,14 +375,14 @@ def _register_resource(endpoint: str = DEFAULT_ENDPOINT) -> object | None:
     )
 
 
-async def context(endpoint: str = DEFAULT_ENDPOINT) -> object:
+async def context(endpoint: str = DEFAULT_ENDPOINT) -> BrowserContext:
     """The browser's first existing context (its running profile), creating one only
     if the browser exposes none."""
     b = await connect(endpoint)
     return b.contexts[0] if b.contexts else await b.new_context()
 
 
-async def page(*, endpoint: str = DEFAULT_ENDPOINT, new: bool = False) -> object:
+async def page(*, endpoint: str = DEFAULT_ENDPOINT, new: bool = False) -> Page:
     """A Playwright ``Page`` on the running browser: the front (most recent) tab by
     default, or a fresh tab with ``new=True``. Hand it to the full Playwright API."""
     ctx = await context(endpoint)
@@ -391,7 +398,7 @@ async def goto(
     new: bool = False,
     wait_until: str = "load",
     timeout: float = 30000,
-) -> object:
+) -> Page:
     """Navigate a tab to ``url`` and return its ``Page``. Reuses the front tab unless
     ``new=True``. ``wait_until`` is Playwright's load state (``load`` /
     ``domcontentloaded`` / ``networkidle``); ``timeout`` is in milliseconds."""
