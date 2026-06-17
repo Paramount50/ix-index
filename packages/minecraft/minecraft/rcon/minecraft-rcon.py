@@ -1,23 +1,51 @@
 #!/usr/bin/env python3
-import argparse
 import socket
 import struct
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
-from typing import cast
+
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, CliPositionalArg, SettingsConfigDict
 
 
 AUTH = 3
 COMMAND = 2
 
+# Sentinel default used to mark fields that are required at the CLI even though
+# the type checker needs a syntactic default value.
+_UNSET_PORT: int = -1
+_UNSET_COMMAND: list[str] = []
 
-@dataclass(frozen=True)
-class Args:
-    host: str
-    port: int
-    password: str
-    command: list[str]
+
+class RconSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        cli_parse_args=True,
+        cli_kebab_case=True,
+        cli_prog_name="minecraft-rcon",
+        cli_enforce_required=True,
+    )
+
+    host: str = "127.0.0.1"
+    port: int = Field(default=_UNSET_PORT)
+    password: str | None = None
+    password_file: str | None = None
+    command: CliPositionalArg[list[str]] = _UNSET_COMMAND
+
+    @model_validator(mode="after")
+    def validate_required_fields_and_password(self) -> "RconSettings":
+        if self.port == _UNSET_PORT:
+            raise ValueError("--port is required")
+        if not self.command:
+            raise ValueError("command is required")
+        if self.password is not None and self.password_file is not None:
+            raise ValueError(
+                "argument --password-file: not allowed with argument --password"
+            )
+        if self.password is None and self.password_file is None:
+            raise ValueError(
+                "one of the arguments --password --password-file is required"
+            )
+        return self
 
 
 def packet(request_id: int, kind: int, payload: str) -> bytes:
@@ -41,38 +69,31 @@ def read_packet(sock: socket.socket) -> tuple[int, int, str]:
     return int(request_id), int(kind), payload
 
 
-def parse_args(argv: Sequence[str] | None = None) -> Args:
-    parser = argparse.ArgumentParser(description="Minimal Minecraft RCON client")
-    _ = parser.add_argument("--host", default="127.0.0.1")
-    _ = parser.add_argument("--port", type=int, required=True)
-    password = parser.add_mutually_exclusive_group(required=True)
-    _ = password.add_argument("--password")
-    _ = password.add_argument("--password-file")
-    _ = parser.add_argument("command", nargs="+")
-    args = parser.parse_args(argv)
-
-    password_value = cast(str | None, args.password)
-    password_file_path = cast(str | None, args.password_file)
-    if password_file_path is not None:
-        with open(password_file_path, encoding="utf-8") as password_file:
-            password_value = password_file.readline().rstrip("\n")
-
-    if password_value is None:
-        raise RuntimeError("missing RCON password")
-
-    return Args(
-        host=cast(str, args.host),
-        port=cast(int, args.port),
-        password=password_value,
-        command=cast(list[str], args.command),
-    )
+def resolve_password(settings: RconSettings) -> str:
+    if settings.password_file is not None:
+        with open(settings.password_file, encoding="utf-8") as f:
+            return f.readline().rstrip("\n")
+    # model_validator guarantees exactly one is set
+    assert settings.password is not None
+    return settings.password
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(argv)
-    command = " ".join(args.command)
-    with socket.create_connection((args.host, args.port), timeout=10) as sock:
-        sock.sendall(packet(1, AUTH, args.password))
+    if argv is not None:
+        saved = sys.argv[:]
+        sys.argv = [sys.argv[0]] + list(argv)
+        try:
+            settings = RconSettings()
+        finally:
+            sys.argv = saved
+    else:
+        settings = RconSettings()
+
+    password = resolve_password(settings)
+    command = " ".join(settings.command)
+
+    with socket.create_connection((settings.host, settings.port), timeout=10) as sock:
+        sock.sendall(packet(1, AUTH, password))
         auth_id, _, auth_payload = read_packet(sock)
         if auth_id == -1:
             print("RCON authentication failed", file=sys.stderr)
