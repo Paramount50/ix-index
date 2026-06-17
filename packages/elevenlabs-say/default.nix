@@ -20,6 +20,7 @@ let
     version = "0.1.0";
     inherit src;
     mainProgram = "elevenlabs-say";
+    pyChecker = "zuban";
     # pydantic-core and websockets ship binary wheels that dlopen libstdc++ at
     # import time on Linux, the same constraint the daily-scraper example handles.
     runtimeLibraryInputs = [ pkgs.stdenv.cc.cc.lib ];

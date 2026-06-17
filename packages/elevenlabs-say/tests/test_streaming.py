@@ -12,12 +12,30 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal, TextIO, cast
+from unittest.mock import patch
 
 import elevenlabs.realtime_tts as realtime_module
+from elevenlabs import ElevenLabs
 from elevenlabs.core import ApiError
 
 import elevenlabs_say as say
+
+
+@contextmanager
+def fake_stdin(stdin: object) -> Iterator[None]:
+    """Swap ``sys.stdin`` for a stand-in that implements only what the code uses.
+
+    The tests' fakes implement just ``fileno``/``isatty``, not the full
+    ``TextIO`` protocol, so a direct ``sys.stdin = fake`` is a type error.
+    ``patch.object`` takes the attribute by name (``str``) and restores it on
+    exit, which both types cleanly and removes the manual try/finally.
+    """
+    with patch.object(sys, "stdin", cast(TextIO, stdin)):
+        yield
 
 
 def test_stdin_yields_before_eof_and_rejoins_split_utf8() -> None:
@@ -37,17 +55,15 @@ def test_stdin_yields_before_eof_and_rejoins_split_utf8() -> None:
         def isatty(self) -> bool:
             return False
 
-    original = sys.stdin
-    sys.stdin = FakeStdin()  # type: ignore[assignment]
     chunks: list[str] = []
 
     def drain() -> None:
         for chunk in say.stdin_text_chunks():
             chunks.append(chunk)
 
-    worker = threading.Thread(target=drain)
-    worker.start()
-    try:
+    with fake_stdin(FakeStdin()):
+        worker = threading.Thread(target=drain)
+        worker.start()
         time.sleep(0.15)
         os.write(write_fd, b"hello ")
         time.sleep(0.15)
@@ -59,8 +75,6 @@ def test_stdin_yields_before_eof_and_rejoins_split_utf8() -> None:
         time.sleep(0.1)
         os.close(write_fd)
         worker.join(timeout=2)
-    finally:
-        sys.stdin = original
 
     assert before_close >= 1, f"stdin did not stream before EOF: {chunks}"
     assert "".join(chunks) == "hello ä world", chunks
@@ -109,20 +123,16 @@ def test_should_stream_auto_and_overrides() -> None:
         def isatty(self) -> bool:
             return self._tty
 
-    original = sys.stdin
-    try:
-        sys.stdin = FakeStdin(tty=False)  # type: ignore[assignment]
+    with fake_stdin(FakeStdin(tty=False)):
         assert say.should_stream(say.parse_args([])) is True
         assert say.should_stream(say.parse_args(["--no-stream"])) is False
         assert say.should_stream(say.parse_args(["hello"])) is False
         assert say.should_stream(say.parse_args(["hello", "--stream"])) is True
         assert say.should_stream(say.parse_args(["--file", "notes.txt"])) is False
 
-        sys.stdin = FakeStdin(tty=True)  # type: ignore[assignment]
+    with fake_stdin(FakeStdin(tty=True)):
         assert say.should_stream(say.parse_args([])) is False
         assert say.should_stream(say.parse_args(["--stream"])) is True
-    finally:
-        sys.stdin = original
 
 
 def test_stream_init_does_not_crash_on_omit_voice_settings() -> None:
@@ -154,12 +164,19 @@ def test_stream_init_does_not_crash_on_omit_voice_settings() -> None:
         def __enter__(self) -> FakeSocket:
             return socket
 
-        def __exit__(self, *args: object) -> bool:
+        # Literal[False] (not bool): a context manager whose __exit__ can return
+        # True is treated as possibly swallowing exceptions; this one never does.
+        def __exit__(self, *args: object) -> Literal[False]:
             return False
 
-    original_connect = realtime_module.connect
-    realtime_module.connect = lambda *a, **k: FakeConnection()  # type: ignore[assignment]
-    try:
+    def fake_connect(*args: object, **kwargs: object) -> FakeConnection:
+        return FakeConnection()
+
+    # patch.object swaps the module attribute by name, so the re-imported
+    # websockets `connect` (not part of the module's public surface) can be
+    # replaced without an attr-defined/assignment type error, and it restores on
+    # exit.
+    with patch.object(realtime_module, "connect", fake_connect):
         chunks = say.stream_synthesize(
             client, say.parse_args(["hi", "--stream"]), "voice-id"
         )
@@ -167,8 +184,6 @@ def test_stream_init_does_not_crash_on_omit_voice_settings() -> None:
             next(iter(chunks))
         except _StopAfterInit:
             pass
-    finally:
-        realtime_module.connect = original_connect  # type: ignore[assignment]
 
     assert socket.sent, "init frame was never sent"
     init = json.loads(socket.sent[0])
@@ -218,7 +233,10 @@ def test_resolve_voice_id_id_shape_skips_api() -> None:
         def __getattr__(self, name: str) -> object:
             raise AssertionError(f"client.{name} must not be used for an id")
 
-    assert say.resolve_voice_id(Boom(), "JBFqnCBsd6RMkjVDRZzb") == "JBFqnCBsd6RMkjVDRZzb"
+    # resolve_voice_id is typed for an ElevenLabs client; Boom stands in for one
+    # and asserts the id path never touches it, so cast it to the expected type.
+    boom = cast(ElevenLabs, Boom())
+    assert say.resolve_voice_id(boom, "JBFqnCBsd6RMkjVDRZzb") == "JBFqnCBsd6RMkjVDRZzb"
 
 
 def test_resolve_voice_id_name_searches_and_maps() -> None:
