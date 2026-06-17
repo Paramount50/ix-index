@@ -26,11 +26,11 @@ for a quick look); without it, every history file is read.
 
 from __future__ import annotations
 
-import os
 import shlex
 import subprocess
 import sys
 from collections import Counter
+from pathlib import Path
 
 import polars as pl
 from polars_sftp import read_sftp, scan_sftp
@@ -56,14 +56,14 @@ def connection(alias: str) -> tuple[str, dict[str, object]]:
     """`(hostname, polars-sftp kwargs)` for `alias`."""
     cfg = resolve(alias)
     key = cfg.get("identityfile")
-    key_path = os.path.expanduser(key) if key else None
+    key_path = Path(key).expanduser() if key else None
     conn: dict[str, object] = {
         "port": int(cfg.get("port", "22")),
         "username": cfg.get("user"),
         # `ssh -G` reports default identity paths even when the file is absent;
         # only pass one that exists, else leave it None so polars-sftp falls back
         # to the SSH agent.
-        "private_key": key_path if (key_path and os.path.exists(key_path)) else None,
+        "private_key": key_path if (key_path and key_path.exists()) else None,
         "storage_format": "ndjson",
     }
     return cfg["hostname"], conn
@@ -85,6 +85,7 @@ def history_files(alias: str) -> list[str]:
         ["ssh", alias, "bash -lc " + shlex.quote(remote)],
         capture_output=True,
         text=True,
+        check=False,
     ).stdout
     return [p for p in out.splitlines() if p.strip()]
 
@@ -121,13 +122,13 @@ def main(hosts: list[str], limit: int | None) -> None:
                     )
                 except Exception as exc:
                     unreadable += 1
-                    print(f"  ! {alias}:{os.path.basename(path)}: {exc}", file=sys.stderr)
+                    print(f"  ! {alias}:{Path(path).name}: {exc}", file=sys.stderr)
                 continue
             try:
                 df = read_sftp(hostname, path, **conn)  # one fetch, eager
             except Exception as exc:  # a transcript polars can't infer; skip + report
                 unreadable += 1
-                print(f"  ! {alias}:{os.path.basename(path)}: {exc}", file=sys.stderr)
+                print(f"  ! {alias}:{Path(path).name}: {exc}", file=sys.stderr)
                 continue
             records += df.height
             if "type" in df.columns:
@@ -137,7 +138,7 @@ def main(hosts: list[str], limit: int | None) -> None:
             sessions.append(
                 {
                     "host": alias,
-                    "session": os.path.basename(path).removesuffix(".jsonl"),
+                    "session": Path(path).name.removesuffix(".jsonl"),
                     "records": df.height,
                 }
             )
@@ -187,7 +188,7 @@ def parse_args(argv: list[str]) -> tuple[list[str], int | None]:
         try:
             limit = int(raw)
         except ValueError:
-            raise SystemExit(f"--limit must be an integer, got {raw!r}")
+            raise SystemExit(f"--limit must be an integer, got {raw!r}") from None
         if limit < 0:
             raise SystemExit("--limit must be >= 0")
     return hosts or DEFAULT_HOSTS, limit

@@ -20,6 +20,8 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 ANSI_RE = re.compile(
     r"\x1b\[[\x20-\x3f]*[\x40-\x7e]"  # CSI: ESC [ ... final
@@ -43,18 +45,18 @@ class FaultWindow:
     offset: float  # for clock/skip only (0.0 for non-clock)
 
 
-def strip_ansi(text):
+def strip_ansi(text: str) -> str:
     return ANSI_RE.sub("", text)
 
 
-def _valid_max_duration(max_dur):
+def _valid_max_duration(max_dur: int | float | str | None) -> float | None:
     """Return max_dur as a positive float, or None if absent/zero/string."""
     if isinstance(max_dur, (int, float)) and max_dur > 0:
         return float(max_dur)
     return None
 
 
-def _build_active_faults(windows):
+def _build_active_faults(windows: list[FaultWindow]) -> dict[str, Any]:
     """Reduce internal fault windows into the active_faults snapshot."""
     result = {}
     for w in windows:
@@ -75,7 +77,7 @@ def _build_active_faults(windows):
     return result
 
 
-def process_events(events):
+def process_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Process all events in a single pass: strip ANSI, add vtime_seconds, track active_faults."""
     fault_windows = []
     faults_snapshot = {}
@@ -211,7 +213,7 @@ def process_events(events):
     return result
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Process an Antithesis JSON log: strip ANSI escapes, add vtime_seconds, track active faults.",
     )
@@ -221,24 +223,24 @@ def main():
     args = parser.parse_args()
 
     if args.test:
-        return run_tests()
+        run_tests()
+        return
 
-    src = open(args.input) if args.input else sys.stdin
-    try:
-        events = json.load(src)
-    finally:
-        if src is not sys.stdin:
-            src.close()
+    if args.input:
+        with Path(args.input).open() as src:
+            events = json.load(src)
+    else:
+        events = json.load(sys.stdin)
 
     events = process_events(events)
 
-    dst = open(args.output, "w") if args.output else sys.stdout
-    try:
-        json.dump(events, dst, ensure_ascii=False)
-        dst.write("\n")
-    finally:
-        if dst is not sys.stdout:
-            dst.close()
+    if args.output:
+        with Path(args.output).open("w") as dst:
+            json.dump(events, dst, ensure_ascii=False)
+            dst.write("\n")
+    else:
+        json.dump(events, sys.stdout, ensure_ascii=False)
+        sys.stdout.write("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +248,7 @@ def main():
 # ---------------------------------------------------------------------------
 
 
-def _evt(vtime_sec, **kwargs):
+def _evt(vtime_sec: float, **kwargs: Any) -> dict[str, Any]:  # noqa: ANN401 -- test helper accepts arbitrary event fields
     """Helper to create a test event at a given virtual time in seconds.
 
     Automatically adds source.name = "fault_injector" when fault or info keys
@@ -258,10 +260,10 @@ def _evt(vtime_sec, **kwargs):
     return event
 
 
-def run_tests():
+def run_tests() -> None:
     failures = 0
 
-    def check(name, input_text, expected=None):
+    def check(name: str, input_text: str, expected: str | None = None) -> None:
         nonlocal failures
         if expected is None:
             expected = input_text
@@ -275,7 +277,7 @@ def run_tests():
         else:
             print(f"  ok: {name}")
 
-    def assert_eq(name, got, expected):
+    def assert_eq(name: str, got: object, *, expected: object) -> None:
         nonlocal failures
         if got != expected:
             print(f"FAIL: {name}")
@@ -370,7 +372,7 @@ def run_tests():
     # Verify it's actually rounded to 5 places
     vtime_str = str(results[0]["vtime_seconds"])
     parts = vtime_str.split(".")
-    assert_eq("vtime_seconds decimal precision <= 5", len(parts[1]) <= 5, True)
+    assert_eq("vtime_seconds decimal precision <= 5", len(parts[1]) <= 5, expected=True)
 
     evt_zero = {"moment": {"_vtime_ticks": 0}}
     results = process_events([evt_zero])
@@ -379,8 +381,8 @@ def run_tests():
     # Event without moment field should not get vtime_seconds
     evt_no_moment = {"output_text": "hello"}
     results = process_events([evt_no_moment])
-    assert_eq("no vtime_seconds when no moment", "vtime_seconds" not in results[0], True)
-    assert_eq("active_faults present even without moment", "active_faults" in results[0], True)
+    assert_eq("no vtime_seconds when no moment", "vtime_seconds" not in results[0], expected=True)
+    assert_eq("active_faults present even without moment", "active_faults" in results[0], expected=True)
 
     # =====================================================================
     # active_faults: network faults
@@ -453,7 +455,7 @@ def run_tests():
     ])
     assert_eq("event without moment still gets active_faults", results[1]["active_faults"],
               {"network_partition": {"vtime": 1.0}})
-    assert_eq("event without moment has no vtime_seconds", "vtime_seconds" not in results[1], True)
+    assert_eq("event without moment has no vtime_seconds", "vtime_seconds" not in results[1], expected=True)
 
     # Untracked faults (kill, stop without type/affected_nodes) produce empty active_faults
     results = process_events([

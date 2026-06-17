@@ -6,6 +6,7 @@
 # https://doc.rust-lang.org/cargo/reference/workspaces.html#the-package-table
 
 import sys
+from pathlib import Path
 from typing import Any
 
 import tomli
@@ -13,7 +14,7 @@ import tomli_w
 
 
 def load_file(path: str) -> dict[str, Any]:
-    with open(path, "rb") as f:
+    with Path(path).open("rb") as f:
         return tomli.load(f)
 
 
@@ -91,7 +92,7 @@ def replace_dependencies(
 
     for key in ["dependencies", "dev-dependencies", "build-dependencies"]:
         if key in root:
-            for k in root[key].keys():
+            for k in root[key]:
                 changed |= replace_key(workspace_manifest, root[key], "dependencies", k)
 
     return changed
@@ -116,7 +117,7 @@ def main() -> None:
     changed = False
 
     to_remove: list[str] = []
-    for key in crate_manifest["package"].keys():
+    for key in crate_manifest["package"]:
         changed_key = replace_key(
             workspace_manifest, crate_manifest["package"], "package", key
         )
@@ -131,7 +132,7 @@ def main() -> None:
     changed |= replace_dependencies(workspace_manifest, crate_manifest)
 
     if "target" in crate_manifest:
-        for key in crate_manifest["target"].keys():
+        for key in crate_manifest["target"]:
             changed |= replace_dependencies(
                 workspace_manifest, crate_manifest["target"][key]
             )
@@ -147,7 +148,7 @@ def main() -> None:
     if not changed:
         return
 
-    with open(sys.argv[1], "wb") as f:
+    with Path(sys.argv[1]).open("wb") as f:
         tomli_w.dump(crate_manifest, f)
 
 
