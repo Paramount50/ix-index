@@ -48,6 +48,8 @@ let
 
   fileIssues = "File an issue the moment you hit something worth capturing: a flaw in your own approach a later run should avoid, index friction (misleading tool surface, context-flooding output, a wedged kernel, a correction, a plainly better implementation), or anything that slowed you down. GitHub issue in the relevant repo (`indexable-inc/index` for index friction), Linear ticket for ix work. One observation per report: expected, actual, and the smallest change that would have helped.";
 
+  selfReportMistakes = "Whenever anything you did was less than perfect, log it: a tool or MCP call made wrong, a wrong turn you had to back out of, a workaround you settled for, a tool surface that misled you, a correction the user had to make. File it in the `shitty` Linear project (https://linear.app/indexable/project/shitty-b30ae521fda7/overview) with what actually happened, what you should have done instead, and how the tool or workflow should have worked so it would not happen again. Roll any other friction you hit into the same report. Err toward filing: a logged mistake is how the next run avoids it.";
+
   mermaidDiagrams = "Use a fenced ```mermaid diagram in issues, PRs, tickets, and design docs when a flow, state machine, architecture, or dependency graph reads better as a picture. Keep it to the one relationship that matters and pair it with a sentence of context.";
 
   bugReports = "Bug reports to other people must link a runnable minimal reproducible example, not just prose: a self-contained artifact (a `nix-shell` shebang script or small flake) in a GitHub gist. A secret gist is unlisted, not private, so scrub secrets first and use an access-controlled channel when the reproduction is sensitive.";
@@ -81,6 +83,7 @@ let
     cleanupMerged
     landingBanner
     fileIssues
+    selfReportMistakes
     mermaidDiagrams
     bugReports
     discloseAi
