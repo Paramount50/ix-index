@@ -184,8 +184,8 @@ def _error_response(request_id: object, code: int, message: str) -> JsonObject:
 
 
 def main() -> None:
-    for line in sys.stdin:
-        line = line.strip()
+    for raw_line in sys.stdin:
+        line = raw_line.strip()
         if not line:
             continue
         try:

@@ -19,8 +19,8 @@ def _read_lines(name: str, override: Path | None) -> list[dict[str, Any]]:
     """Read a JSONL dataset, from an explicit path or the packaged default."""
     path = override if override is not None else dataset_path(name)
     rows: list[dict[str, Any]] = []
-    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = line.strip()
+    for lineno, raw_line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw_line.strip()
         if not line:
             continue
         try:

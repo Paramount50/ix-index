@@ -29,7 +29,8 @@ _explicit = (sys.argv[1] if len(sys.argv) > 1 else None) or os.environ.get("POLA
 _MODULE_PATH = pathlib.Path(_explicit) if _explicit else _DEFAULT
 
 _spec = importlib.util.spec_from_file_location("polars_mixedbread_pushdown", _MODULE_PATH)
-assert _spec is not None and _spec.loader is not None, f"cannot load {_MODULE_PATH}"
+assert _spec is not None, f"cannot load {_MODULE_PATH}"
+assert _spec.loader is not None, f"cannot load {_MODULE_PATH}"
 _pushdown = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_pushdown)
 

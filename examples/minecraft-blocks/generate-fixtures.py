@@ -62,7 +62,7 @@ BASE_MS = 1767225600000
 BOX = json.loads((pathlib.Path(__file__).parent / "box.json").read_text())
 
 
-def record(seq, world, x, y, z):
+def record(seq: int, world: str, x: int, y: int, z: int) -> dict:
     player_uuid, player_name = PLAYERS[seq % len(PLAYERS)]
     return {
         "world": world,
@@ -76,7 +76,7 @@ def record(seq, world, x, y, z):
     }
 
 
-def main():
+def main() -> None:
     rows = []
     seq = 0
 

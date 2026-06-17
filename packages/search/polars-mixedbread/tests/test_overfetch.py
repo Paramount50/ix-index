@@ -18,6 +18,7 @@ import importlib.util
 import os
 import pathlib
 import sys
+from collections.abc import Callable
 
 import polars as pl
 
@@ -26,7 +27,8 @@ _explicit = (sys.argv[1] if len(sys.argv) > 1 else None) or os.environ.get("POLA
 _MODULE_PATH = pathlib.Path(_explicit) if _explicit else _DEFAULT
 
 _spec = importlib.util.spec_from_file_location("polars_mixedbread_overfetch", _MODULE_PATH)
-assert _spec is not None and _spec.loader is not None, f"cannot load {_MODULE_PATH}"
+assert _spec is not None, f"cannot load {_MODULE_PATH}"
+assert _spec.loader is not None, f"cannot load {_MODULE_PATH}"
 _overfetch = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_overfetch)
 
@@ -34,7 +36,7 @@ grow_until = _overfetch.grow_until
 initial_k = _overfetch.initial_k
 
 
-def make_fetch(*, total_hits: int, pass_every: int, calls: list[int]):
+def make_fetch(*, total_hits: int, pass_every: int, calls: list[int]) -> Callable[[int], tuple[pl.DataFrame, int]]:
     """A fake ``fetch(k)``: a store of ``total_hits`` ranked hits where 1 in
     ``pass_every`` survives the client-side filter. Records each ``k`` it sees."""
 

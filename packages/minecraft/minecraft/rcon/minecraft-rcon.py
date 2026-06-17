@@ -3,6 +3,7 @@ import socket
 import struct
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, CliPositionalArg, CliSettingsSource, PydanticBaseSettingsSource, SettingsConfigDict
@@ -88,7 +89,7 @@ def read_packet(sock: socket.socket) -> tuple[int, int, str]:
 
 def resolve_password(settings: RconSettings) -> str:
     if settings.password_file is not None:
-        with open(settings.password_file, encoding="utf-8") as f:
+        with Path(settings.password_file).open(encoding="utf-8") as f:
             return f.readline().rstrip("\n")
     # model_validator guarantees exactly one is set
     assert settings.password is not None
@@ -98,7 +99,7 @@ def resolve_password(settings: RconSettings) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     if argv is not None:
         saved = sys.argv[:]
-        sys.argv = [sys.argv[0]] + list(argv)
+        sys.argv = [sys.argv[0], *list(argv)]
         try:
             settings = RconSettings()
         finally:

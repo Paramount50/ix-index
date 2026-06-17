@@ -83,10 +83,7 @@ from ._ix_sdk import IxTimeoutError
 
 
 def _fmt_command(command: str | list[str]) -> str:
-    if isinstance(command, list):
-        text = " ".join(command)
-    else:
-        text = command
+    text = " ".join(command) if isinstance(command, list) else command
     text = text.replace("\n", " ").strip()
     if len(text) > 120:
         text = text[:117] + "..."

@@ -36,7 +36,7 @@ class SearchBackend:
     reranker: str | None = None
     timeout_seconds: float = 180.0
 
-    def _base_args(self, no_sync: bool) -> list[str]:
+    def _base_args(self, *, no_sync: bool) -> list[str]:
         args = [self.search_bin, "--json", "-m", str(self.max_count)]
         for source in self.sources:
             args += ["--source", source]
@@ -56,11 +56,11 @@ class SearchBackend:
         Embedding is content-addressed, so this only pays the upload/embed cost
         for content the store has not seen before.
         """
-        self._run(self._base_args(no_sync=False) + ["warm up the index", str(self.corpus)])
+        self._run([*self._base_args(no_sync=False), "warm up the index", str(self.corpus)])
 
     def search(self, query: str, *, no_sync: bool = False) -> list[Hit]:
         """Return the ranked hits for ``query`` over the corpus."""
-        out = self._run(self._base_args(no_sync) + [query, str(self.corpus)])
+        out = self._run([*self._base_args(no_sync=no_sync), query, str(self.corpus)])
         try:
             raw = json.loads(out or "[]")
         except json.JSONDecodeError as exc:

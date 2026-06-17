@@ -94,11 +94,10 @@ def _walk(node: JSONValue, pushable: set[str], *, negated: bool) -> Filter | Non
             return _condition(binary, op, pushable, negated=negated)
         return None
     function = node.get("Function")
-    if isinstance(function, dict):
-        if function.get("function") == {"Boolean": "Not"}:
-            inputs = function.get("input")
-            if isinstance(inputs, list) and inputs:
-                return _walk(inputs[0], pushable, negated=not negated)
+    if isinstance(function, dict) and function.get("function") == {"Boolean": "Not"}:
+        inputs = function.get("input")
+        if isinstance(inputs, list) and inputs:
+            return _walk(inputs[0], pushable, negated=not negated)
     return None
 
 

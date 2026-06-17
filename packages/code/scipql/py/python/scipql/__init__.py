@@ -102,6 +102,7 @@ def fix(
     index_path: str,
     program: str,
     root: str | None = None,
+    *,
     write: bool = False,
 ) -> str:
     """Apply a ``fix`` program's ``edit`` relation; return the unified diff.
@@ -116,6 +117,7 @@ def rename(
     selector: str,
     new_name: str,
     root: str | None = None,
+    *,
     write: bool = False,
 ) -> str:
     """Rename every occurrence whose moniker ends with ``selector``.
