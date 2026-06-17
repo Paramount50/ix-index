@@ -10,17 +10,20 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
+
+from .types import State
 
 
 def state_path(out_dir: Path, user: str, slug: str) -> Path:
     return out_dir / "state" / user / f"{slug}.json"
 
 
-def _empty() -> dict:
+def _empty() -> State:
     return {"project": None, "items": [], "distilled_sessions": {}, "session_outcomes": {}}
 
 
-def load(out_dir: Path, user: str, slug: str) -> dict:
+def load(out_dir: Path, user: str, slug: str) -> State:
     path = state_path(out_dir, user, slug)
     if not path.is_file():
         return _empty()
@@ -28,13 +31,18 @@ def load(out_dir: Path, user: str, slug: str) -> dict:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         return _empty()
+    if not isinstance(data, dict):
+        return _empty()
+    # The file is external (a prior run's output, possibly hand-edited); fill in
+    # any keys an older schema omitted before trusting the State shape.
+    data.setdefault("project", None)
     data.setdefault("items", [])
     data.setdefault("distilled_sessions", {})
     data.setdefault("session_outcomes", {})
-    return data
+    return cast(State, data)
 
 
-def save(out_dir: Path, user: str, slug: str, state: dict) -> Path:
+def save(out_dir: Path, user: str, slug: str, state: State) -> Path:
     path = state_path(out_dir, user, slug)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".json.tmp")

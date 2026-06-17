@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from . import corpus, distill, markdown, state, transcripts
+from .types import Item, SessionRecord, State
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -86,10 +87,10 @@ def run(args: argparse.Namespace) -> int:
         print(f"no sessions in the last {args.days:g} days under {args.claude_root}")
         return 0
 
-    all_items_by_project: dict[str, list[dict]] = {}
-    all_outcomes_by_project: dict[str, dict[str, dict]] = {}
+    all_items_by_project: dict[str, list[Item]] = {}
+    all_outcomes_by_project: dict[str, dict[str, SessionRecord]] = {}
 
-    def keep_state(project: str, st: dict) -> None:
+    def keep_state(project: str, st: State) -> None:
         if st["items"]:
             all_items_by_project[project] = st["items"]
         if st["session_outcomes"]:
@@ -123,7 +124,9 @@ def run(args: argparse.Namespace) -> int:
             keep_state(project, st)
             continue
 
-        sessions_meta = {s.session_id: {"last_ts": s.last_ts} for s in fresh}
+        sessions_meta: dict[str, SessionRecord] = {
+            s.session_id: {"last_ts": s.last_ts} for s in fresh
+        }
         st["items"] = distill.apply_operations(
             st["items"], result.operations, sessions_meta, max_new=args.max_new_items
         )

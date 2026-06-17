@@ -42,6 +42,41 @@ let
   ];
   distillerPython = pkgs.python3.withPackages (ps: pythonDeps ps ++ [ distillerModule ]);
 
+  # Strict type-checking gate (ENG-3131), mirroring lib/build/uv-application.nix's
+  # zuban branch: `zuban check --strict` for correctness plus `ruff check
+  # --select ANN` for explicit annotations. The checker resolves third-party
+  # imports through a deps-only interpreter (no `distillerModule`, so `distiller`
+  # is type-checked from source as a first-party package, not from the installed
+  # site-packages copy). mypy.ini scopes two dependency stub gaps (pyarrow
+  # re-exports / untyped writer, boto3's untyped `client`); see that file.
+  typeCheckPython = pkgs.python3.withPackages pythonDeps;
+  mypyConfig = builtins.path {
+    name = "ix-distiller-mypy-ini";
+    path = ./mypy.ini;
+  };
+  typeCheck =
+    pkgs.runCommand "ix-distiller-typecheck"
+      {
+        nativeBuildInputs = [
+          pkgs.zuban
+          pkgs.ruff
+        ];
+        strictDeps = true;
+      }
+      ''
+        # zuban discovers mypy.ini from the working directory, so assemble a
+        # tree holding the config beside the importable `distiller` package.
+        cp -r ${distillerSource}/. ./
+        cp ${mypyConfig} ./mypy.ini
+        zuban check --strict \
+          --python-executable ${lib.getExe typeCheckPython} \
+          --python-version ${pkgs.python3.pythonVersion} \
+          --platform linux \
+          distiller
+        ruff check --no-cache --select ANN distiller
+        mkdir -p "$out"
+      '';
+
   package =
     pkgs.runCommand "ix-distiller"
       {
@@ -115,6 +150,7 @@ package.overrideAttrs (old: {
     tests = (old.passthru.tests or { }) // {
       pytest = unitTests;
       import = importTest;
+      typecheck = typeCheck;
     };
   };
 })

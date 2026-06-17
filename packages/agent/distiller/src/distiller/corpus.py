@@ -24,9 +24,12 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+from typing import cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+
+from .types import Item, Row, SessionRecord
 
 SOURCE = "distilled_facts"
 # Per-session outcome verdicts (ENG-2710) ride a sibling slice with the same
@@ -75,7 +78,7 @@ def corpus_hash(pairs: list[tuple[str, str]]) -> str:
     return digest.hexdigest()
 
 
-def item_body(item: dict, project: str, session_labels: list[str] | None = None) -> str:
+def item_body(item: Item, project: str, session_labels: list[str] | None = None) -> str:
     """The embedded, self-contained fact text (what gets hashed + indexed)."""
     trailer = (
         f"(outcome: {item['outcome']}; scope: {item['scope']}; project: {project};"
@@ -94,12 +97,12 @@ def item_body(item: dict, project: str, session_labels: list[str] | None = None)
 
 
 def item_row(
-    item: dict,
+    item: Item,
     project: str,
     host: str,
     user: str,
     session_labels: dict[str, str] | None = None,
-) -> dict:
+) -> Row:
     # ``session_labels`` maps evidence session ids to their outcome verdicts;
     # lessons whose evidence includes a failed session are the most valuable
     # guardrails, so the labels ride the body and meta (``failure_derived``).
@@ -116,7 +119,7 @@ def item_row(
     content_hash = hash_body(body.encode())
     timestamp = int(item.get("last_updated") or 0) or None
     scope = item.get("scope", "shared")
-    meta = {
+    meta: dict[str, object] = {
         "source": SOURCE,
         "external_id": external_id,
         "content_hash": content_hash,
@@ -151,7 +154,7 @@ def item_row(
     }
 
 
-def _encode_meta(meta: dict, external_id: str) -> str:
+def _encode_meta(meta: dict[str, object], external_id: str) -> str:
     meta_json = json.dumps(meta, sort_keys=True)
     if len(meta_json.encode()) > MAX_METADATA_BYTES:
         raise ContractError(f"meta_json for {external_id} exceeds {MAX_METADATA_BYTES} bytes")
@@ -167,7 +170,7 @@ def _clip_chars(text: str, limit: int) -> str:
     return text[: limit - 1] + "…"
 
 
-def session_body(session_id: str, rec: dict, project: str) -> str:
+def session_body(session_id: str, rec: SessionRecord, project: str) -> str:
     """Self-contained outcome record text: reason first, then key stats."""
     label = rec.get("label") or "partial"
     goal = rec.get("goal") or "(no goal recorded)"
@@ -188,7 +191,7 @@ def session_body(session_id: str, rec: dict, project: str) -> str:
     return "\n".join(lines)
 
 
-def session_row(session_id: str, rec: dict, project: str, host: str, user: str) -> dict:
+def session_row(session_id: str, rec: SessionRecord, project: str, host: str, user: str) -> Row:
     """One 9-column row for a judged session (``source=session_outcomes``)."""
     slug_source = project.strip("/").replace("/", "-") or "unknown"
     external_id = f"{SESSIONS_SOURCE}:{user}:{slug_source}:{session_id}"
@@ -197,7 +200,7 @@ def session_row(session_id: str, rec: dict, project: str, host: str, user: str) 
     timestamp = int(rec.get("last_ts") or 0) or None
     label = rec.get("label") or "partial"
     title = f"[{label}] {_clip_chars(rec.get('goal') or session_id, 140)}"
-    meta = {
+    meta: dict[str, object] = {
         "source": SESSIONS_SOURCE,
         "external_id": external_id,
         "content_hash": content_hash,
@@ -227,7 +230,7 @@ def session_row(session_id: str, rec: dict, project: str, host: str, user: str) 
     }
 
 
-def write_slice(rows: list[dict], slice_dir: Path) -> dict[str, Path]:
+def write_slice(rows: list[Row], slice_dir: Path) -> dict[str, Path]:
     """Write ``data.parquet`` + ``_manifest.json`` for one slice directory.
 
     Mirrors the sink's empty-set policy: an empty row set writes nothing
@@ -237,7 +240,10 @@ def write_slice(rows: list[dict], slice_dir: Path) -> dict[str, Path]:
     if not rows:
         return {}
     slice_dir.mkdir(parents=True, exist_ok=True)
-    columns = {name: [row[name] for row in rows] for name in SCHEMA.names}
+    # A TypedDict rejects dynamic key access, so go through a plain mapping view
+    # of each row to pivot the rows into per-column arrays for pyarrow.
+    plain_rows = [cast(dict[str, object], row) for row in rows]
+    columns = {name: [row[name] for row in plain_rows] for name in SCHEMA.names}
     table = pa.Table.from_pydict(columns, schema=SCHEMA)
     data_path = slice_dir / "data.parquet"
     manifest_path = slice_dir / "_manifest.json"

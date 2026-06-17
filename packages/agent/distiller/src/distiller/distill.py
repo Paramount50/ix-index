@@ -15,7 +15,14 @@ import subprocess
 import tempfile
 import time
 import uuid
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from .types import Item, SessionRecord, Verdict
+
+if TYPE_CHECKING:
+    from .transcripts import Session
 
 DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
@@ -75,8 +82,11 @@ _FALLBACK_LABELS = {"success": "success", "failure": "failure", "mixed": "partia
 
 @dataclass
 class DistillResult:
-    operations: list[dict]
-    session_outcomes: list[dict]
+    # Raw, unvalidated model output: a JSON list whose entries are validated
+    # key-by-key at the merge boundary (apply_operations / session_verdicts),
+    # so the element type stays `object` rather than a trusted dict shape.
+    operations: list[object]
+    session_outcomes: list[object]
     raw: str
 
 
@@ -86,14 +96,14 @@ class DistillError(RuntimeError):
 
 def build_prompt(
     project: str,
-    items: list[dict],
+    items: list[Item],
     digests: list[str],
     max_new: int = 8,
 ) -> str:
     existing = (
         json.dumps(
             [
-                {k: item[k] for k in ("id", "title", "body", "outcome", "scope")}
+                {k: item.get(k) for k in ("id", "title", "body", "outcome", "scope")}
                 for item in items
             ],
             indent=1,
@@ -134,7 +144,7 @@ def _envelope_result(envelope: object) -> str:
     return ""
 
 
-def _extract_json(text: str) -> dict:
+def _extract_json(text: str) -> dict[str, object]:
     """Parse the model reply, tolerating code fences and stray prose."""
     text = text.strip()
     fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
@@ -144,7 +154,10 @@ def _extract_json(text: str) -> dict:
     end = text.rfind("}")
     if start < 0 or end <= start:
         raise DistillError(f"no JSON object in model reply: {text[:200]!r}")
-    return json.loads(text[start : end + 1])
+    parsed = json.loads(text[start : end + 1])
+    if not isinstance(parsed, dict):
+        raise DistillError(f"model reply is not a JSON object: {text[:200]!r}")
+    return parsed
 
 
 def run_claude(
@@ -214,7 +227,9 @@ def _word_clip(text: str, max_words: int = 120) -> str:
     return " ".join(words[:max_words])
 
 
-def session_verdicts(outcomes: list[dict], sessions: list) -> dict[str, dict]:
+def session_verdicts(
+    outcomes: Sequence[object], sessions: Sequence[Session]
+) -> dict[str, Verdict]:
     """Normalize model verdicts into ``{session_id: {label, reason}}``.
 
     Exactly one verdict per passed-in session: malformed or off-label model
@@ -223,13 +238,15 @@ def session_verdicts(outcomes: list[dict], sessions: list) -> dict[str, dict]:
     sessions slice never has holes.
     """
 
-    by_id: dict[str, dict] = {}
+    by_id: dict[str, Verdict] = {}
     for verdict in outcomes:
+        # Defensive: callers (and run_claude) may pass raw model JSON whose
+        # entries are not all objects; skip anything that is not a dict.
         if not isinstance(verdict, dict):
             continue
         sid = verdict.get("session_id")
         label = verdict.get("label")
-        if not isinstance(sid, str) or label not in SESSION_LABELS:
+        if not isinstance(sid, str) or not isinstance(label, str) or label not in SESSION_LABELS:
             continue
         reason = verdict.get("reason")
         by_id[sid] = {
@@ -237,21 +254,28 @@ def session_verdicts(outcomes: list[dict], sessions: list) -> dict[str, dict]:
             "reason": _word_clip(reason, 25) if isinstance(reason, str) else "",
         }
 
-    verdicts: dict[str, dict] = {}
+    verdicts: dict[str, Verdict] = {}
     for session in sessions:
         judged = by_id.get(session.session_id)
         if judged is not None:
             verdicts[session.session_id] = judged
             continue
         if session.outcome == "unknown" and session.message_count < 6:
-            label = "abandoned"
+            fallback = "abandoned"
         else:
-            label = _FALLBACK_LABELS.get(session.outcome, "partial")
+            fallback = _FALLBACK_LABELS.get(session.outcome, "partial")
         verdicts[session.session_id] = {
-            "label": label,
+            "label": fallback,
             "reason": f"heuristic fallback (no model verdict; signals: {session.outcome})",
         }
     return verdicts
+
+
+def _clean_outcome(value: object, default: str) -> str:
+    """Coerce an untrusted model ``outcome`` to the closed evidence-label set."""
+    if isinstance(value, str) and value in ("success", "failure", "mixed"):
+        return value
+    return default
 
 
 def new_item_id() -> str:
@@ -259,13 +283,13 @@ def new_item_id() -> str:
 
 
 def apply_operations(
-    items: list[dict],
-    operations: list[dict],
-    sessions_meta: dict[str, dict],
+    items: list[Item],
+    operations: Sequence[object],
+    sessions_meta: dict[str, SessionRecord],
     now: float | None = None,
-    id_factory=new_item_id,
+    id_factory: Callable[[], str] = new_item_id,
     max_new: int = 8,
-) -> list[dict]:
+) -> list[Item]:
     """Merge model operations into the existing item list.
 
     Items absent from ``operations`` are kept untouched (the anti-collapse
@@ -273,17 +297,18 @@ def apply_operations(
     """
 
     now = now if now is not None else time.time()
-    merged = [dict(item) for item in items]
-    by_id = {item["id"]: item for item in merged}
+    merged: list[Item] = [item.copy() for item in items]
+    by_id: dict[str, Item] = {item["id"]: item for item in merged}
     added = 0
 
-    def session_ids(op: dict) -> list[str]:
+    def session_ids(op: dict[str, object]) -> list[str]:
         raw = op.get("sessions")
         if not isinstance(raw, list):
             return []
         return [s for s in raw if isinstance(s, str)][:8]
 
     for op in operations:
+        # Untrusted model JSON: skip any entry that is not an object.
         if not isinstance(op, dict):
             continue
         kind = op.get("op")
@@ -296,48 +321,53 @@ def apply_operations(
                 continue
             if any(item["title"].strip().lower() == title.strip().lower() for item in merged):
                 continue  # near-duplicate guard
-            sessions = session_ids(op)
-            item = {
-                "id": id_factory(),
-                "title": title.strip(),
-                "body": _word_clip(body),
-                "outcome": op.get("outcome") if op.get("outcome") in ("success", "failure", "mixed") else "mixed",
-                "scope": "user" if op.get("scope") == "user" else "shared",
-                "sessions": sessions,
-                "first_seen": now,
-                "last_updated": now,
-            }
-            merged.append(item)
-            by_id[item["id"]] = item
+            outcome = op.get("outcome")
+            new_item = Item(
+                id=id_factory(),
+                title=title.strip(),
+                body=_word_clip(body),
+                outcome=_clean_outcome(outcome, default="mixed"),
+                scope="user" if op.get("scope") == "user" else "shared",
+                sessions=session_ids(op),
+                first_seen=now,
+                last_updated=now,
+            )
+            merged.append(new_item)
+            by_id[new_item["id"]] = new_item
             added += 1
         elif kind == "update":
-            item = by_id.get(op.get("id"))
-            if item is None:
+            op_id = op.get("id")
+            if not isinstance(op_id, str):
                 continue
-            if isinstance(op.get("title"), str) and op["title"].strip():
-                item["title"] = op["title"].strip()
-            if isinstance(op.get("body"), str) and op["body"].strip():
-                item["body"] = _word_clip(op["body"])
-            if op.get("outcome") in ("success", "failure", "mixed"):
-                item["outcome"] = op["outcome"]
-            if op.get("scope") in ("user", "shared"):
-                item["scope"] = op["scope"]
-            new_sessions = [s for s in session_ids(op) if s not in item.get("sessions", [])]
-            item["sessions"] = (item.get("sessions") or []) + new_sessions
-            item["last_updated"] = now
+            target = by_id.get(op_id)
+            if target is None:
+                continue
+            new_title = op.get("title")
+            if isinstance(new_title, str) and new_title.strip():
+                target["title"] = new_title.strip()
+            new_body = op.get("body")
+            if isinstance(new_body, str) and new_body.strip():
+                target["body"] = _word_clip(new_body)
+            new_outcome = op.get("outcome")
+            if isinstance(new_outcome, str) and new_outcome in ("success", "failure", "mixed"):
+                target["outcome"] = new_outcome
+            new_scope = op.get("scope")
+            if isinstance(new_scope, str) and new_scope in ("user", "shared"):
+                target["scope"] = new_scope
+            new_sessions = [s for s in session_ids(op) if s not in target.get("sessions", [])]
+            target["sessions"] = (target.get("sessions") or []) + new_sessions
+            target["last_updated"] = now
 
     # Stamp date ranges from session metadata so provenance survives.
     for item in merged:
         stamps = [
-            sessions_meta[s]["last_ts"]
+            ts
             for s in item.get("sessions", [])
-            if s in sessions_meta and sessions_meta[s].get("last_ts")
+            if s in sessions_meta and (ts := sessions_meta[s].get("last_ts")) is not None
         ]
         if stamps:
-            item["evidence_from"] = min(
-                stamps + ([item["evidence_from"]] if item.get("evidence_from") else [])
-            )
-            item["evidence_to"] = max(
-                stamps + ([item["evidence_to"]] if item.get("evidence_to") else [])
-            )
+            prior_from = item.get("evidence_from")
+            item["evidence_from"] = min(stamps + ([prior_from] if prior_from else []))
+            prior_to = item.get("evidence_to")
+            item["evidence_to"] = max(stamps + ([prior_to] if prior_to else []))
     return merged

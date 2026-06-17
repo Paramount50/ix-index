@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .types import Item
+
 
 def _date(ts: float | None) -> str:
     if not ts:
@@ -12,7 +14,7 @@ def _date(ts: float | None) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
-def render(project: str, user: str, items: list[dict]) -> str:
+def render(project: str, user: str, items: list[Item]) -> str:
     lines = [
         f"# Distilled facts — {project}",
         "",
@@ -34,7 +36,7 @@ def render(project: str, user: str, items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def write(out_dir: Path, user: str, slug: str, project: str, items: list[dict]) -> Path:
+def write(out_dir: Path, user: str, slug: str, project: str, items: list[Item]) -> Path:
     path = out_dir / "facts" / user / f"{slug}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render(project, user, items))
