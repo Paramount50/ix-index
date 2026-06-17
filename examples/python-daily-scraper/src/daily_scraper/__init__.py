@@ -1,29 +1,40 @@
 from __future__ import annotations
 
-import argparse
 import datetime as dt
 import logging
-from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 import duckdb
 import httpx
+from pydantic import BaseModel
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 LOGGER = logging.getLogger("daily_scraper")
 
 
-@dataclass(frozen=True)
-class CliArgs:
+class CliArgs(BaseSettings):
+    model_config = SettingsConfigDict(
+        cli_parse_args=True,
+        cli_kebab_case=True,
+        cli_prog_name="daily-scraper",
+    )
+
     output_dir: Path
-    repo: str
-    github_api_url: str
-    user_agent: str
+    repo: str = "indexable-inc/index"
+    github_api_url: str = "https://api.github.com"
+    user_agent: str = "ix-daily-scraper-example/0.1"
 
 
-@dataclass(frozen=True)
-class RepoMetric:
+class GitHubRepoPayload(BaseModel):
+    full_name: str
+    default_branch: str
+    stargazers_count: int
+    forks_count: int
+    open_issues_count: int
+
+
+class RepoMetric(BaseModel):
     run_date: dt.date
     fetched_at: dt.datetime
     source_url: str
@@ -32,56 +43,6 @@ class RepoMetric:
     stars: int
     forks: int
     open_issues: int
-
-
-def parse_args() -> CliArgs:
-    parser = argparse.ArgumentParser(
-        prog="daily-scraper",
-        description="Fetch one GitHub repository record and write it as Parquet.",
-    )
-    _ = parser.add_argument(
-        "--output-dir",
-        type=Path,
-        required=True,
-        help="Directory for Parquet output.",
-    )
-    _ = parser.add_argument(
-        "--repo",
-        default="indexable-inc/index",
-        help="GitHub repository in owner/name form.",
-    )
-    _ = parser.add_argument(
-        "--github-api-url",
-        default="https://api.github.com",
-        help="GitHub API base URL.",
-    )
-    _ = parser.add_argument(
-        "--user-agent",
-        default="ix-daily-scraper-example/0.1",
-        help="HTTP User-Agent header.",
-    )
-    namespace = parser.parse_args()
-
-    return CliArgs(
-        output_dir=cast(Path, namespace.output_dir),
-        repo=cast(str, namespace.repo),
-        github_api_url=cast(str, namespace.github_api_url),
-        user_agent=cast(str, namespace.user_agent),
-    )
-
-
-def int_field(payload: dict[str, object], key: str) -> int:
-    value = payload.get(key)
-    if not isinstance(value, int):
-        raise TypeError(f"{key} is missing or is not an integer")
-    return value
-
-
-def str_field(payload: dict[str, object], key: str) -> str:
-    value = payload.get(key)
-    if not isinstance(value, str):
-        raise TypeError(f"{key} is missing or is not a string")
-    return value
 
 
 def fetch_repo_metric(repo: str, api_url: str, user_agent: str) -> RepoMetric:
@@ -94,22 +55,18 @@ def fetch_repo_metric(repo: str, api_url: str, user_agent: str) -> RepoMetric:
     with httpx.Client(headers=headers, follow_redirects=True, timeout=30.0) as client:
         response = client.get(source_url)
         _ = response.raise_for_status()
-        raw_payload = cast(object, response.json())
+        payload = GitHubRepoPayload.model_validate(response.json())
 
-    if not isinstance(raw_payload, dict):
-        raise TypeError("GitHub returned a non-object response")
-
-    payload = cast(dict[str, object], raw_payload)
     fetched_at = dt.datetime.now(dt.UTC).replace(microsecond=0)
     return RepoMetric(
         run_date=fetched_at.date(),
         fetched_at=fetched_at,
         source_url=source_url,
-        repository=str_field(payload, "full_name"),
-        default_branch=str_field(payload, "default_branch"),
-        stars=int_field(payload, "stargazers_count"),
-        forks=int_field(payload, "forks_count"),
-        open_issues=int_field(payload, "open_issues_count"),
+        repository=payload.full_name,
+        default_branch=payload.default_branch,
+        stars=payload.stargazers_count,
+        forks=payload.forks_count,
+        open_issues=payload.open_issues_count,
     )
 
 
@@ -164,7 +121,7 @@ def write_parquet(metric: RepoMetric, output_dir: Path) -> Path:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    args = parse_args()
+    args = CliArgs.model_validate({})
 
     metric = fetch_repo_metric(
         repo=args.repo,
