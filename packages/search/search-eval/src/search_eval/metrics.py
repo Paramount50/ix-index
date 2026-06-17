@@ -38,10 +38,15 @@ from dataclasses import dataclass
 
 
 def _gain(rel: float) -> float:
-    """Exponential gain ``2**rel - 1``; ``rel <= 0`` contributes nothing."""
+    """Exponential gain ``2**rel - 1``; ``rel <= 0`` contributes nothing.
+
+    ``math.pow`` (rather than the ``**`` operator) keeps the result statically
+    typed as ``float``: ``float.__pow__`` is typed to return ``Any`` for a
+    non-literal exponent, which would defeat strict return-type checking.
+    """
     if rel <= 0:
         return 0.0
-    return (2.0**rel) - 1.0
+    return math.pow(2.0, rel) - 1.0
 
 
 def dcg(relevances: Sequence[float]) -> float:

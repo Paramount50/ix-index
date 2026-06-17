@@ -24,6 +24,7 @@ let
     version = "0.1.0";
     srcRoot = ./.;
     mainProgram = "search-eval";
+    pyChecker = "zuban";
     meta = {
       description = "Exa-style evaluation harness for the `search` engine";
       license = lib.licenses.mit;
