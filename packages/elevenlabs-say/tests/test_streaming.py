@@ -6,6 +6,7 @@ is never touched: the WebSocket client is only constructed, not connected.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -17,6 +18,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, TextIO, cast
 from unittest.mock import patch
+
+import pytest
 
 import elevenlabs.realtime_tts as realtime_module
 from elevenlabs import ElevenLabs
@@ -59,7 +62,7 @@ def test_stdin_yields_before_eof_and_rejoins_split_utf8() -> None:
 
     def drain() -> None:
         for chunk in say.stdin_text_chunks():
-            chunks.append(chunk)
+            chunks.append(chunk)  # noqa: PERF402 – appending to an outer list across a thread boundary, not a list copy
 
     with fake_stdin(FakeStdin()):
         worker = threading.Thread(target=drain)
@@ -81,28 +84,25 @@ def test_stdin_yields_before_eof_and_rejoins_split_utf8() -> None:
 
 
 def test_write_stream_writes_chunks_and_rejects_empty() -> None:
-    out = Path(tempfile.mktemp(suffix=".mp3"))
+    fd, tmp = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    out = Path(tmp)
     say.write_stream(iter([b"abc", b"def"]), out)
     assert out.read_bytes() == b"abcdef"
     out.unlink()
 
-    empty = Path(tempfile.mktemp(suffix=".mp3"))
-    try:
+    fd2, tmp2 = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd2)
+    empty = Path(tmp2)
+    empty.unlink()  # write_stream must be the one to create/not-create it
+    with pytest.raises(say.SayError, match="no audio"):
         say.write_stream(iter([]), empty)
-    except say.SayError as exc:
-        assert "no audio" in str(exc), exc
-    else:
-        raise AssertionError("expected SayError on empty stream")
     assert not empty.exists(), "an empty mp3 must not be left behind"
 
 
 def test_play_stream_rejects_empty_without_spawning_ffplay() -> None:
-    try:
+    with pytest.raises(say.SayError, match="no audio"):
         say.play_stream(iter([]))
-    except say.SayError as exc:
-        assert "no audio" in str(exc), exc
-    else:
-        raise AssertionError("expected SayError on empty stream")
 
 
 def test_stream_client_narrows_to_realtime() -> None:
@@ -117,7 +117,7 @@ def test_should_stream_auto_and_overrides() -> None:
     """Pipe auto-streams, TEXT/--file batch, explicit --stream/--no-stream win."""
 
     class FakeStdin:
-        def __init__(self, tty: bool) -> None:
+        def __init__(self, *, tty: bool) -> None:
             self._tty = tty
 
         def isatty(self) -> bool:
@@ -180,10 +180,8 @@ def test_stream_init_does_not_crash_on_omit_voice_settings() -> None:
         chunks = say.stream_synthesize(
             client, say.parse_args(["hi", "--stream"]), "voice-id"
         )
-        try:
+        with contextlib.suppress(_StopAfterInit):
             next(iter(chunks))
-        except _StopAfterInit:
-            pass
 
     assert socket.sent, "init frame was never sent"
     init = json.loads(socket.sent[0])
@@ -205,12 +203,8 @@ def test_atempo_filter_maps_wpm_to_in_range_stages() -> None:
             product *= s
         assert abs(product - rate / say.DEFAULT_WPM) < 1e-3, (rate, product)
     for bad in (0, -5):
-        try:
+        with pytest.raises(say.SayError):
             say.atempo_filter(bad)
-        except say.SayError:
-            pass
-        else:
-            raise AssertionError(f"expected SayError for rate={bad}")
 
 
 def test_say_compat_flags_parse() -> None:
@@ -258,16 +252,12 @@ def test_resolve_voice_id_missing_permission_is_actionable() -> None:
     for status in (401, 403):
 
         class FakeVoices:
-            def search(self, search: str) -> object:
-                raise ApiError(status_code=status, body={"detail": "nope"})
+            def search(self, search: str, _s: int = status) -> object:
+                raise ApiError(status_code=_s, body={"detail": "nope"})
 
         client = type("C", (), {"voices": FakeVoices()})()
-        try:
+        with pytest.raises(say.SayError, match="voices_read"):
             say.resolve_voice_id(client, "George")
-        except say.SayError as exc:
-            assert "voices_read" in str(exc), (status, exc)
-        else:
-            raise AssertionError(f"expected SayError for {status} during resolution")
 
 
 def test_resolve_voice_id_other_api_error_falls_through() -> None:
@@ -282,13 +272,11 @@ def test_resolve_voice_id_other_api_error_falls_through() -> None:
             raise ApiError(status_code=500, body={"detail": "boom"})
 
     client = type("C", (), {"voices": FakeVoices()})()
-    try:
+    with pytest.raises(say.SayError) as exc_info:
         say.resolve_voice_id(client, "George")
-    except say.SayError as exc:
-        assert "status 500" in str(exc), exc
-        assert "voices_read" not in str(exc), exc
-    else:
-        raise AssertionError("expected SayError for a 500 during name resolution")
+    msg = str(exc_info.value)
+    assert "status 500" in msg, msg
+    assert "voices_read" not in msg, msg
 
 
 if __name__ == "__main__":
