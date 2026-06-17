@@ -29,14 +29,20 @@ dashboard's styled table for free); the mutating calls are async.
 
 from __future__ import annotations
 
+import builtins
 import dataclasses
 import html as _html
 import os
 import pathlib
 import subprocess
 import tempfile
+from typing import TYPE_CHECKING, Any
 
 import polars as pl
+
+if TYPE_CHECKING:
+    import nix as _nix_mod
+    import sh as _sh_mod
 
 __all__ = ["list", "add", "remove", "prune", "Worktree"]
 
@@ -45,7 +51,7 @@ __all__ = ["list", "add", "remove", "prune", "Worktree"]
 _MONO = "ui-monospace,SFMono-Regular,Menlo,monospace"
 
 
-def _run(repo: str | os.PathLike, *args: str) -> subprocess.CompletedProcess:
+def _run(repo: str | os.PathLike[str], *args: str) -> subprocess.CompletedProcess[str]:
     """Run a ``git`` command in ``repo`` and return the completed process.
 
     Synchronous and used only for the fast, metadata-only reads (``rev-parse``,
@@ -59,7 +65,7 @@ def _run(repo: str | os.PathLike, *args: str) -> subprocess.CompletedProcess:
     )
 
 
-def _toplevel(path: str | os.PathLike) -> pathlib.Path:
+def _toplevel(path: str | os.PathLike[str]) -> pathlib.Path:
     """The main work tree root for the repo containing ``path``."""
     proc = _run(path, "rev-parse", "--show-toplevel")
     if proc.returncode != 0:
@@ -80,7 +86,7 @@ def _default_path(repo: pathlib.Path, branch: str) -> pathlib.Path:
     return base / _sanitize(branch)
 
 
-def _local_branch_exists(repo: str | os.PathLike, branch: str) -> bool:
+def _local_branch_exists(repo: str | os.PathLike[str], branch: str) -> bool:
     return (
         _run(repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}").returncode
         == 0
@@ -92,7 +98,7 @@ class Worktree:
     """One linked work tree: a branch checked out at its own ``path``.
 
     Returned by :func:`add` and the rows of :func:`list`. It is also an
-    ``os.PathLike`` (``__fspath__`` is its path) and ``wt / "sub"`` joins onto it,
+    ``os.PathLike[str]`` (``__fspath__`` is its path) and ``wt / "sub"`` joins onto it,
     so it drops straight into ``view.cat`` / ``view.edit`` / ``pathlib``.
     """
 
@@ -106,26 +112,26 @@ class Worktree:
     def __fspath__(self) -> str:
         return str(self.path)
 
-    def __truediv__(self, other: str | os.PathLike) -> pathlib.Path:
+    def __truediv__(self, other: str | os.PathLike[str]) -> pathlib.Path:
         return self.path / other
 
-    async def sh(self, cmd, **kwargs):
+    async def sh(self, cmd: str | builtins.list[str], **kwargs: Any) -> "_sh_mod.Output":  # noqa: ANN401 -- forwarded to sh()
         """Run a shell command in this worktree (bundled ``sh``, ``cwd`` threaded)."""
-        import sh as _sh
+        from sh import sh as _sh
 
         return await _sh(cmd, cwd=str(self.path), **kwargs)
 
-    async def commit(self, message: str, *, all: bool = True):
+    async def commit(self, message: str, *, all: bool = True) -> "_sh_mod.Output":
         """Commit this worktree. With ``all`` (the default) stage everything first
         (``git add -A``), so new files are included; returns the ``git commit``
         :class:`sh.Output`."""
-        import sh as _sh
+        from sh import sh as _sh
 
         if all:
             await _sh(["git", "-C", str(self.path), "add", "-A"], check=True, cwd=str(self.path))
         return await _sh(["git", "-C", str(self.path), "commit", "-m", message], cwd=str(self.path))
 
-    async def build(self, attr: str, *flags: str, add: bool = True, **kwargs):
+    async def build(self, attr: str, *flags: str, add: bool = True, **kwargs: Any) -> "_nix_mod.NixLog":  # noqa: ANN401 -- forwarded to nix.build()
         """``nix build`` this worktree's flake (bundled ``nix``, ``cwd`` threaded).
 
         With ``add`` (the default) ``git add -A`` runs first, because a flake only
@@ -135,12 +141,12 @@ class Worktree:
         import nix as _nix
 
         if add:
-            import sh as _sh
+            from sh import sh as _sh
 
             await _sh(["git", "-C", str(self.path), "add", "-A"], check=True, cwd=str(self.path))
         return await _nix.build(attr, *flags, cwd=str(self.path), **kwargs)
 
-    async def remove(self, *, force: bool = False):
+    async def remove(self, *, force: bool = False) -> "_sh_mod.Output":
         """Remove this linked work tree (the branch is kept). ``force`` discards
         uncommitted changes in it; returns the ``git worktree remove``
         :class:`sh.Output`."""
@@ -170,8 +176,8 @@ class Worktree:
 
 def _parse_porcelain(text: str, repo: pathlib.Path) -> "pl.DataFrame":
     """Parse ``git worktree list --porcelain`` (blank-line-separated stanzas)."""
-    rows: list = []
-    cur: dict = {}
+    rows: builtins.list[dict[str, str | bool]] = []
+    cur: dict[str, str | bool] = {}
 
     def flush() -> None:
         if cur:
@@ -199,10 +205,10 @@ def _parse_porcelain(text: str, repo: pathlib.Path) -> "pl.DataFrame":
             {
                 "path": r.get("path", ""),
                 "branch": r.get("branch"),
-                "head": (r.get("head") or "")[:8],
+                "head": str(r.get("head") or "")[:8],
                 "locked": bool(r.get("locked")),
                 "prunable": bool(r.get("prunable")),
-                "current": pathlib.Path(r.get("path", "")) == repo,
+                "current": pathlib.Path(str(r.get("path", ""))) == repo,
             }
             for r in rows
         ],
@@ -217,7 +223,7 @@ def _parse_porcelain(text: str, repo: pathlib.Path) -> "pl.DataFrame":
     )
 
 
-def list(repo: str | os.PathLike = ".") -> "pl.DataFrame":  # noqa: A001
+def list(repo: str | os.PathLike[str] = ".") -> "pl.DataFrame":  # noqa: A001
     """Every linked work tree of ``repo`` as a DataFrame (path, branch, head,
     locked, prunable, current).
 
@@ -235,8 +241,8 @@ async def add(
     branch: str,
     *,
     base: str | None = None,
-    path: str | os.PathLike | None = None,
-    repo: str | os.PathLike = ".",
+    path: str | os.PathLike[str] | None = None,
+    repo: str | os.PathLike[str] = ".",
     force: bool = False,
 ) -> Worktree:
     """Create a linked work tree for ``branch`` and return its :class:`Worktree`.
@@ -248,7 +254,7 @@ async def add(
     out elsewhere. Raises :class:`sh.ShellError` (carrying git's output) on
     failure, so a clash never half-creates a tree.
     """
-    import sh as _sh
+    from sh import sh as _sh
 
     top = _toplevel(repo)
     dest = pathlib.Path(path) if path is not None else _default_path(top, branch)
@@ -268,17 +274,17 @@ async def add(
 
 
 async def remove(
-    target: str | os.PathLike,
+    target: str | os.PathLike[str],
     *,
-    repo: str | os.PathLike = ".",
+    repo: str | os.PathLike[str] = ".",
     force: bool = False,
-):
+) -> "_sh_mod.Output":
     """Remove the linked work tree at ``target`` (a path), keeping its branch.
 
     ``force`` discards uncommitted changes in the tree. Returns the ``git worktree
     remove`` :class:`sh.Output`.
     """
-    import sh as _sh
+    from sh import sh as _sh
 
     top = _toplevel(repo)
     argv = ["git", "-C", str(top), "worktree", "remove"]
@@ -288,12 +294,12 @@ async def remove(
     return await _sh(argv, cwd=str(top))
 
 
-async def prune(repo: str | os.PathLike = "."):
+async def prune(repo: str | os.PathLike[str] = ".") -> "_sh_mod.Output":
     """Prune administrative metadata for work trees whose directory is gone.
 
     Returns the ``git worktree prune`` :class:`sh.Output`.
     """
-    import sh as _sh
+    from sh import sh as _sh
 
     top = _toplevel(repo)
     return await _sh(["git", "-C", str(top), "worktree", "prune", "-v"], cwd=str(top))

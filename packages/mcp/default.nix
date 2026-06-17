@@ -997,6 +997,7 @@ let
     "google_auth"
     "slack"
     "view"
+    "worktree"
   ];
   strictTypecheck =
     let
