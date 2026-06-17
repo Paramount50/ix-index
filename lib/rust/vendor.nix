@@ -183,6 +183,10 @@ let
           replaceWorkspaceValues = writePythonApplication {
             name = "replace-workspace-values";
             src = ./replace-workspace-values.py;
+            pyChecker = "zuban";
+            # tomli / tomli-w ship type stubs; the default `extraPaths` points
+            # the strict checker at this env's site-packages so the imports
+            # resolve under `zuban --strict` (MYPYPATH in writers.nix).
             python = pkgs.python314.withPackages (
               ps:
               attrValues {

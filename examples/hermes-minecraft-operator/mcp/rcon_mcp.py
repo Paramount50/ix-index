@@ -28,6 +28,11 @@ import socket
 import struct
 import sys
 
+# Decoded JSON-RPC messages and MCP result payloads: string keys, arbitrary
+# JSON values. The transport hands us untrusted objects, so values stay
+# `object` and are narrowed (e.g. `isinstance`) before use.
+type JsonObject = dict[str, object]
+
 SERVERDATA_AUTH = 3
 SERVERDATA_AUTH_RESPONSE = 2
 SERVERDATA_EXECCOMMAND = 2
@@ -115,7 +120,7 @@ TOOL = {
 }
 
 
-def _tool_call(arguments: dict) -> dict:
+def _tool_call(arguments: JsonObject) -> JsonObject:
     command = arguments.get("command")
     if not isinstance(command, str) or not command.strip():
         return _tool_error("`command` must be a non-empty string")
@@ -139,17 +144,18 @@ def _tool_call(arguments: dict) -> dict:
     }
 
 
-def _tool_error(message: str) -> dict:
+def _tool_error(message: str) -> JsonObject:
     return {"content": [{"type": "text", "text": message}], "isError": True}
 
 
-def _handle(request: dict) -> dict | None:
+def _handle(request: JsonObject) -> JsonObject | None:
     method = request.get("method")
     request_id = request.get("id")
     if request_id is None:
         # Notifications (e.g. notifications/initialized) need no reply.
         return None
 
+    result: JsonObject
     if method == "initialize":
         result = {
             "protocolVersion": "2024-11-05",
@@ -159,10 +165,13 @@ def _handle(request: dict) -> dict | None:
     elif method == "tools/list":
         result = {"tools": [TOOL]}
     elif method == "tools/call":
-        params = request.get("params") or {}
+        raw_params = request.get("params")
+        params: JsonObject = raw_params if isinstance(raw_params, dict) else {}
         if params.get("name") != "run_command":
             return _error_response(request_id, -32602, f"unknown tool {params.get('name')!r}")
-        result = _tool_call(params.get("arguments") or {})
+        raw_arguments = params.get("arguments")
+        arguments: JsonObject = raw_arguments if isinstance(raw_arguments, dict) else {}
+        result = _tool_call(arguments)
     elif method == "ping":
         result = {}
     else:
@@ -170,7 +179,7 @@ def _handle(request: dict) -> dict | None:
     return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 
-def _error_response(request_id: object, code: int, message: str) -> dict:
+def _error_response(request_id: object, code: int, message: str) -> JsonObject:
     return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
 

@@ -601,6 +601,9 @@ let
     src = pkgs.writeText "python-app-closure-probe.py" ''
       print("python app source is in the runtime closure")
     '';
+    # `check = false` already skips the checker, so the default flip cannot
+    # reach this fixture; pin the checker anyway to make that intent explicit.
+    pyChecker = "zuban";
     check = false;
   };
 
@@ -1616,6 +1619,7 @@ let
     pname = "uv-app-fixture";
     version = "0.1.0";
     src = uvAppFixture;
+    pyChecker = "zuban";
   };
 
   uvLockedDistribution = builtins.head uvApplication.uvWheelhouse.lock.distributions;

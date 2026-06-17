@@ -65,10 +65,20 @@ let
       ruffAnnPhase = "${lib.getExe' pkgs.ruff "ruff"} check --select ANN ${lib.escapeShellArg "${src}"}";
       # `zuban` needs the `check` subcommand; `mypy` is invoked directly. Both
       # accept --strict / --python-executable / --python-version / --platform.
+      #
+      # zuban only discovers source files at or below its working directory, so a
+      # bare absolute store path (the usual single-file `src`) yields "No Python
+      # files found to check". Run the checker from the src's parent directory
+      # and pass the basename; this is equally valid for a directory `src` (zuban
+      # walks the named dir) and leaves MYPYPATH — which carries absolute import
+      # roots — unaffected. ruff resolves absolute paths fine, so it keeps the
+      # full path and runs from the build's default cwd.
       strictPhase = checker: subcommand: ''
-        MYPYPATH=${lib.escapeShellArg mypyPath} ${lib.getExe' checker (lib.getName checker)} ${subcommand}--strict \
-          --python-executable ${lib.escapeShellArg (lib.getExe python)} \
-          --python-version ${python.pythonVersion} --platform ${pythonPlatform} ${lib.escapeShellArg "${src}"}
+        ( cd ${lib.escapeShellArg (builtins.dirOf "${src}")} && \
+          MYPYPATH=${lib.escapeShellArg mypyPath} ${lib.getExe' checker (lib.getName checker)} ${subcommand}--strict \
+            --python-executable ${lib.escapeShellArg (lib.getExe python)} \
+            --python-version ${python.pythonVersion} --platform ${pythonPlatform} \
+            ${lib.escapeShellArg (builtins.baseNameOf "${src}")} )
         ${ruffAnnPhase}
       '';
       pyCheckers = {

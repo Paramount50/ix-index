@@ -25,6 +25,7 @@ let
   rconMcp = ix.writePythonApplication pkgs {
     name = "minecraft-rcon-mcp";
     src = ./mcp/rcon_mcp.py;
+    pyChecker = "zuban";
     meta.description = "MCP stdio server exposing Minecraft RCON as a typed run_command tool";
   };
 in

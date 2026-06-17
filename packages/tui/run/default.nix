@@ -13,6 +13,7 @@ let
   unwrapped = ix.writePythonApplication pkgs {
     name = "run-unwrapped";
     src = ./run.py;
+    pyChecker = "zuban";
     meta.description = "Record a command's terminal session, timing, and queryable output events";
   };
   package =

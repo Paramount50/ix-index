@@ -518,7 +518,7 @@ def stdio_fd(name: str, fallback: int) -> int:
     if stream is None:
         return fallback
     try:
-        return stream.fileno()
+        return int(stream.fileno())
     except (AttributeError, OSError, ValueError):
         return fallback
 
@@ -851,9 +851,6 @@ def run(argv: list[str]) -> int:
 
             if child_status is not None and not pty_open:
                 break
-
-        if child_status is None:
-            _waited_pid, child_status = os.waitpid(pid, 0)
     finally:
         signal.signal(signal.SIGWINCH, previous_winch)
         for signum, handler in previous_handlers.items():

@@ -307,18 +307,21 @@ let
   updateMods = ix.writePythonApplication pkgs {
     name = "update-mods";
     src = paths.tools.updateMods;
+    pyChecker = "zuban";
     meta.description = "Regenerate Minecraft mod catalogs";
   };
 
   updateLoaders = ix.writePythonApplication pkgs {
     name = "update-loaders";
     src = paths.tools.updateLoaders;
+    pyChecker = "zuban";
     meta.description = "Refresh Minecraft loader (Paper / Velocity / Fabric) catalogs from upstream";
   };
 
   ixShellSyncIgnored = ix.writePythonApplication pkgs {
     name = "ix-shell-sync-ignored";
     src = paths.tools.ixShellSyncIgnored;
+    pyChecker = "zuban";
     runtimeInputs = [
       pkgs.git
       pkgs.gnutar

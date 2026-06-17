@@ -11,7 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 API = "https://api.modrinth.com/v2"
 HEADERS = {"User-Agent": "indexable-inc/index update-mods (github.com/indexable-inc/index)"}
@@ -23,7 +23,13 @@ _project_cache: dict[str, JsonObject] = {}
 _version_cache: dict[tuple[str, tuple[str, ...], tuple[str, ...]], list[JsonObject]] = {}
 
 
-def api_get(path: str, params: JsonObject | None = None) -> Any:
+def api_get(path: str, params: JsonObject | None = None) -> object:
+    """Fetch and JSON-decode a Modrinth endpoint.
+
+    Returns the raw decoded JSON as `object`; each caller casts to the shape
+    that endpoint documents (a `JsonObject` for single resources, a
+    `list[JsonObject]` for collections).
+    """
     url = f"{API}{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
@@ -35,7 +41,7 @@ def api_get(path: str, params: JsonObject | None = None) -> Any:
                 if resp.status == 429:
                     time.sleep(2**attempt)
                     continue
-                return json.loads(resp.read())
+                return cast(object, json.loads(resp.read()))
         except urllib.error.HTTPError as err:
             if err.code == 429 and attempt < 2:
                 time.sleep(2**attempt)
@@ -47,7 +53,7 @@ def api_get(path: str, params: JsonObject | None = None) -> Any:
 
 def get_project(id_or_slug: str) -> JsonObject:
     if id_or_slug not in _project_cache:
-        project = api_get(f"/project/{id_or_slug}")
+        project = cast(JsonObject, api_get(f"/project/{id_or_slug}"))
         cache_project(project)
     return _project_cache[id_or_slug]
 
@@ -66,7 +72,7 @@ def get_projects(ids_or_slugs: list[str]) -> list[JsonObject]:
         chunk = missing[offset : offset + SEARCH_PAGE_SIZE]
         if not chunk:
             continue
-        projects = api_get("/projects", {"ids": json.dumps(chunk)})
+        projects = cast(list[JsonObject], api_get("/projects", {"ids": json.dumps(chunk)}))
         for project in projects:
             cache_project(project)
 
@@ -85,7 +91,9 @@ def get_versions(project_id: str, game_versions: list[str], loaders: list[str]) 
             params["game_versions"] = json.dumps(game_versions)
         if loaders:
             params["loaders"] = json.dumps(loaders)
-        _version_cache[key] = api_get(f"/project/{project_id}/version", params)
+        _version_cache[key] = cast(
+            list[JsonObject], api_get(f"/project/{project_id}/version", params)
+        )
     return _version_cache[key]
 
 
@@ -102,7 +110,8 @@ def pick_version(versions: list[JsonObject]) -> JsonObject | None:
 
 
 def primary_file(version: JsonObject) -> JsonObject:
-    return next((file for file in version["files"] if file["primary"]), version["files"][0])
+    files = cast(list[JsonObject], version["files"])
+    return next((file for file in files if file["primary"]), files[0])
 
 
 def sri_from_modrinth(file: JsonObject) -> str:
@@ -337,7 +346,7 @@ def discover_projects(
         if facets:
             params["facets"] = json.dumps(facets)
 
-        page = api_get("/search", params)
+        page = cast(JsonObject, api_get("/search", params))
         hits = page.get("hits", [])
         total_hits = page.get("total_hits", total_hits)
         if not hits:

@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 JsonObject = dict[str, Any]
 
@@ -40,7 +40,7 @@ def http_get(url: str) -> bytes:
                 if response.status == 429:
                     time.sleep(2**attempt)
                     continue
-                return response.read()
+                return cast(bytes, response.read())
         except urllib.error.HTTPError as err:
             if err.code in (429, 502, 503, 504) and attempt < 2:
                 time.sleep(2**attempt)
@@ -49,8 +49,9 @@ def http_get(url: str) -> bytes:
     raise RuntimeError(f"rate limited after retries: {url}")
 
 
-def http_get_json(url: str) -> Any:
-    return json.loads(http_get(url))
+def http_get_json(url: str) -> object:
+    """Fetch and JSON-decode `url`; the caller casts to the documented shape."""
+    return cast(object, json.loads(http_get(url)))
 
 
 def sri_sha256(data: bytes) -> str:
@@ -65,7 +66,7 @@ def latest_papermc_build(project: str, version: str, channel: str) -> JsonObject
     handles; the SHA-256 is converted to SRI before storing.
     """
     builds_url = f"{PAPER_FILL_API}/projects/{project}/versions/{version}/builds"
-    builds = http_get_json(builds_url)
+    builds = cast(list[JsonObject], http_get_json(builds_url))
     filtered = [build for build in builds if channel == "default" or build.get("channel") == channel]
     if not filtered:
         raise RuntimeError(
