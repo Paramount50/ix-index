@@ -33,8 +33,15 @@
   evalImageConfig,
 }:
 let
-  inherit (import (paths.root + "/lib/dev/shared-mount.nix") { inherit lib; }) serverModule clientModule;
-  inherit (import (paths.root + "/lib/dev/identity.nix") { inherit lib; }) bindModule sourceNode sourceServerSeed;
+  inherit (import (paths.root + "/lib/dev/shared-mount.nix") { inherit lib; })
+    serverModule
+    clientModule
+    ;
+  inherit (import (paths.root + "/lib/dev/identity.nix") { inherit lib; })
+    bindModule
+    sourceNode
+    sourceServerSeed
+    ;
 
   # Plain option/agent modules (root-anchored paths). The probe needs only the
   # `ix.dev` declarations (`optionsModule`); the agent layer is added to

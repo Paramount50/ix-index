@@ -170,9 +170,11 @@ let
   # The CI progress bars are a standalone reusable component, not personal glue:
   # this just composes it (imported below, turned on in config). Anyone can do
   # the same with `services.ciBars = { enable = true; repos = [ ... ]; }`.
-  ciBarsModule = import (ix.paths.packagesRoot + "/minecraft/bossbar-overlay/ci-bars-home-module.nix") {
-    inherit indexPackages portableServicesModule ix;
-  };
+  ciBarsModule =
+    import (ix.paths.packagesRoot + "/minecraft/bossbar-overlay/ci-bars-home-module.nix")
+      {
+        inherit indexPackages portableServicesModule ix;
+      };
 in
 {
   imports = [

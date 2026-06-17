@@ -14,7 +14,14 @@
 let
   inherit (builtins) baseNameOf toString;
 
-  vendorLib = import ./vendor.nix { inherit lib pkgs writePythonApplication lists; };
+  vendorLib = import ./vendor.nix {
+    inherit
+      lib
+      pkgs
+      writePythonApplication
+      lists
+      ;
+  };
 
   policyLib = import ./policy.nix {
     inherit lib pkgs clippyPackage;
