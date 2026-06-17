@@ -15,7 +15,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal, TextIO, cast
+from typing import Literal, TextIO, cast  # noqa: TID251 -- casting test doubles to their interface is intentional
 from unittest.mock import patch
 
 import elevenlabs.realtime_tts as realtime_module
