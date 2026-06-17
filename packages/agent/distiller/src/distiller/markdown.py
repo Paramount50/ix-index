@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 from .types import Item
@@ -11,7 +11,7 @@ from .types import Item
 def _date(ts: float | None) -> str:
     if not ts:
         return "?"
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%d")
 
 
 def render(project: str, user: str, items: list[Item]) -> str:

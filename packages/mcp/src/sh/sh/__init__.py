@@ -564,11 +564,11 @@ async def sh(
             await asyncio.wait_for(_drain(), timeout)
         else:
             await _drain()
-    except asyncio.TimeoutError:
+    except TimeoutError:
         _terminate(proc)
         # The group is dead, so the pipe closes and this reap returns promptly;
         # bound it anyway so a wedged reap can never hang the job past its timeout.
-        with contextlib.suppress(asyncio.TimeoutError):
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(proc.wait(), 2.0)
         raise TimeoutError(f"command timed out after {timeout}s: {shown}") from None
     except asyncio.CancelledError:

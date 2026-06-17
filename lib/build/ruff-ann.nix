@@ -82,11 +82,22 @@ let
     # it -- the flagged loops (retry/drain/collect-failures) genuinely need the
     # per-iteration try; hoisting it would change behavior.
     "PERF203"
+    # ASYNC109: async function that takes a `timeout` parameter. The codebase's
+    # pervasive, deliberate pattern is to accept a timeout and forward it to the
+    # underlying library (httpx/asyncssh/subprocess/wait_for), which the rule
+    # cannot see; it fires ~38 times with no bug behind any. Not a helpful lint here.
+    "ASYNC109"
   ];
 in
 {
   inherit banMessage banConfig select ignore;
   # Drop-in replacement for the old bare `--select ANN`:
   #   ruff check ${ruffAnnArgs} <targets>
-  ruffAnnArgs = "--select ${lib.concatStringsSep "," select} --ignore ${lib.concatStringsSep "," ignore} --config ${lib.escapeShellArg banConfig}";
+  #
+  # `--target-version py313` is pinned so every gate (per-package and the repo-wide
+  # lint stage) evaluates target-version-gated rules (UP041 aliased errors, UP017
+  # datetime.UTC, ...) identically -- the whole repo is Python 3.13, and without
+  # this the lint stage's per-file pyproject discovery diverged from the package
+  # gates, flagging rules in one place but not the other.
+  ruffAnnArgs = "--target-version py313 --select ${lib.concatStringsSep "," select} --ignore ${lib.concatStringsSep "," ignore} --config ${lib.escapeShellArg banConfig}";
 }

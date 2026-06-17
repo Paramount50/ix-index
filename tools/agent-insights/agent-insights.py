@@ -41,7 +41,7 @@ import argparse
 import json
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 
 INTERRUPT_MARK = "[Request interrupted by user"
@@ -66,7 +66,7 @@ def parse_ts(s: str | None) -> datetime | None:
     if not s:
         return None
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+        return datetime.fromisoformat(s).astimezone(UTC)
     except (ValueError, AttributeError):
         return None
 
@@ -204,7 +204,7 @@ def scan_codex(root: str, since: datetime | None) -> list[Turn]:
 
 def week_start(dt: datetime) -> datetime:
     d = (dt - timedelta(days=dt.weekday())).date()
-    return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    return datetime(d.year, d.month, d.day, tzinfo=UTC)
 
 
 def pct(vals: list[float], p: float) -> float:

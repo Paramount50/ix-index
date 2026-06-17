@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 from pathlib import Path
 
 # User messages matching these near the start signal a correction of the
@@ -62,7 +62,7 @@ def _parse_ts(value: object) -> float | None:
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        return datetime.fromisoformat(value).timestamp()
     except ValueError:
         return None
 
@@ -218,7 +218,7 @@ def scan(root: Path, days: float, now: float | None = None) -> dict[str, list[Se
     gate then trims sessions whose activity falls outside the window.
     """
 
-    now = now if now is not None else datetime.now(timezone.utc).timestamp()
+    now = now if now is not None else datetime.now(UTC).timestamp()
     cutoff = now - days * 86400
     groups: dict[str, list[Session]] = {}
     if not root.is_dir():

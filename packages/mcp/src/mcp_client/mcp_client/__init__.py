@@ -273,7 +273,7 @@ class Server:
         await self._queue.put(_STOP)
         try:
             await asyncio.wait_for(self._closed.wait(), timeout=10)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             self._task.cancel()
 
     async def __aenter__(self) -> Server:
@@ -554,7 +554,7 @@ async def connect(
     srv = Server(key, factory, label)
     try:
         await asyncio.wait_for(srv._open(), timeout=open_timeout)
-    except asyncio.TimeoutError as exc:
+    except TimeoutError as exc:
         await srv.close()
         raise MCPError(f"{label}: timed out connecting") from exc
     return srv

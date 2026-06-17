@@ -58,7 +58,7 @@ import subprocess
 import sys
 from collections.abc import Iterable
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, UTC
 
 import polars as pl
 
@@ -87,7 +87,7 @@ CHAT_DB = str(Path("~/Library/Messages/chat.db").expanduser())
 # Core Data / Apple epoch: 2001-01-01 UTC, in nanoseconds since the Unix epoch.
 # `message.date` is nanoseconds since this point on modern macOS (it was *seconds*
 # before High Sierra); both are handled in `_to_datetime`.
-_APPLE_EPOCH = datetime(2001, 1, 1, tzinfo=timezone.utc)
+_APPLE_EPOCH = datetime(2001, 1, 1, tzinfo=UTC)
 _APPLE_EPOCH_NS = int(_APPLE_EPOCH.timestamp() * 1_000_000_000)
 
 
@@ -289,7 +289,7 @@ def _apple_ns(when: datetime | str) -> int:
     if isinstance(when, str):
         when = datetime.fromisoformat(when)
     if when.tzinfo is None:
-        when = when.replace(tzinfo=timezone.utc)
+        when = when.replace(tzinfo=UTC)
     return int(when.timestamp() * 1_000_000_000) - _APPLE_EPOCH_NS
 
 

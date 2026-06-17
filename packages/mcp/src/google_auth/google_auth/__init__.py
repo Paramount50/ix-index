@@ -198,7 +198,7 @@ def _mint() -> MintedToken:
 def _expiry(expires_in: int | None) -> datetime.datetime:
     seconds = expires_in if expires_in is not None and expires_in > 0 else _DEFAULT_LIFETIME
     # google-auth compares `expiry` against a naive UTC clock, so keep it naive.
-    now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    now = datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
     return now + datetime.timedelta(seconds=seconds) - _EXPIRY_SKEW
 
 

@@ -1,7 +1,7 @@
 """Outcome-labeling tests: verdict normalization, sessions slice, e2e cli run."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, UTC
 from pathlib import Path
 
 import polars as pl
@@ -133,7 +133,7 @@ def test_item_row_marks_failure_derived() -> None:
 
 
 def _ts(minutes: int) -> str:
-    stamp = datetime.now(timezone.utc) - timedelta(hours=2) + timedelta(minutes=minutes)
+    stamp = datetime.now(UTC) - timedelta(hours=2) + timedelta(minutes=minutes)
     return stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

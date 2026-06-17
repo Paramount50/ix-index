@@ -292,7 +292,7 @@ async def run_cli(
     timed_out = False
     try:
         await asyncio.wait_for(process.wait(), timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         timed_out = True
         process.kill()
 
@@ -495,7 +495,7 @@ async def switch_node(node: FleetNode, *, dry_run: bool) -> None:
             ),
             SWITCH_TIMEOUT_SECS,
         )
-    except asyncio.TimeoutError as error:
+    except TimeoutError as error:
         raise RuntimeError(
             f"switch of {node.name} timed out after {SWITCH_TIMEOUT_SECS}s"
         ) from error
@@ -608,7 +608,7 @@ async def run_health_check(
                         branch.exec(list(check.command), check=False, quiet=True),
                         check.timeoutSec,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     last_error = f"timed out after {check.timeoutSec}s"
                 else:
                     if result.exit_code == 0:
@@ -635,7 +635,7 @@ async def run_health_check(
             )
             try:
                 stdout_b, stderr_b = await asyncio.wait_for(process.communicate(), check.timeoutSec)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 process.kill()
                 await process.wait()
                 last_error = f"timed out after {check.timeoutSec}s"

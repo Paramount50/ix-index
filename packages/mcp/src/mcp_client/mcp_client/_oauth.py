@@ -353,7 +353,7 @@ class _LoopbackListener:
         result = self._result
         try:
             outcome = await asyncio.wait_for(asyncio.shield(result), timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise OAuthCallbackTimeout(
                 f"no OAuth redirect received on 127.0.0.1:{self.port} "
                 f"within {timeout:.0f}s"

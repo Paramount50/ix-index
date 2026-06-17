@@ -19,7 +19,7 @@ __version__: str
 
 #: A cell color: `None` is the terminal default, an `int` is a palette index,
 #: an `(r, g, b)` tuple is truecolor.
-_Color: TypeAlias = int | tuple[int, int, int] | None
+type _Color = int | tuple[int, int, int] | None
 
 class StyledCell:
     """A single terminal cell: character plus VT100 styling."""
