@@ -8,10 +8,11 @@ import pyarrow.parquet as pq
 import pytest
 
 from distiller import corpus
+from distiller.types import Item
 
 
-def make_item(i: int = 0, **overrides) -> dict:
-    item = {
+def make_item(i: int = 0, **overrides) -> Item:
+    fields = {
         "id": f"df-{i:012x}",
         "title": f"Lesson {i}",
         "body": f"Body of lesson {i}: run exactly `nix build .#thing`.",
@@ -23,29 +24,29 @@ def make_item(i: int = 0, **overrides) -> dict:
         "evidence_from": 1_699_999_000.0,
         "evidence_to": 1_700_000_050.0,
     }
-    item.update(overrides)
-    return item
+    fields.update(overrides)
+    return Item(**fields)
 
 
 def test_content_hash_is_sha256_of_body():
     row = corpus.item_row(make_item(), "/home/u/repo", "hostx", "useru")
-    expected = "sha256:" + hashlib.sha256(row["body"].encode()).hexdigest()
-    assert row["content_hash"] == expected
-    assert row["content_hash"].startswith("sha256:")
-    assert len(row["content_hash"]) == len("sha256:") + 64
+    expected = "sha256:" + hashlib.sha256(row.body.encode()).hexdigest()
+    assert row.content_hash == expected
+    assert row.content_hash.startswith("sha256:")
+    assert len(row.content_hash) == len("sha256:") + 64
 
 
 def test_meta_json_carries_identity_and_filter_keys():
     row = corpus.item_row(make_item(scope="user"), "/home/u/repo", "hostx", "useru")
-    meta = json.loads(row["meta_json"])
+    meta = json.loads(row.meta_json)
     for key in ("source", "external_id", "content_hash", "title"):
-        assert meta[key] == row[key] or key == "title"
+        assert meta[key] == getattr(row, key) or key == "title"
     assert meta["user"] == "useru"
     assert meta["host"] == "hostx"
     assert meta["project"] == "/home/u/repo"
-    assert meta["timestamp"] == row["timestamp"] == 1_700_000_100
+    assert meta["timestamp"] == row.timestamp == 1_700_000_100
     assert meta["scope"] == "user:useru"
-    assert row["external_id"].startswith("distilled_facts:useru:home-u-repo:df-")
+    assert row.external_id.startswith("distilled_facts:useru:home-u-repo:df-")
 
 
 def test_corpus_hash_matches_rust_construction():
@@ -70,7 +71,7 @@ def test_write_and_validate_roundtrip(tmp_path: Path):
     assert corpus.validate_slice(tmp_path / "slice") == 3
     manifest = json.loads(paths["manifest"].read_text())
     assert manifest["content_hash"] == corpus.corpus_hash(
-        [(r["external_id"], r["content_hash"]) for r in rows]
+        [(r.external_id, r.content_hash) for r in rows]
     )
 
 
@@ -92,11 +93,11 @@ def test_validate_rejects_tampered_body(tmp_path: Path):
     rows = [corpus.item_row(make_item(i), "/p", "h", "u") for i in range(2)]
     corpus.write_slice(rows, tmp_path)
     # Rewrite with a body that no longer matches its content_hash.
-    rows[0]["body"] = rows[0]["body"] + " TAMPERED"
+    rows[0].body = rows[0].body + " TAMPERED"
     import pyarrow as pa
 
     table = pa.Table.from_pydict(
-        {name: [r[name] for r in rows] for name in corpus.SCHEMA.names},
+        {name: [getattr(r, name) for r in rows] for name in corpus.SCHEMA.names},
         schema=corpus.SCHEMA,
     )
     pq.write_table(table, tmp_path / "data.parquet")

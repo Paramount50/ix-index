@@ -103,7 +103,7 @@ def build_prompt(
     existing = (
         json.dumps(
             [
-                {k: item.get(k) for k in ("id", "title", "body", "outcome", "scope")}
+                {k: getattr(item, k) for k in ("id", "title", "body", "outcome", "scope")}
                 for item in items
             ],
             indent=1,
@@ -249,10 +249,10 @@ def session_verdicts(
         if not isinstance(sid, str) or not isinstance(label, str) or label not in SESSION_LABELS:
             continue
         reason = verdict.get("reason")
-        by_id[sid] = {
-            "label": label,
-            "reason": _word_clip(reason, 25) if isinstance(reason, str) else "",
-        }
+        by_id[sid] = Verdict(
+            label=label,
+            reason=_word_clip(reason, 25) if isinstance(reason, str) else "",
+        )
 
     verdicts: dict[str, Verdict] = {}
     for session in sessions:
@@ -264,10 +264,10 @@ def session_verdicts(
             fallback = "abandoned"
         else:
             fallback = _FALLBACK_LABELS.get(session.outcome, "partial")
-        verdicts[session.session_id] = {
-            "label": fallback,
-            "reason": f"heuristic fallback (no model verdict; signals: {session.outcome})",
-        }
+        verdicts[session.session_id] = Verdict(
+            label=fallback,
+            reason=f"heuristic fallback (no model verdict; signals: {session.outcome})",
+        )
     return verdicts
 
 
@@ -297,8 +297,8 @@ def apply_operations(
     """
 
     now = now if now is not None else time.time()
-    merged: list[Item] = [item.copy() for item in items]
-    by_id: dict[str, Item] = {item["id"]: item for item in merged}
+    merged: list[Item] = [item.model_copy() for item in items]
+    by_id: dict[str, Item] = {item.id: item for item in merged}
     added = 0
 
     def session_ids(op: dict[str, object]) -> list[str]:
@@ -319,7 +319,7 @@ def apply_operations(
             body = op.get("body")
             if not isinstance(title, str) or not isinstance(body, str):
                 continue
-            if any(item["title"].strip().lower() == title.strip().lower() for item in merged):
+            if any(item.title.strip().lower() == title.strip().lower() for item in merged):
                 continue  # near-duplicate guard
             outcome = op.get("outcome")
             new_item = Item(
@@ -333,7 +333,7 @@ def apply_operations(
                 last_updated=now,
             )
             merged.append(new_item)
-            by_id[new_item["id"]] = new_item
+            by_id[new_item.id] = new_item
             added += 1
         elif kind == "update":
             op_id = op.get("id")
@@ -344,30 +344,30 @@ def apply_operations(
                 continue
             new_title = op.get("title")
             if isinstance(new_title, str) and new_title.strip():
-                target["title"] = new_title.strip()
+                target.title = new_title.strip()
             new_body = op.get("body")
             if isinstance(new_body, str) and new_body.strip():
-                target["body"] = _word_clip(new_body)
+                target.body = _word_clip(new_body)
             new_outcome = op.get("outcome")
             if isinstance(new_outcome, str) and new_outcome in ("success", "failure", "mixed"):
-                target["outcome"] = new_outcome
+                target.outcome = new_outcome
             new_scope = op.get("scope")
             if isinstance(new_scope, str) and new_scope in ("user", "shared"):
-                target["scope"] = new_scope
-            new_sessions = [s for s in session_ids(op) if s not in target.get("sessions", [])]
-            target["sessions"] = (target.get("sessions") or []) + new_sessions
-            target["last_updated"] = now
+                target.scope = new_scope
+            new_sessions = [s for s in session_ids(op) if s not in target.sessions]
+            target.sessions = target.sessions + new_sessions
+            target.last_updated = now
 
     # Stamp date ranges from session metadata so provenance survives.
     for item in merged:
         stamps = [
             ts
-            for s in item.get("sessions", [])
-            if s in sessions_meta and (ts := sessions_meta[s].get("last_ts")) is not None
+            for s in item.sessions
+            if s in sessions_meta and (ts := sessions_meta[s].last_ts) is not None
         ]
         if stamps:
-            prior_from = item.get("evidence_from")
-            item["evidence_from"] = min(stamps + ([prior_from] if prior_from else []))
-            prior_to = item.get("evidence_to")
-            item["evidence_to"] = max(stamps + ([prior_to] if prior_to else []))
+            prior_from = item.evidence_from
+            item.evidence_from = min(stamps + ([prior_from] if prior_from else []))
+            prior_to = item.evidence_to
+            item.evidence_to = max(stamps + ([prior_to] if prior_to else []))
     return merged

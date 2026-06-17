@@ -35,10 +35,13 @@ let
   # cannot self-certify the slice). pyarrow: the writer -- its embedded Arrow
   # schema says Utf8, which is what the Rust source-parquet reader downcasts
   # to. boto3: the optional --upload leg into the MinIO archive bucket.
+  # pydantic: the persisted record models (Item/SessionRecord/State/Row/Verdict)
+  # that validate the on-disk state JSON and the corpus rows.
   pythonDeps = ps: [
     ps.polars
     ps.pyarrow
     ps.boto3
+    ps.pydantic
   ];
   distillerPython = pkgs.python3.withPackages (ps: pythonDeps ps ++ [ distillerModule ]);
 

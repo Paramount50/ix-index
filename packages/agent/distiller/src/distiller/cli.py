@@ -91,16 +91,16 @@ def run(args: argparse.Namespace) -> int:
     all_outcomes_by_project: dict[str, dict[str, SessionRecord]] = {}
 
     def keep_state(project: str, st: State) -> None:
-        if st["items"]:
-            all_items_by_project[project] = st["items"]
-        if st["session_outcomes"]:
-            all_outcomes_by_project[project] = st["session_outcomes"]
+        if st.items:
+            all_items_by_project[project] = st.items
+        if st.session_outcomes:
+            all_outcomes_by_project[project] = st.session_outcomes
 
     for project, sessions in sorted(groups.items()):
         slug = transcripts.project_slug(project)
         st = state.load(args.out, args.user, slug)
-        st["project"] = project
-        seen = st["distilled_sessions"]
+        st.project = project
+        seen = st.distilled_sessions
         fresh = [
             s
             for s in sessions
@@ -108,14 +108,14 @@ def run(args: argparse.Namespace) -> int:
         ][: args.max_sessions_per_project]
         if len(fresh) < args.min_sessions:
             keep_state(project, st)
-            print(f"[{slug}] no new sessions; keeping {len(st['items'])} items")
+            print(f"[{slug}] no new sessions; keeping {len(st.items)} items")
             continue
 
         digests = [transcripts.digest(s) for s in fresh]
-        prompt = distill.build_prompt(project, st["items"], digests, max_new=args.max_new_items)
+        prompt = distill.build_prompt(project, st.items, digests, max_new=args.max_new_items)
         print(
             f"[{slug}] distilling {len(fresh)} session(s) "
-            f"({len(st['items'])} existing items) via {args.model} ..."
+            f"({len(st.items)} existing items) via {args.model} ..."
         )
         try:
             result = distill.run_claude(prompt, model=args.model, claude_bin=args.claude_bin)
@@ -125,34 +125,34 @@ def run(args: argparse.Namespace) -> int:
             continue
 
         sessions_meta: dict[str, SessionRecord] = {
-            s.session_id: {"last_ts": s.last_ts} for s in fresh
+            s.session_id: SessionRecord(last_ts=s.last_ts) for s in fresh
         }
-        st["items"] = distill.apply_operations(
-            st["items"], result.operations, sessions_meta, max_new=args.max_new_items
+        st.items = distill.apply_operations(
+            st.items, result.operations, sessions_meta, max_new=args.max_new_items
         )
         verdicts = distill.session_verdicts(result.session_outcomes, fresh)
         for s in fresh:
             verdict = verdicts[s.session_id]
-            st["session_outcomes"][s.session_id] = {
-                "label": verdict["label"],
-                "reason": verdict["reason"],
-                "goal": s.goal,
-                "turns": s.message_count,
-                "duration_s": (
+            st.session_outcomes[s.session_id] = SessionRecord(
+                label=verdict.label,
+                reason=verdict.reason,
+                goal=s.goal,
+                turns=s.message_count,
+                duration_s=(
                     int(s.last_ts - s.first_ts) if s.first_ts and s.last_ts else 0
                 ),
-                "models": s.models,
-                "errors": len(s.errors),
-                "corrections": len(s.corrections),
-                "last_ts": s.last_ts,
-            }
+                models=s.models,
+                errors=len(s.errors),
+                corrections=len(s.corrections),
+                last_ts=s.last_ts,
+            )
             seen[s.session_id] = s.fingerprint()
         state.save(args.out, args.user, slug, st)
-        labels = ", ".join(f"{s.session_id}={verdicts[s.session_id]['label']}" for s in fresh)
+        labels = ", ".join(f"{s.session_id}={verdicts[s.session_id].label}" for s in fresh)
         print(f"[{slug}] session outcomes: {labels}")
-        if st["items"]:
-            md_path = markdown.write(args.out, args.user, slug, project, st["items"])
-            print(f"[{slug}] {len(st['items'])} items -> {md_path}")
+        if st.items:
+            md_path = markdown.write(args.out, args.user, slug, project, st.items)
+            print(f"[{slug}] {len(st.items)} items -> {md_path}")
         else:
             print(f"[{slug}] model found nothing worth keeping")
         keep_state(project, st)
@@ -164,7 +164,7 @@ def run(args: argparse.Namespace) -> int:
             args.host,
             args.user,
             session_labels={
-                sid: rec["label"]
+                sid: rec.label
                 for sid, rec in all_outcomes_by_project.get(project, {}).items()
             },
         )
@@ -180,7 +180,7 @@ def run(args: argparse.Namespace) -> int:
         counts: dict[str, int] = {}
         for project, recs in all_outcomes_by_project.items():
             for rec in recs.values():
-                counts[rec["label"]] = counts.get(rec["label"], 0) + 1
+                counts[rec.label] = counts.get(rec.label, 0) + 1
         print(
             "outcome label distribution: "
             + ", ".join(f"{label}={n}" for label, n in sorted(counts.items()))

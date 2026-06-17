@@ -1,11 +1,17 @@
 """Shared record shapes for the distiller's JSON-backed state.
 
-These ``TypedDict``s describe the structures the distiller owns and persists:
-distilled items (``Item``), per-session outcome records (``SessionRecord``),
-normalized model verdicts (``Verdict``), and the per-(user, project) state file
-(``State``). They are ``total=False`` where keys accrue across runs (provenance
-stamps, optional metadata) so partial dicts still type-check while still naming
-every field a reader may touch.
+These ``pydantic`` models describe the structures the distiller owns and
+persists: distilled items (``Item``), per-session outcome records
+(``SessionRecord``), normalized model verdicts (``Verdict``), and the
+per-(user, project) state file (``State``). Fields that accrue across runs
+(provenance stamps, optional metadata) carry defaults so partial records still
+validate while still naming every field a reader may touch.
+
+On-disk JSON compatibility is load-bearing: the state file persists across runs
+and is what makes distillation incremental. ``extra="ignore"`` tolerates keys
+from older/newer schemas, defaults tolerate missing keys, and ``Item`` omits
+its unset provenance stamps on dump (``exclude_none``; see ``state.save``) so
+the serialized shape matches the historical ``total=False`` TypedDict output.
 
 Raw model output -- the ``operations`` and ``session_outcomes`` lists returned
 by ``claude -p`` -- is intentionally left as ``dict[str, object]`` (see
@@ -15,49 +21,61 @@ merge boundary rather than trusted to match a fixed shape.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from pydantic import BaseModel, ConfigDict
+
+# A prior run's state file is external (possibly hand-edited or from an older
+# schema); ignore unknown keys rather than erroring, matching the old loader.
+_TOLERANT = ConfigDict(extra="ignore")
 
 
-class Item(TypedDict, total=False):
+class Item(BaseModel):
     """One distilled ReasoningBank-style lesson, persisted across runs."""
+
+    model_config = _TOLERANT
 
     id: str
     title: str
     body: str
     outcome: str  # success | failure | mixed
     scope: str  # user | shared
-    sessions: list[str]
-    first_seen: float
-    last_updated: float
-    # Provenance stamps derived from session metadata; absent until an item has
-    # at least one timestamped evidence session.
-    evidence_from: float
-    evidence_to: float
+    sessions: list[str] = []
+    first_seen: float = 0.0
+    last_updated: float = 0.0
+    # Provenance stamps derived from session metadata; absent (None, omitted on
+    # dump) until an item has at least one timestamped evidence session.
+    evidence_from: float | None = None
+    evidence_to: float | None = None
 
 
-class SessionRecord(TypedDict, total=False):
+class SessionRecord(BaseModel):
     """One judged session's persisted outcome record (``session_outcomes``)."""
 
-    label: str
-    reason: str
-    goal: str | None
-    turns: int
-    duration_s: int
-    models: list[str]
-    errors: int
-    corrections: int
-    last_ts: float | None
+    model_config = _TOLERANT
+
+    label: str = ""
+    reason: str = ""
+    goal: str | None = None
+    turns: int = 0
+    duration_s: int = 0
+    models: list[str] = []
+    errors: int = 0
+    corrections: int = 0
+    last_ts: float | None = None
 
 
-class Verdict(TypedDict):
+class Verdict(BaseModel):
     """Normalized per-session verdict: a closed label plus a one-line reason."""
 
+    model_config = _TOLERANT
+
     label: str
     reason: str
 
 
-class Row(TypedDict):
+class Row(BaseModel):
     """One row of the 9-column corpus parquet contract (see ``corpus.py``)."""
+
+    model_config = _TOLERANT
 
     external_id: str
     source: str
@@ -70,11 +88,13 @@ class Row(TypedDict):
     meta_json: str
 
 
-class State(TypedDict):
+class State(BaseModel):
     """Per-(user, project) distillation state persisted as JSON."""
 
-    project: str | None
-    items: list[Item]
+    model_config = _TOLERANT
+
+    project: str | None = None
+    items: list[Item] = []
     # session id -> fingerprint of the last-distilled revision of that session.
-    distilled_sessions: dict[str, str]
-    session_outcomes: dict[str, SessionRecord]
+    distilled_sessions: dict[str, str] = {}
+    session_outcomes: dict[str, SessionRecord] = {}

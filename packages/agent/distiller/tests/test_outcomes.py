@@ -8,6 +8,7 @@ import polars as pl
 import pytest
 
 from distiller import cli, corpus, distill, transcripts
+from distiller.types import Item, SessionRecord
 
 
 def session(sid: str, **overrides) -> transcripts.Session:
@@ -31,12 +32,13 @@ def test_session_verdicts_normalize_and_fallback():
     ]
     verdicts = distill.session_verdicts(outcomes, sessions)
     assert set(verdicts) == {"s-ok", "s-bad", "s-quiet", "s-long"}
-    assert verdicts["s-ok"] == {"label": "success", "reason": "goal shipped"}
-    assert verdicts["s-bad"]["label"] == "failure"  # heuristic fallback
-    assert "fallback" in verdicts["s-bad"]["reason"]
-    assert verdicts["s-quiet"]["label"] == "abandoned"  # tiny unknown session
-    assert verdicts["s-long"]["label"] == "partial"
-    assert all(v["label"] in distill.SESSION_LABELS for v in verdicts.values())
+    assert verdicts["s-ok"].label == "success"
+    assert verdicts["s-ok"].reason == "goal shipped"
+    assert verdicts["s-bad"].label == "failure"  # heuristic fallback
+    assert "fallback" in verdicts["s-bad"].reason
+    assert verdicts["s-quiet"].label == "abandoned"  # tiny unknown session
+    assert verdicts["s-long"].label == "partial"
+    assert all(v.label in distill.SESSION_LABELS for v in verdicts.values())
 
 
 def test_envelope_result_handles_object_and_event_array():
@@ -61,8 +63,8 @@ def test_prompt_keeps_sentinel_and_requests_verdicts():
         assert f'"{label}"' in prompt
 
 
-def make_rec(**overrides) -> dict:
-    rec = {
+def make_rec(**overrides) -> SessionRecord:
+    fields = {
         "label": "failure",
         "reason": "build never recovered after the lockfile edit",
         "goal": "fix the failing CI build",
@@ -73,20 +75,20 @@ def make_rec(**overrides) -> dict:
         "corrections": 1,
         "last_ts": 1_700_000_000.0,
     }
-    rec.update(overrides)
-    return rec
+    fields.update(overrides)
+    return SessionRecord(**fields)
 
 
 def test_session_row_contract():
     row = corpus.session_row("sess-1", make_rec(), "/home/u/repo", "hostx", "useru")
-    assert row["source"] == corpus.SESSIONS_SOURCE == "session_outcomes"
-    assert row["external_id"] == "session_outcomes:useru:home-u-repo:sess-1"
-    assert row["content_hash"] == corpus.hash_body(row["body"].encode())
-    assert row["timestamp"] == 1_700_000_000
-    assert row["title"].startswith("[failure] fix the failing CI build")
-    assert "build never recovered" in row["body"]
-    assert "turns: 42" in row["body"]
-    meta = json.loads(row["meta_json"])
+    assert row.source == corpus.SESSIONS_SOURCE == "session_outcomes"
+    assert row.external_id == "session_outcomes:useru:home-u-repo:sess-1"
+    assert row.content_hash == corpus.hash_body(row.body.encode())
+    assert row.timestamp == 1_700_000_000
+    assert row.title.startswith("[failure] fix the failing CI build")
+    assert "build never recovered" in row.body
+    assert "turns: 42" in row.body
+    meta = json.loads(row.meta_json)
     assert meta["label"] == "failure"
     assert meta["turns"] == 42
     assert meta["duration_s"] == 1080
@@ -108,23 +110,23 @@ def test_session_slice_roundtrip(tmp_path: Path):
 
 
 def test_item_row_marks_failure_derived():
-    item = {
-        "id": "df-1",
-        "title": "Never edit the lockfile by hand",
-        "body": "Run `cargo update -p <crate>` instead.",
-        "outcome": "failure",
-        "scope": "shared",
-        "sessions": ["s-bad", "s-ok"],
-        "last_updated": 1_700_000_100.0,
-    }
+    item = Item(
+        id="df-1",
+        title="Never edit the lockfile by hand",
+        body="Run `cargo update -p <crate>` instead.",
+        outcome="failure",
+        scope="shared",
+        sessions=["s-bad", "s-ok"],
+        last_updated=1_700_000_100.0,
+    )
     labels = {"s-bad": "failure", "s-ok": "success"}
     row = corpus.item_row(item, "/p", "h", "u", session_labels=labels)
-    meta = json.loads(row["meta_json"])
+    meta = json.loads(row.meta_json)
     assert meta["session_labels"] == "failure,success"
     assert meta["failure_derived"] is True
-    assert "session-labels: failure, success" in row["body"]
+    assert "session-labels: failure, success" in row.body
     # Without label info the meta stays as before (no empty keys).
-    bare = json.loads(corpus.item_row(item, "/p", "h", "u")["meta_json"])
+    bare = json.loads(corpus.item_row(item, "/p", "h", "u").meta_json)
     assert "session_labels" not in bare and "failure_derived" not in bare
 
 

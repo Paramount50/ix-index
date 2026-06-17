@@ -24,7 +24,6 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-from typing import cast
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -81,15 +80,15 @@ def corpus_hash(pairs: list[tuple[str, str]]) -> str:
 def item_body(item: Item, project: str, session_labels: list[str] | None = None) -> str:
     """The embedded, self-contained fact text (what gets hashed + indexed)."""
     trailer = (
-        f"(outcome: {item['outcome']}; scope: {item['scope']}; project: {project};"
-        f" sessions: {', '.join(item.get('sessions', [])[:6]) or 'n/a'}"
+        f"(outcome: {item.outcome}; scope: {item.scope}; project: {project};"
+        f" sessions: {', '.join(item.sessions[:6]) or 'n/a'}"
     )
     if session_labels:
         trailer += f"; session-labels: {', '.join(session_labels)}"
     lines = [
-        f"# {item['title']}",
+        f"# {item.title}",
         "",
-        item["body"],
+        item.body,
         "",
         trailer + ")",
     ]
@@ -109,49 +108,49 @@ def item_row(
     labels = sorted(
         {
             session_labels[sid]
-            for sid in item.get("sessions", [])
+            for sid in item.sessions
             if session_labels and sid in session_labels
         }
     )
     slug_source = project.strip("/").replace("/", "-") or "unknown"
-    external_id = f"{SOURCE}:{user}:{slug_source}:{item['id']}"
+    external_id = f"{SOURCE}:{user}:{slug_source}:{item.id}"
     body = item_body(item, project, session_labels=labels)
     content_hash = hash_body(body.encode())
-    timestamp = int(item.get("last_updated") or 0) or None
-    scope = item.get("scope", "shared")
+    timestamp = int(item.last_updated or 0) or None
+    scope = item.scope
     meta: dict[str, object] = {
         "source": SOURCE,
         "external_id": external_id,
         "content_hash": content_hash,
-        "title": item["title"],
+        "title": item.title,
         "host": host,
         "user": user,
         "project": project,
         "scope": f"user:{user}" if scope == "user" else "shared",
-        "outcome": item.get("outcome", "mixed"),
-        "session_ids": ",".join(item.get("sessions", [])[:16]),
-        "item_id": item["id"],
+        "outcome": item.outcome,
+        "session_ids": ",".join(item.sessions[:16]),
+        "item_id": item.id,
     }
     if timestamp is not None:
         meta["timestamp"] = timestamp
-    if item.get("evidence_from"):
-        meta["evidence_from"] = int(item["evidence_from"])
-    if item.get("evidence_to"):
-        meta["evidence_to"] = int(item["evidence_to"])
+    if item.evidence_from:
+        meta["evidence_from"] = int(item.evidence_from)
+    if item.evidence_to:
+        meta["evidence_to"] = int(item.evidence_to)
     if labels:
         meta["session_labels"] = ",".join(labels)
         meta["failure_derived"] = "failure" in labels
-    return {
-        "external_id": external_id,
-        "source": SOURCE,
-        "content_hash": content_hash,
-        "title": item["title"],
-        "url": None,
-        "host": host,
-        "timestamp": timestamp,
-        "body": body,
-        "meta_json": _encode_meta(meta, external_id),
-    }
+    return Row(
+        external_id=external_id,
+        source=SOURCE,
+        content_hash=content_hash,
+        title=item.title,
+        url=None,
+        host=host,
+        timestamp=timestamp,
+        body=body,
+        meta_json=_encode_meta(meta, external_id),
+    )
 
 
 def _encode_meta(meta: dict[str, object], external_id: str) -> str:
@@ -172,19 +171,19 @@ def _clip_chars(text: str, limit: int) -> str:
 
 def session_body(session_id: str, rec: SessionRecord, project: str) -> str:
     """Self-contained outcome record text: reason first, then key stats."""
-    label = rec.get("label") or "partial"
-    goal = rec.get("goal") or "(no goal recorded)"
+    label = rec.label or "partial"
+    goal = rec.goal or "(no goal recorded)"
     stats = (
-        f"label: {label}; turns: {int(rec.get('turns') or 0)};"
-        f" duration_s: {int(rec.get('duration_s') or 0)};"
-        f" models: {', '.join(rec.get('models') or []) or 'unknown'};"
-        f" tool-errors: {int(rec.get('errors') or 0)};"
-        f" user-corrections: {int(rec.get('corrections') or 0)}"
+        f"label: {label}; turns: {int(rec.turns or 0)};"
+        f" duration_s: {int(rec.duration_s or 0)};"
+        f" models: {', '.join(rec.models or []) or 'unknown'};"
+        f" tool-errors: {int(rec.errors or 0)};"
+        f" user-corrections: {int(rec.corrections or 0)}"
     )
     lines = [
         f"# [{label}] {_clip_chars(goal, 200)}",
         "",
-        rec.get("reason") or "(no reason recorded)",
+        rec.reason or "(no reason recorded)",
         "",
         f"({stats}; project: {project}; session: {session_id})",
     ]
@@ -197,9 +196,9 @@ def session_row(session_id: str, rec: SessionRecord, project: str, host: str, us
     external_id = f"{SESSIONS_SOURCE}:{user}:{slug_source}:{session_id}"
     body = session_body(session_id, rec, project)
     content_hash = hash_body(body.encode())
-    timestamp = int(rec.get("last_ts") or 0) or None
-    label = rec.get("label") or "partial"
-    title = f"[{label}] {_clip_chars(rec.get('goal') or session_id, 140)}"
+    timestamp = int(rec.last_ts or 0) or None
+    label = rec.label or "partial"
+    title = f"[{label}] {_clip_chars(rec.goal or session_id, 140)}"
     meta: dict[str, object] = {
         "source": SESSIONS_SOURCE,
         "external_id": external_id,
@@ -210,24 +209,24 @@ def session_row(session_id: str, rec: SessionRecord, project: str, host: str, us
         "project": project,
         "session_id": session_id,
         "label": label,
-        "reason": rec.get("reason") or "",
-        "turns": int(rec.get("turns") or 0),
-        "duration_s": int(rec.get("duration_s") or 0),
-        "models": ",".join(rec.get("models") or []),
+        "reason": rec.reason or "",
+        "turns": int(rec.turns or 0),
+        "duration_s": int(rec.duration_s or 0),
+        "models": ",".join(rec.models or []),
     }
     if timestamp is not None:
         meta["timestamp"] = timestamp
-    return {
-        "external_id": external_id,
-        "source": SESSIONS_SOURCE,
-        "content_hash": content_hash,
-        "title": title,
-        "url": None,
-        "host": host,
-        "timestamp": timestamp,
-        "body": body,
-        "meta_json": _encode_meta(meta, external_id),
-    }
+    return Row(
+        external_id=external_id,
+        source=SESSIONS_SOURCE,
+        content_hash=content_hash,
+        title=title,
+        url=None,
+        host=host,
+        timestamp=timestamp,
+        body=body,
+        meta_json=_encode_meta(meta, external_id),
+    )
 
 
 def write_slice(rows: list[Row], slice_dir: Path) -> dict[str, Path]:
@@ -240,16 +239,16 @@ def write_slice(rows: list[Row], slice_dir: Path) -> dict[str, Path]:
     if not rows:
         return {}
     slice_dir.mkdir(parents=True, exist_ok=True)
-    # A TypedDict rejects dynamic key access, so go through a plain mapping view
-    # of each row to pivot the rows into per-column arrays for pyarrow.
-    plain_rows = [cast(dict[str, object], row) for row in rows]
+    # Dump each row to a plain mapping so the rows pivot into per-column arrays
+    # for pyarrow (model attribute names match the parquet column names).
+    plain_rows = [row.model_dump() for row in rows]
     columns = {name: [row[name] for row in plain_rows] for name in SCHEMA.names}
     table = pa.Table.from_pydict(columns, schema=SCHEMA)
     data_path = slice_dir / "data.parquet"
     manifest_path = slice_dir / "_manifest.json"
     pq.write_table(table, data_path)
     manifest = {
-        "content_hash": corpus_hash([(r["external_id"], r["content_hash"]) for r in rows])
+        "content_hash": corpus_hash([(r.external_id, r.content_hash) for r in rows])
     }
     manifest_path.write_text(json.dumps(manifest))
     return {"data": data_path, "manifest": manifest_path}

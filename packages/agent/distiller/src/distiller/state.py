@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import cast
 
 from .types import State
 
@@ -19,33 +18,39 @@ def state_path(out_dir: Path, user: str, slug: str) -> Path:
     return out_dir / "state" / user / f"{slug}.json"
 
 
-def _empty() -> State:
-    return {"project": None, "items": [], "distilled_sessions": {}, "session_outcomes": {}}
-
-
 def load(out_dir: Path, user: str, slug: str) -> State:
     path = state_path(out_dir, user, slug)
     if not path.is_file():
-        return _empty()
+        return State()
     try:
         data = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
-        return _empty()
+        return State()
     if not isinstance(data, dict):
-        return _empty()
-    # The file is external (a prior run's output, possibly hand-edited); fill in
-    # any keys an older schema omitted before trusting the State shape.
-    data.setdefault("project", None)
-    data.setdefault("items", [])
-    data.setdefault("distilled_sessions", {})
-    data.setdefault("session_outcomes", {})
-    return cast(State, data)
+        return State()
+    # The file is external (a prior run's output, possibly hand-edited); the
+    # model fills any keys an older schema omitted (defaults) and drops keys a
+    # newer schema added (extra="ignore") before the State shape is trusted.
+    return State.model_validate(data)
 
 
 def save(out_dir: Path, user: str, slug: str, state: State) -> Path:
     path = state_path(out_dir, user, slug)
     path.parent.mkdir(parents=True, exist_ok=True)
+    # Match the historical on-disk shape exactly: items omit their unset
+    # provenance stamps (the old total=False Item left them out), while every
+    # other field -- including null project/goal/last_ts -- is written. So dump
+    # the items with exclude_none and assemble the rest verbatim, then emit in
+    # the same json.dumps(indent=1, sort_keys=True) style as before.
+    payload: dict[str, object] = {
+        "project": state.project,
+        "items": [item.model_dump(mode="json", exclude_none=True) for item in state.items],
+        "distilled_sessions": state.distilled_sessions,
+        "session_outcomes": {
+            sid: rec.model_dump(mode="json") for sid, rec in state.session_outcomes.items()
+        },
+    }
     tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(state, indent=1, sort_keys=True))
+    tmp.write_text(json.dumps(payload, indent=1, sort_keys=True))
     tmp.replace(path)  # atomic like the indexer's cursor write
     return path
