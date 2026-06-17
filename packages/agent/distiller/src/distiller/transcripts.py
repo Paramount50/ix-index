@@ -92,7 +92,7 @@ def _text_blocks(content: object) -> str:
 def _is_meta_user_text(text: str) -> bool:
     """Harness-injected user content, not a human signal."""
     stripped = text.lstrip()
-    return stripped.startswith("<") or stripped.startswith("Caveat:")
+    return stripped.startswith(("<", "Caveat:"))
 
 
 def parse_session(path: Path) -> Session | None:
@@ -110,8 +110,8 @@ def parse_session(path: Path) -> Session | None:
     except OSError:
         return None
     with handle:
-        for line in handle:
-            line = line.strip()
+        for raw_line in handle:
+            line = raw_line.strip()
             if not line:
                 continue
             try:
@@ -252,10 +252,8 @@ def digest(session: Session) -> str:
     ]
     if session.goal:
         lines.append(f"goal: {session.goal}")
-    for correction in session.corrections:
-        lines.append(f"user-correction: {correction}")
-    for error in session.errors[:4]:
-        lines.append(f"tool-error: {error}")
+    lines.extend(f"user-correction: {correction}" for correction in session.corrections)
+    lines.extend(f"tool-error: {error}" for error in session.errors[:4])
     if session.success_markers:
         lines.append("success-markers: " + ", ".join(session.success_markers))
     if session.final_assistant:

@@ -178,7 +178,7 @@ def run(args: argparse.Namespace) -> int:
     ]
     if session_rows:
         counts: dict[str, int] = {}
-        for project, recs in all_outcomes_by_project.items():
+        for recs in all_outcomes_by_project.values():
             for rec in recs.values():
                 counts[rec.label] = counts.get(rec.label, 0) + 1
         print(

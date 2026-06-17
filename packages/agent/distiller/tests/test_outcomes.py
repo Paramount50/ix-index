@@ -11,13 +11,13 @@ from distiller import cli, corpus, distill, transcripts
 from distiller.types import Item, SessionRecord
 
 
-def session(sid: str, **overrides) -> transcripts.Session:
-    base = dict(session_id=sid, path=f"/t/{sid}.jsonl", message_count=20, outcome="mixed")
+def session(sid: str, **overrides: object) -> transcripts.Session:
+    base: dict[str, object] = {"session_id": sid, "path": f"/t/{sid}.jsonl", "message_count": 20, "outcome": "mixed"}
     base.update(overrides)
     return transcripts.Session(**base)
 
 
-def test_session_verdicts_normalize_and_fallback():
+def test_session_verdicts_normalize_and_fallback() -> None:
     sessions = [
         session("s-ok", outcome="success"),
         session("s-bad", outcome="failure"),
@@ -41,7 +41,7 @@ def test_session_verdicts_normalize_and_fallback():
     assert all(v.label in distill.SESSION_LABELS for v in verdicts.values())
 
 
-def test_envelope_result_handles_object_and_event_array():
+def test_envelope_result_handles_object_and_event_array() -> None:
     # Older CLIs: one {"result": ...} object.
     assert distill._envelope_result({"result": "{}"}) == "{}"
     # claude >= 2.1: full event array, final entry type=result.
@@ -55,7 +55,7 @@ def test_envelope_result_handles_object_and_event_array():
     assert distill._envelope_result(42) == ""
 
 
-def test_prompt_keeps_sentinel_and_requests_verdicts():
+def test_prompt_keeps_sentinel_and_requests_verdicts() -> None:
     prompt = distill.build_prompt("/p", [], ["### session x"])
     assert prompt.startswith(distill.PROMPT_SENTINEL)
     assert "session_outcomes" in prompt
@@ -63,7 +63,7 @@ def test_prompt_keeps_sentinel_and_requests_verdicts():
         assert f'"{label}"' in prompt
 
 
-def make_rec(**overrides) -> SessionRecord:
+def make_rec(**overrides: object) -> SessionRecord:
     fields = {
         "label": "failure",
         "reason": "build never recovered after the lockfile edit",
@@ -79,7 +79,7 @@ def make_rec(**overrides) -> SessionRecord:
     return SessionRecord(**fields)
 
 
-def test_session_row_contract():
+def test_session_row_contract() -> None:
     row = corpus.session_row("sess-1", make_rec(), "/home/u/repo", "hostx", "useru")
     assert row.source == corpus.SESSIONS_SOURCE == "session_outcomes"
     assert row.external_id == "session_outcomes:useru:home-u-repo:sess-1"
@@ -94,10 +94,11 @@ def test_session_row_contract():
     assert meta["duration_s"] == 1080
     assert meta["models"] == "claude-haiku-4-5-20251001,claude-sonnet-4-5"
     assert meta["session_id"] == "sess-1"
-    assert meta["user"] == "useru" and meta["host"] == "hostx"
+    assert meta["user"] == "useru"
+    assert meta["host"] == "hostx"
 
 
-def test_session_slice_roundtrip(tmp_path: Path):
+def test_session_slice_roundtrip(tmp_path: Path) -> None:
     rows = [
         corpus.session_row(f"s-{i}", make_rec(label=label), "/p", "h", "u")
         for i, label in enumerate(("success", "partial", "failure", "abandoned"))
@@ -109,7 +110,7 @@ def test_session_slice_roundtrip(tmp_path: Path):
         corpus.validate_slice(tmp_path / "slice")
 
 
-def test_item_row_marks_failure_derived():
+def test_item_row_marks_failure_derived() -> None:
     item = Item(
         id="df-1",
         title="Never edit the lockfile by hand",
@@ -127,7 +128,8 @@ def test_item_row_marks_failure_derived():
     assert "session-labels: failure, success" in row.body
     # Without label info the meta stays as before (no empty keys).
     bare = json.loads(corpus.item_row(item, "/p", "h", "u").meta_json)
-    assert "session_labels" not in bare and "failure_derived" not in bare
+    assert "session_labels" not in bare
+    assert "failure_derived" not in bare
 
 
 def _ts(minutes: int) -> str:
@@ -154,7 +156,7 @@ def _fake_claude(tmp_path: Path, reply: dict) -> Path:
     return script
 
 
-def test_cli_end_to_end_writes_both_slices(tmp_path: Path, capsys):
+def test_cli_end_to_end_writes_both_slices(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = tmp_path / "projects" / "-home-u-repo"
     _transcript(
         root / "sess-ok.jsonl",

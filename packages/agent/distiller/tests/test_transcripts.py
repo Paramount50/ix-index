@@ -11,7 +11,7 @@ def write_transcript(path: Path, records: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(r) for r in records))
 
 
-def rec(rtype: str, content, ts: str = "2026-06-10T10:00:00Z", **extra) -> dict:
+def rec(rtype: str, content: object, ts: str = "2026-06-10T10:00:00Z", **extra: object) -> dict:
     return {
         "type": rtype,
         "message": {"role": rtype, "content": content},
@@ -22,7 +22,7 @@ def rec(rtype: str, content, ts: str = "2026-06-10T10:00:00Z", **extra) -> dict:
     }
 
 
-def test_signals_and_outcome_success(tmp_path: Path):
+def test_signals_and_outcome_success(tmp_path: Path) -> None:
     path = tmp_path / "proj" / "sess-1.jsonl"
     write_transcript(
         path,
@@ -49,7 +49,7 @@ def test_signals_and_outcome_success(tmp_path: Path):
     assert session.fingerprint().startswith("4:")
 
 
-def test_tool_error_failure_label(tmp_path: Path):
+def test_tool_error_failure_label(tmp_path: Path) -> None:
     path = tmp_path / "proj" / "s.jsonl"
     write_transcript(
         path,
@@ -68,7 +68,7 @@ def test_tool_error_failure_label(tmp_path: Path):
     assert session.outcome == "failure"
 
 
-def test_meta_user_lines_and_sidechains_skipped(tmp_path: Path):
+def test_meta_user_lines_and_sidechains_skipped(tmp_path: Path) -> None:
     path = tmp_path / "proj" / "s.jsonl"
     write_transcript(
         path,
@@ -83,7 +83,7 @@ def test_meta_user_lines_and_sidechains_skipped(tmp_path: Path):
     assert session.goal == "real goal"
 
 
-def test_scan_groups_by_cwd_and_windows(tmp_path: Path):
+def test_scan_groups_by_cwd_and_windows(tmp_path: Path) -> None:
     new = tmp_path / "-home-u-repo" / "new.jsonl"
     write_transcript(new, [rec("user", "hello", ts="2026-06-10T10:00:00Z")])
     old = tmp_path / "-home-u-repo" / "old.jsonl"
@@ -94,7 +94,7 @@ def test_scan_groups_by_cwd_and_windows(tmp_path: Path):
     assert [s.goal for s in groups["/home/u/repo"]] == ["hello"]
 
 
-def test_project_key_falls_back_to_dir_name():
+def test_project_key_falls_back_to_dir_name() -> None:
     session = transcripts.Session(session_id="s", path="p")
     assert transcripts.project_key(session, "-home-u-my-repo") == "/home/u/my/repo"
     assert transcripts.project_slug("/home/u/my repo!") == "home-u-my-repo"

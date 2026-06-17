@@ -11,7 +11,7 @@ from distiller import corpus
 from distiller.types import Item
 
 
-def make_item(i: int = 0, **overrides) -> Item:
+def make_item(i: int = 0, **overrides: object) -> Item:
     fields = {
         "id": f"df-{i:012x}",
         "title": f"Lesson {i}",
@@ -28,7 +28,7 @@ def make_item(i: int = 0, **overrides) -> Item:
     return Item(**fields)
 
 
-def test_content_hash_is_sha256_of_body():
+def test_content_hash_is_sha256_of_body() -> None:
     row = corpus.item_row(make_item(), "/home/u/repo", "hostx", "useru")
     expected = "sha256:" + hashlib.sha256(row.body.encode()).hexdigest()
     assert row.content_hash == expected
@@ -36,7 +36,7 @@ def test_content_hash_is_sha256_of_body():
     assert len(row.content_hash) == len("sha256:") + 64
 
 
-def test_meta_json_carries_identity_and_filter_keys():
+def test_meta_json_carries_identity_and_filter_keys() -> None:
     row = corpus.item_row(make_item(scope="user"), "/home/u/repo", "hostx", "useru")
     meta = json.loads(row.meta_json)
     for key in ("source", "external_id", "content_hash", "title"):
@@ -49,7 +49,7 @@ def test_meta_json_carries_identity_and_filter_keys():
     assert row.external_id.startswith("distilled_facts:useru:home-u-repo:df-")
 
 
-def test_corpus_hash_matches_rust_construction():
+def test_corpus_hash_matches_rust_construction() -> None:
     # sha256 over sorted (id \0 hash \0) pairs, duplicates collapsed.
     pairs = [("b", "h2"), ("a", "h1"), ("b", "h2")]
     digest = hashlib.sha256()
@@ -61,7 +61,7 @@ def test_corpus_hash_matches_rust_construction():
     assert corpus.corpus_hash(pairs) == digest.hexdigest()
 
 
-def test_write_and_validate_roundtrip(tmp_path: Path):
+def test_write_and_validate_roundtrip(tmp_path: Path) -> None:
     rows = [
         corpus.item_row(make_item(i), "/home/u/repo", "hostx", "useru") for i in range(3)
     ]
@@ -75,7 +75,7 @@ def test_write_and_validate_roundtrip(tmp_path: Path):
     )
 
 
-def test_arrow_schema_is_utf8_not_large(tmp_path: Path):
+def test_arrow_schema_is_utf8_not_large(tmp_path: Path) -> None:
     # The Rust reader downcasts to StringArray (Utf8); LargeUtf8/Utf8View
     # would fail its ColumnType check.
     rows = [corpus.item_row(make_item(), "/p", "h", "u")]
@@ -89,7 +89,7 @@ def test_arrow_schema_is_utf8_not_large(tmp_path: Path):
     assert schema.field("timestamp").type == pa.int64()
 
 
-def test_validate_rejects_tampered_body(tmp_path: Path):
+def test_validate_rejects_tampered_body(tmp_path: Path) -> None:
     rows = [corpus.item_row(make_item(i), "/p", "h", "u") for i in range(2)]
     corpus.write_slice(rows, tmp_path)
     # Rewrite with a body that no longer matches its content_hash.
@@ -105,7 +105,7 @@ def test_validate_rejects_tampered_body(tmp_path: Path):
         corpus.validate_slice(tmp_path)
 
 
-def test_validate_rejects_stale_manifest(tmp_path: Path):
+def test_validate_rejects_stale_manifest(tmp_path: Path) -> None:
     rows = [corpus.item_row(make_item(), "/p", "h", "u")]
     corpus.write_slice(rows, tmp_path)
     (tmp_path / "_manifest.json").write_text(json.dumps({"content_hash": "0" * 64}))
@@ -113,12 +113,12 @@ def test_validate_rejects_stale_manifest(tmp_path: Path):
         corpus.validate_slice(tmp_path)
 
 
-def test_empty_rows_never_wipe(tmp_path: Path):
+def test_empty_rows_never_wipe(tmp_path: Path) -> None:
     assert corpus.write_slice([], tmp_path / "slice") == {}
     assert not (tmp_path / "slice").exists()
 
 
-def test_oversized_meta_rejected():
+def test_oversized_meta_rejected() -> None:
     item = make_item(title="t" * (200 * 1024))
     with pytest.raises(corpus.ContractError, match="bytes"):
         corpus.item_row(item, "/p", "h", "u")

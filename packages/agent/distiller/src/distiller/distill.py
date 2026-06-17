@@ -195,6 +195,7 @@ def run_claude(
             text=True,
             timeout=timeout,
             cwd=scratch,
+            check=False,  # returncode is checked explicitly below
         )
     if proc.returncode != 0:
         raise DistillError(

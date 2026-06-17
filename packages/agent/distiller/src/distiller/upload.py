@@ -16,8 +16,8 @@ from pathlib import Path
 
 def load_env_file(path: Path) -> dict[str, str]:
     env: dict[str, str] = {}
-    for line in path.read_text().splitlines():
-        line = line.strip()
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
