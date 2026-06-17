@@ -280,11 +280,11 @@ fn dirty() { danger(); }
 }
 
 #[test]
-fn no_attached_sibling_scans_the_annotation_block() -> TestResult {
-    // `no-attached-sibling` searches the annotation block directly above each
-    // def (preceding siblings up to the previous def), so a `@spec` counts even
-    // with a `@doc` or comment between it and the def. Only the def with no
-    // `@spec` in its block qualifies.
+fn attached_sibling_scans_the_annotation_block() -> TestResult {
+    // `attached-sibling` searches the annotation block directly above each def
+    // (preceding siblings up to the previous def), so a `@spec` counts even with a
+    // `@doc` or comment between it and the def. `(not (attached-sibling ...))`
+    // then keeps only the def with no `@spec` in its block.
     let source = "
 defmodule Demo do
   @spec documented() :: :ok
@@ -302,10 +302,9 @@ defmodule Demo do
 end
 ";
     let rules = r#"
-(rule (undocumented-def c)
-  (match elixir "(call (identifier) @i) @c")
-  (text i "def")
-  (no-attached-sibling c "identifier" "spec"))
+(rule (a-def c) (match elixir "(call (identifier) @i) @c") (text i "def"))
+(rule (spec-attached c) (a-def c) (attached-sibling c "identifier" "spec"))
+(rule (undocumented-def c) (a-def c) (not (spec-attached c)))
 "#;
     let dir = tempfile::tempdir()?;
     write_sample(&dir, "sample.ex", source)?;
@@ -321,6 +320,112 @@ end
     };
     assert!(analysis.corpus.node_text(*node).contains("undocumented"));
     Ok(())
+}
+
+#[test]
+fn negation_filters_by_name_join() -> TestResult {
+    // `keep` is a function that defines a spec for its own name; `drop` is spec'd
+    // for a *different* name. A name-matched negation flags only `drop`.
+    let source = "
+defmodule Demo do
+  @spec keep(integer()) :: integer()
+  def keep(x), do: x
+
+  @spec other() :: :ok
+  def drop(y), do: y
+end
+";
+    let rules = r#"
+(rule (def-name d n)
+  (match elixir "(call (identifier) @kw (arguments (call (identifier) @n))) @d")
+  (text kw "def"))
+(rule (spec-name n)
+  (match elixir "(unary_operator (call (identifier) @kw (arguments (binary_operator (call (identifier) @sn))))) ")
+  (text kw "spec")
+  (text sn n))
+(rule (unspecced d)
+  (def-name d n)
+  (text n t)
+  (not (spec-name t)))
+"#;
+    let dir = tempfile::tempdir()?;
+    write_sample(&dir, "sample.ex", source)?;
+    let analysis = analyze(rules, &[dir.path().to_path_buf()])?;
+    let rows = analysis.database.relations["unspecced"].rows();
+    assert_eq!(rows.len(), 1, "only the def with no same-named @spec qualifies");
+    let Value::Node(node) = &rows[0][0] else {
+        return Err("unspecced column 0 should be a node".into());
+    };
+    assert!(analysis.corpus.node_text(*node).contains("drop"));
+    Ok(())
+}
+
+#[test]
+fn unsafe_negation_is_rejected() {
+    // `y` appears only inside the negated atom, with nothing to filter against.
+    let rules = r#"
+(rule (thing x) (match rust "(identifier) @x"))
+(rule (bad x) (match rust "(identifier) @x") (not (thing y)))
+"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("negation over an unbound variable must be rejected");
+    };
+    let message = error.to_string();
+    assert!(
+        message.contains("only inside `(not ...)`"),
+        "expected unsafe-negation error, got: {message}"
+    );
+}
+
+#[test]
+fn negation_before_its_binding_is_rejected() {
+    // `t` is bound by `(text n t)` only AFTER the negation. The evaluator runs
+    // left-to-right, so `t` would be unbound when `(not ...)` runs and bound
+    // existentially per row instead of filtering -- safety must reject it.
+    let rules = r#"
+(rule (named n) (match rust "(identifier) @n"))
+(rule (other t) (match rust "(identifier) @x") (text x t))
+(rule (bad n) (named n) (not (other t)) (text n t))
+"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("negation before its binding atom must be rejected");
+    };
+    assert!(
+        error.to_string().contains("only inside"),
+        "expected unsafe-negation error, got: {error}"
+    );
+}
+
+#[test]
+fn rewrite_negation_safety_is_checked() {
+    // The same range-restriction applies to rewrite bodies, not just rules.
+    let rules = r#"
+(rule (thing x) (match rust "(identifier) @x"))
+(rewrite r (match rust "(identifier) @x") (not (thing y)) (replace x "z"))
+"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("unbound negation in a rewrite body must be rejected");
+    };
+    assert!(
+        error.to_string().contains("only inside"),
+        "expected unsafe-negation error, got: {error}"
+    );
+}
+
+#[test]
+fn negation_through_recursion_is_rejected() {
+    let rules = r#"
+(rule (p x) (match rust "(identifier) @x"))
+(rule (p x) (match rust "(identifier) @x") (not (p x)))
+"#;
+    let Err(error) = analyze(rules, &[]) else {
+        panic!("negation through recursion must be rejected");
+    };
+    let message = error.to_string();
+    assert!(
+        message.contains("stratif") || message.contains("recursion"),
+        "expected unstratifiable error, got: {message}"
+    );
 }
 
 /// One rule flagging every `.unwrap()` receiver, lint-declared as an error

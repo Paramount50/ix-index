@@ -20,7 +20,7 @@ use ast_merge_langs::Lang;
 
 use crate::error::{
     ArityMismatchSnafu, BuiltinAritySnafu, DslSnafu, Error, LintSeveritySnafu, LintVarSnafu,
-    UnknownLangNameSnafu, UnknownRelationSnafu,
+    UnknownLangNameSnafu, UnknownRelationSnafu, UnsafeNegationSnafu, UnstratifiableProgramSnafu,
 };
 use crate::sexpr::{self, Sexpr};
 
@@ -35,7 +35,7 @@ pub const BUILTINS: &[(&str, usize)] = &[
     ("same-file", 2),
     ("text-match", 2),
     ("no-descendant", 3),
-    ("no-attached-sibling", 3),
+    ("attached-sibling", 3),
 ];
 
 /// A list S-expression destructured into its head atom and remaining items.
@@ -65,6 +65,10 @@ pub struct MatchAtom {
 pub enum BodyAtom {
     Match(MatchAtom),
     App(AppAtom),
+    /// `(not (relation args...))`: succeeds for a binding iff no row of the named
+    /// relation unifies with it. Stratified — the negated relation is always
+    /// computed in a lower stratum, so its rows are final before the negation runs.
+    Negation(AppAtom),
 }
 
 #[derive(Debug)]
@@ -208,15 +212,80 @@ impl Program {
                 .fail();
             }
             check_atoms(&rule.body, &arities)?;
+            check_negation_safety(&rule.body)?;
         }
         for rewrite in &self.rewrites {
             check_atoms(&rewrite.body, &arities)?;
+            check_negation_safety(&rewrite.body)?;
             check_template(rewrite)?;
         }
         for lint in &self.lints {
             self.check_lint(lint)?;
         }
+        // Reject negation through recursion: the stratification must exist.
+        self.strata()?;
         Ok(())
+    }
+
+    /// Rules grouped into strata: every relation a rule negates is computed in an
+    /// earlier stratum, so negation always reads a final relation. Returns rule
+    /// indices grouped by ascending stratum.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnstratifiableProgram`] if a relation depends on itself through a
+    /// negation (no stratification exists).
+    pub fn strata(&self) -> Result<Vec<Vec<usize>>, Error> {
+        // Relation dependency edges (head relation -> referenced relation), with a
+        // flag for edges that pass through `(not ...)`.
+        let mut edges: Vec<(&str, &str, bool)> = Vec::new();
+        for rule in &self.rules {
+            for atom in &rule.body {
+                match atom {
+                    BodyAtom::App(app) if builtin_arity(&app.name).is_none() => {
+                        edges.push((&rule.name, &app.name, false));
+                    }
+                    BodyAtom::Negation(neg) => edges.push((&rule.name, &neg.name, true)),
+                    _ => {}
+                }
+            }
+        }
+        // Relax stratum levels: a positive edge a->b needs level(a) >= level(b);
+        // a negative edge needs level(a) > level(b). A negative edge inside a cycle
+        // forces unbounded growth, so if anything still changes after one pass per
+        // relation the program is unstratifiable.
+        let mut level: HashMap<&str, usize> = self.rules.iter().map(|r| (r.name.as_str(), 0)).collect();
+        let passes = level.len() + 1;
+        for pass in 0..=passes {
+            let mut grew: Option<&str> = None;
+            for &(a, b, negative) in &edges {
+                let need = level[b] + usize::from(negative);
+                if level[a] < need {
+                    level.insert(a, need);
+                    grew = Some(a);
+                }
+            }
+            match grew {
+                None => break,
+                // A relation whose level still grows after a full pass per
+                // relation sits on a negation cycle: report it, not rule #1.
+                Some(name) if pass == passes => {
+                    let line = self.rules.iter().find(|r| r.name == name).map_or(0, |r| r.line);
+                    return UnstratifiableProgramSnafu {
+                        rule: name.to_owned(),
+                        line,
+                    }
+                    .fail();
+                }
+                Some(_) => {}
+            }
+        }
+        let max_level = level.values().copied().max().unwrap_or(0);
+        let mut strata = vec![Vec::new(); max_level + 1];
+        for (index, rule) in self.rules.iter().enumerate() {
+            strata[level[rule.name.as_str()]].push(index);
+        }
+        Ok(strata)
     }
 
     /// A lint must name a defined relation, and its message may only splice
@@ -256,6 +325,34 @@ pub fn builtin_arity(name: &str) -> Option<usize> {
 
 fn check_atoms(atoms: &[BodyAtom], arities: &HashMap<&str, usize>) -> Result<(), Error> {
     for atom in atoms {
+        if let BodyAtom::Negation(neg) = atom {
+            // A negated atom must name a defined relation (not a builtin: builtins
+            // are filters, not finite relations to scan) with matching arity.
+            if builtin_arity(&neg.name).is_some() {
+                return DslSnafu {
+                    line: neg.line,
+                    message: format!("(not ...) cannot negate the builtin `{}`", neg.name),
+                }
+                .fail();
+            }
+            let expected = *arities.get(neg.name.as_str()).ok_or_else(|| {
+                UnknownRelationSnafu {
+                    name: neg.name.clone(),
+                    line: neg.line,
+                }
+                .build()
+            })?;
+            if neg.args.len() != expected {
+                return ArityMismatchSnafu {
+                    name: neg.name.clone(),
+                    expected,
+                    got: neg.args.len(),
+                    line: neg.line,
+                }
+                .fail();
+            }
+            continue;
+        }
         let BodyAtom::App(app) = atom else {
             continue;
         };
@@ -301,6 +398,42 @@ fn check_atoms(atoms: &[BodyAtom], arities: &HashMap<&str, usize>) -> Result<(),
     Ok(())
 }
 
+/// Every variable a negated atom uses must be bound by a positive atom that
+/// appears BEFORE it in the body (range restriction). The evaluator runs atoms
+/// left-to-right, so a variable first bound after the negation is still unbound
+/// when the negation runs and would be existentially bound per row (a wildcard)
+/// rather than filtering -- this check rejects exactly that. Applied to rule and
+/// rewrite bodies alike.
+fn check_negation_safety(body: &[BodyAtom]) -> Result<(), Error> {
+    let mut bound: HashSet<&str> = HashSet::new();
+    for atom in body {
+        match atom {
+            BodyAtom::Match(m) => bound.extend(capture_names(&m.query)),
+            BodyAtom::App(app) => {
+                for arg in &app.args {
+                    if let Term::Var(var) = arg {
+                        bound.insert(var);
+                    }
+                }
+            }
+            BodyAtom::Negation(neg) => {
+                for arg in &neg.args {
+                    if let Term::Var(var) = arg
+                        && !bound.contains(var.as_str())
+                    {
+                        return UnsafeNegationSnafu {
+                            var: var.clone(),
+                            line: neg.line,
+                        }
+                        .fail();
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn check_template(rewrite: &Rewrite) -> Result<(), Error> {
     let mut mentioned: HashSet<&str> = HashSet::new();
     for atom in &rewrite.body {
@@ -313,6 +446,10 @@ fn check_template(rewrite: &Rewrite) -> Result<(), Error> {
                     }
                 }
             }
+            // A negated atom only filters; it binds nothing, so it contributes no
+            // mentioned variables (its vars are bound by positive atoms via the
+            // safety check).
+            BodyAtom::Negation(_) => {}
         }
     }
     let template_vars = rewrite
@@ -523,6 +660,23 @@ fn parse_body_atom(form: &Sexpr) -> Result<BodyAtom, Error> {
             query: query.clone(),
             line: *line,
         }));
+    }
+    if name == "not" {
+        let [inner] = args else {
+            return DslSnafu {
+                line: form.line(),
+                message: "not form is (not (<relation> args...))".to_owned(),
+            }
+            .fail();
+        };
+        let BodyAtom::App(app) = parse_body_atom(inner)? else {
+            return DslSnafu {
+                line: form.line(),
+                message: "(not ...) may only negate a relation atom".to_owned(),
+            }
+            .fail();
+        };
+        return Ok(BodyAtom::Negation(app));
     }
     let args = args
         .iter()
