@@ -7,21 +7,21 @@ actually need work immediately with no additional setup:
 
     import linear
 
-    # Read an issue
+    # Read an issue (returns a typed `Issue` model -- attribute access)
     issue = await linear.issue("ENG-123")
-    issue["title"]               # string
-    issue["state"]["name"]       # "In Progress", "Done", ...
+    issue.title                  # string
+    issue.state.name             # "In Progress", "Done", ...
 
     # Update an issue
     await linear.issue_update("ENG-123", stateId="<uuid>", priority=2)
 
     # Create an issue
     new = await linear.issue_create("ENG", "Fix the widget", description="...")
-    new["id"]                    # the new issue's UUID
+    new.id                       # the new issue's UUID
 
     # Create a project
     proj = await linear.project_create("Q3 Hardening", ["ENG"], description="...")
-    proj["id"]
+    proj.id
 
 All four are async (kernel-loop style: no blocking network calls on the shared
 event loop) and wrap the Linear GraphQL API
@@ -40,7 +40,9 @@ from __future__ import annotations
 
 import os
 import re
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
+
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     import httpx
@@ -53,11 +55,107 @@ __all__ = [
     "comment_create",
     "project_create",
     "LinearError",
+    "Issue",
+    "IssueState",
+    "IssueAssignee",
+    "Team",
+    "Project",
+    "Comment",
 ]
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 _ENDPOINT = "https://api.linear.app/graphql"
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
+#
+# The GraphQL responses are parsed into these pydantic models at the boundary
+# (in the public functions below) rather than passed around as untyped dicts.
+# Every field is optional except the ``id`` Linear always returns, because the
+# same model is reused across selection sets that request different subsets
+# (e.g. ``issue_update`` returns only id/identifier/title/state). ``extra=
+# "ignore"`` keeps the models forward-compatible if Linear adds fields.
+
+
+class _LinearModel(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+
+class IssueState(_LinearModel):
+    """A workflow state: ``id``, ``name``, and ``type`` (e.g. ``"completed"``)."""
+
+    id: str
+    name: str | None = None
+    type: str | None = None
+
+
+class IssueAssignee(_LinearModel):
+    """The user an issue is assigned to."""
+
+    id: str
+    name: str | None = None
+    email: str | None = None
+
+
+class Team(_LinearModel):
+    """A Linear team: ``id``, ``name``, and human key (e.g. ``"ENG"``)."""
+
+    id: str
+    name: str | None = None
+    key: str | None = None
+
+
+class Issue(_LinearModel):
+    """A Linear issue. Fields absent from a given query's selection set are ``None``."""
+
+    id: str
+    identifier: str | None = None
+    title: str | None = None
+    description: str | None = None
+    priority: float | None = None
+    url: str | None = None
+    state: IssueState | None = None
+    assignee: IssueAssignee | None = None
+    team: Team | None = None
+    createdAt: str | None = None
+    updatedAt: str | None = None
+
+
+class ProjectTeams(_LinearModel):
+    """The ``teams { nodes }`` connection on a project."""
+
+    nodes: list[Team] = []
+
+
+class Project(_LinearModel):
+    """A Linear project."""
+
+    id: str
+    name: str | None = None
+    url: str | None = None
+    state: str | None = None
+    teams: ProjectTeams | None = None
+
+
+class Comment(_LinearModel):
+    """A comment created on an issue: ``id`` and ``url``."""
+
+    id: str
+    url: str | None = None
+
+
+class _GqlEnvelope(_LinearModel):
+    """The GraphQL response envelope: ``data`` and/or ``errors``.
+
+    ``data`` is kept as a raw dict because its shape varies per operation; the
+    public functions validate the relevant sub-object into a typed model.
+    """
+
+    data: dict[str, Any] = {}
+    errors: list[dict[str, Any]] | None = None
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -171,14 +269,14 @@ async def _gql(
                 await asyncio.sleep(_GQL_RETRY_BACKOFFS_S[attempt])
                 continue
             resp.raise_for_status()
-            body = resp.json()
+            env = _GqlEnvelope.model_validate(resp.json())
 
-        if body.get("errors"):
-            if not last and _is_internal_server_error(body["errors"]):
+        if env.errors:
+            if not last and _is_internal_server_error(env.errors):
                 await asyncio.sleep(_GQL_RETRY_BACKOFFS_S[attempt])
                 continue
-            raise LinearError(body["errors"])
-        return cast("dict[str, Any]", body.get("data", {}))
+            raise LinearError(env.errors)
+        return env.data
 
     raise RuntimeError("unreachable: _gql retry loop exited without return or raise")
 
@@ -215,12 +313,12 @@ async def _resolve_team_id(team: str) -> str:
     if cached is not None:
         return cached
     data = await _gql(_TEAM_BY_KEY_QUERY, {"key": team})
-    nodes = data["teams"]["nodes"]
+    nodes = [Team.model_validate(n) for n in data["teams"]["nodes"]]
     if not nodes:
         raise LinearError([{"message": f"no Linear team with key {team!r}"}])
-    tid = nodes[0]["id"]
+    tid = nodes[0].id
     _team_id_cache[team] = tid
-    return cast(str, tid)
+    return tid
 
 
 # ---------------------------------------------------------------------------
@@ -250,21 +348,20 @@ query IssueById($id: String!) {{
 """
 
 
-async def issue(id: str) -> dict[str, Any]:
+async def issue(id: str) -> Issue:
     """Fetch a Linear issue by its UUID or identifier (e.g. ``"ENG-123"``).
 
-    Returns the issue as a plain dict with the fields:
-    ``id``, ``identifier``, ``title``, ``description``, ``priority``,
-    ``url``, ``state`` (``id``/``name``/``type``),
-    ``assignee`` (``id``/``name``/``email`` or ``None``),
-    ``team`` (``id``/``name``/``key``),
-    ``createdAt``, ``updatedAt``.
+    Returns an :class:`Issue` with attribute access::
+
+        i = await linear.issue("ENG-123")
+        i.title            # str
+        i.state.name       # "In Progress", "Done", ...
 
     Raises :class:`LinearError` on GraphQL errors and
     ``httpx.HTTPStatusError`` on network errors.
     """
     data = await _gql(_ISSUE_QUERY, {"id": id})
-    return cast("dict[str, Any]", data["issue"])
+    return Issue.model_validate(data["issue"])
 
 
 _ISSUE_UPDATE_MUTATION = """
@@ -282,7 +379,7 @@ mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
 """
 
 
-async def issue_update(id: str, **fields: object) -> dict[str, Any]:
+async def issue_update(id: str, **fields: object) -> Issue:
     """Update fields on a Linear issue.
 
     ``id`` is the issue UUID or identifier (e.g. ``"ENG-123"``).
@@ -293,11 +390,11 @@ async def issue_update(id: str, **fields: object) -> dict[str, Any]:
         await linear.issue_update("ENG-123", title="Better title",
                                   description="More detail")
 
-    Returns the updated issue dict (``id``, ``identifier``, ``title``,
-    ``state``).  Raises :class:`LinearError` on GraphQL errors.
+    Returns the updated :class:`Issue` (``id``, ``identifier``, ``title``,
+    ``state`` populated).  Raises :class:`LinearError` on GraphQL errors.
     """
     data = await _gql(_ISSUE_UPDATE_MUTATION, {"id": id, "input": fields})
-    return cast("dict[str, Any]", data["issueUpdate"]["issue"])
+    return Issue.model_validate(data["issueUpdate"]["issue"])
 
 
 _ISSUE_CREATE_MUTATION = """
@@ -317,7 +414,7 @@ mutation IssueCreate($input: IssueCreateInput!) {
 """
 
 
-async def issue_create(team: str, title: str, **fields: object) -> dict[str, Any]:
+async def issue_create(team: str, title: str, **fields: object) -> Issue:
     """Create a new Linear issue.
 
     ``team`` is the team key (e.g. ``"ENG"``) or UUID.
@@ -327,10 +424,10 @@ async def issue_create(team: str, title: str, **fields: object) -> dict[str, Any
         new = await linear.issue_create("ENG", "Fix the widget",
                                         description="Details here",
                                         priority=2)
-        new["identifier"]   # "ENG-456"
-        new["url"]          # "https://linear.app/..."
+        new.identifier   # "ENG-456"
+        new.url          # "https://linear.app/..."
 
-    Returns the created issue dict.  Raises :class:`LinearError` on errors.
+    Returns the created :class:`Issue`.  Raises :class:`LinearError` on errors.
     """
     input_vars: dict[str, Any] = {
         "teamId": await _resolve_team_id(team),
@@ -338,7 +435,7 @@ async def issue_create(team: str, title: str, **fields: object) -> dict[str, Any
         **fields,
     }
     data = await _gql(_ISSUE_CREATE_MUTATION, {"input": input_vars})
-    return cast("dict[str, Any]", data["issueCreate"]["issue"])
+    return Issue.model_validate(data["issueCreate"]["issue"])
 
 
 _PROJECT_CREATE_MUTATION = """
@@ -361,7 +458,7 @@ async def project_create(
     name: str,
     teams: list[str],
     **fields: object,
-) -> dict[str, Any]:
+) -> Project:
     """Create a new Linear project.
 
     ``name`` is the project name.
@@ -374,10 +471,10 @@ async def project_create(
             ["ENG"],
             description="Reliability push for Q3",
         )
-        proj["id"]
-        proj["url"]
+        proj.id
+        proj.url
 
-    Returns the created project dict.  Raises :class:`LinearError` on errors.
+    Returns the created :class:`Project`.  Raises :class:`LinearError` on errors.
     """
     input_vars: dict[str, Any] = {
         "name": name,
@@ -385,7 +482,7 @@ async def project_create(
         **fields,
     }
     data = await _gql(_PROJECT_CREATE_MUTATION, {"input": input_vars})
-    return cast("dict[str, Any]", data["projectCreate"]["project"])
+    return Project.model_validate(data["projectCreate"]["project"])
 
 
 _ISSUE_SEARCH_QUERY = """
@@ -404,21 +501,21 @@ query IssueSearch($term: String!, $first: Int!) {
 """
 
 
-async def issue_search(term: str, first: int = 20) -> list[dict[str, Any]]:
+async def issue_search(term: str, first: int = 20) -> list[Issue]:
     """Search Linear issues by keyword or phrase.
 
     ``term`` is the search string forwarded to Linear's full-text search.
     ``first`` caps the number of results returned (default 20).
 
-    Returns a list of issue dicts, each containing at least
-    ``id``, ``identifier``, ``title``, ``url``, ``description``,
-    and ``state`` (``id``/``name``/``type``).
+    Returns a list of :class:`Issue`, each with at least ``id``,
+    ``identifier``, ``title``, ``url``, ``description``, and ``state``
+    populated.
 
     Raises :class:`LinearError` on GraphQL errors and
     ``httpx.HTTPStatusError`` on network errors.
     """
     data = await _gql(_ISSUE_SEARCH_QUERY, {"term": term, "first": first})
-    return cast("list[dict[str, Any]]", data["searchIssues"]["nodes"])
+    return [Issue.model_validate(n) for n in data["searchIssues"]["nodes"]]
 
 
 _COMMENT_CREATE_MUTATION = """
@@ -434,16 +531,16 @@ mutation CommentCreate($input: CommentCreateInput!) {
 """
 
 
-async def comment_create(issue_id: str, body: str) -> dict[str, Any]:
+async def comment_create(issue_id: str, body: str) -> Comment:
     """Add a comment to a Linear issue.
 
     ``issue_id`` is the issue UUID.
     ``body`` is the comment text (Markdown supported).
 
-    Returns the created comment dict with ``id`` and ``url``.
+    Returns the created :class:`Comment` with ``id`` and ``url``.
     Raises :class:`LinearError` on GraphQL errors and
     ``httpx.HTTPStatusError`` on network errors.
     """
     input_vars: dict[str, Any] = {"issueId": issue_id, "body": body}
     data = await _gql(_COMMENT_CREATE_MUTATION, {"input": input_vars})
-    return cast("dict[str, Any]", data["commentCreate"]["comment"])
+    return Comment.model_validate(data["commentCreate"]["comment"])

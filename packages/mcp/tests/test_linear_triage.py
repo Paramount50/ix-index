@@ -446,7 +446,8 @@ class TestLinearModuleAdditions:
         assert "comment_create" in linear.__all__
 
     def test_version_bumped(self):
-        assert linear.__version__ == "0.2.0"
+        # 0.3.0: public functions return typed pydantic models instead of dicts.
+        assert linear.__version__ == "0.3.0"
 
     def test_issue_search_callable(self):
         assert callable(linear.issue_search)
@@ -498,7 +499,16 @@ class TestIssueSearchWire:
             linear._client = original_client
             linear._api_key = original_api_key
 
-        assert result == nodes
+        # issue_search returns typed Issue models -- assert via attribute access.
+        assert len(result) == 1
+        assert result[0].id == "abc"
+        assert result[0].identifier == "ENG-1"
+        assert result[0].title == "Test issue"
+        assert result[0].url == "https://linear.app/test"
+        assert result[0].description == "desc"
+        assert result[0].state is not None
+        assert result[0].state.name == "Todo"
+        assert result[0].state.type == "unstarted"
         assert len(received) == 1
         assert "searchIssues" in received[0]["query"]
         assert received[0]["variables"] == {"term": "some term", "first": 5}

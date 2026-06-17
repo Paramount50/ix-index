@@ -261,14 +261,16 @@ class ModuleLinearPort:
     """Concrete :class:`LinearPort` backed by the ``linear`` module functions.
 
     This is the only class in ``triage`` that imports from ``linear``.  Keep
-    it thin: one call per method, no business logic.
+    it thin: one call per method, no business logic.  The ``linear`` functions
+    return pydantic models; this adapter dumps them to plain dicts so the
+    triage core (and its fake-port tests) stay decoupled from those model types.
     """
 
     async def search(self, term: str) -> list[dict[str, Any]]:
         """Delegate to :func:`linear.issue_search`."""
         import linear
 
-        return await linear.issue_search(term)
+        return [i.model_dump() for i in await linear.issue_search(term)]
 
     async def create(
         self,
@@ -283,7 +285,7 @@ class ModuleLinearPort:
         """Delegate to :func:`linear.issue_create`."""
         import linear
 
-        return await linear.issue_create(
+        created = await linear.issue_create(
             team_id,
             title,
             description=description,
@@ -291,12 +293,13 @@ class ModuleLinearPort:
             labelIds=label_ids,
             priority=priority,
         )
+        return created.model_dump()
 
     async def comment(self, issue_id: str, body: str) -> dict[str, Any]:
         """Delegate to :func:`linear.comment_create`."""
         import linear
 
-        return await linear.comment_create(issue_id, body)
+        return (await linear.comment_create(issue_id, body)).model_dump()
 
 
 # ---------------------------------------------------------------------------

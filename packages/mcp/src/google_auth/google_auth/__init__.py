@@ -50,9 +50,10 @@ import json
 import os
 import subprocess
 import webbrowser
-from typing import Any, cast
+from typing import Any
 
 from google.oauth2.credentials import Credentials
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 __all__ = [
     "GoogleAuthError",
@@ -84,6 +85,28 @@ _LOGIN_URL_TIMEOUT = 30.0
 # How long to wait for the human to finish consenting in the browser before
 # giving up. Generous: a person may need to pick an account and read the screen.
 _LOGIN_TIMEOUT = 300.0
+
+
+class MintedToken(BaseModel):
+    """A freshly minted Google access token, parsed from ``gcal print-access-token``.
+
+    ``extra="ignore"`` keeps it forward-compatible if the binary grows fields.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    access_token: str
+    expires_in: int | None = None
+    scopes: list[str] | None = None
+
+
+class _LogoutResult(BaseModel):
+    """The ``gcal logout --json`` result: whether a grant was removed."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    signed_out: bool = True
+    removed: list[str] = []
 
 
 class GoogleAuthError(RuntimeError):
@@ -149,7 +172,7 @@ def _signed_out_hint(detail: str) -> str:
     return text or "could not reach Google"
 
 
-def _mint() -> dict[str, Any]:
+def _mint() -> MintedToken:
     """Mint a fresh access token + scopes from the stored grant (`gcal`)."""
     _require_incognito()
     proc = subprocess.run(
@@ -162,17 +185,17 @@ def _mint() -> dict[str, Any]:
         detail = (proc.stderr or proc.stdout).strip()
         raise GoogleAuthError(_signed_out_hint(detail))
     try:
-        return cast("dict[str, Any]", json.loads(proc.stdout))
-    except json.JSONDecodeError as exc:
-        # Deliberately omit the body: with `--json` it should be JSON, and on a
+        return MintedToken.model_validate_json(proc.stdout)
+    except ValidationError as exc:
+        # Deliberately omit the body: with `--json` it should parse, and on a
         # bug it could contain the access token, which must not land in an error.
         raise GoogleAuthError(
-            f"gcal print-access-token returned non-JSON output ({len(proc.stdout)} bytes)"
+            f"gcal print-access-token returned unparseable output ({len(proc.stdout)} bytes)"
         ) from exc
 
 
-def _expiry(expires_in: object) -> datetime.datetime:
-    seconds = expires_in if isinstance(expires_in, int) and expires_in > 0 else _DEFAULT_LIFETIME
+def _expiry(expires_in: int | None) -> datetime.datetime:
+    seconds = expires_in if expires_in is not None and expires_in > 0 else _DEFAULT_LIFETIME
     # google-auth compares `expiry` against a naive UTC clock, so keep it naive.
     now = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
     return now + datetime.timedelta(seconds=seconds) - _EXPIRY_SKEW
@@ -188,15 +211,15 @@ def _refresh_handler(request: object, scopes: object) -> tuple[str, datetime.dat
     through it keeps the refresh token and client secret inside the binary.
     """
     data = _mint()
-    return data["access_token"], _expiry(data.get("expires_in"))
+    return data.access_token, _expiry(data.expires_in)
 
 
-def _credentials_from(data: dict[str, Any]) -> Credentials:
+def _credentials_from(data: MintedToken) -> Credentials:
     """Wrap an already-minted token as re-minting google-auth credentials."""
     return Credentials(
-        token=data["access_token"],
-        expiry=_expiry(data.get("expires_in")),
-        scopes=data.get("scopes"),
+        token=data.access_token,
+        expiry=_expiry(data.expires_in),
+        scopes=data.scopes,
         refresh_handler=_refresh_handler,
     )
 
@@ -256,7 +279,7 @@ def status() -> dict[str, Any]:
         # An older grant without a Gmail scope (or a transient API error) still
         # counts as signed in; we just cannot name the account.
         pass
-    return {"signed_in": True, "email": email, "scopes": data.get("scopes") or []}
+    return {"signed_in": True, "email": email, "scopes": data.scopes or []}
 
 
 def logout() -> dict[str, Any]:
@@ -277,8 +300,8 @@ def logout() -> dict[str, Any]:
         detail = (proc.stderr or proc.stdout).strip()
         raise GoogleAuthError(detail or f"gcal logout exited with status {proc.returncode}")
     try:
-        return cast("dict[str, Any]", json.loads(proc.stdout))
-    except json.JSONDecodeError:
+        return _LogoutResult.model_validate_json(proc.stdout).model_dump()
+    except ValidationError:
         return {"signed_out": True, "removed": []}
 
 

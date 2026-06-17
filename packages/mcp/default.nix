@@ -790,6 +790,12 @@ let
       # async via asyncssh/playwright/tui but had no way to call a REST API). Sync
       # `httpx.get(...)` and `async with httpx.AsyncClient()` both work.
       ps.httpx
+      # pydantic (v2): the boundary parser for untrusted/JSON data. The bundled
+      # `linear` and `google_auth` modules parse their GraphQL/CLI JSON responses
+      # into typed models with it instead of threading untyped dicts. (The MCP SDK
+      # pulls it transitively too, but linear/google_auth depend on it directly,
+      # so declare it explicitly.)
+      ps.pydantic
       # htpy: compose HTML in Python with automatic escaping (see the module
       # definition above). The preferred way to build any dashboard markup.
       htpyModule
@@ -4293,6 +4299,7 @@ let
   linearTriageTestPython = pkgs.python3.withPackages (ps: [
     ps.pytest
     ps.httpx
+    ps.pydantic
     linearModule
   ]);
   linearTriageTestSource = builtins.path {
@@ -4320,6 +4327,7 @@ let
   noxAutotriageTestPython = pkgs.python3.withPackages (ps: [
     ps.pytest
     ps.httpx
+    ps.pydantic
     linearModule
     noxAutotriageModule
   ]);
