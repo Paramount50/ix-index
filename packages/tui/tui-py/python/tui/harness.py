@@ -58,6 +58,7 @@ async `launch()` classmethod, which also clears onboarding gates.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import re
 from collections.abc import Awaitable, Callable, Sequence
@@ -259,10 +260,9 @@ class Agent:
         Grounded against Claude Code, which drops the occasional fast Enter.
         """
         await self.keyboard.type(text)
-        try:
+        # The box may wrap/scroll the text; submit anyway if it times out.
+        with contextlib.suppress(WaitTimeout):
             await self._tui.wait_for(_submit_probe(text), timeout=5.0)
-        except WaitTimeout:
-            pass  # the box may wrap/scroll the text; submit anyway
         await self.keyboard.press(Key.ENTER)
         if not await self._turn_started():
             await self.keyboard.press(Key.ENTER)
@@ -310,7 +310,7 @@ class Agent:
         stable_since: float | None = None
         while True:
             txt = await self._tui.text()
-            digest = hashlib.md5(txt.encode()).hexdigest()
+            digest = hashlib.md5(txt.encode(), usedforsecurity=False).hexdigest()
             busy = self._busy is not None and self._busy.lower() in txt.lower()
             if not busy and digest == last:
                 stable_since = stable_since if stable_since is not None else loop.time()
@@ -389,14 +389,14 @@ class Agent:
             txt = await self._tui.text()
             if self._busy and self._busy.lower() in txt.lower():
                 return True
-            if not self._busy and hashlib.md5(txt.encode()).hexdigest() != before:
+            if not self._busy and hashlib.md5(txt.encode(), usedforsecurity=False).hexdigest() != before:
                 return True
             await asyncio.sleep(0.1)
         return False
 
     async def _screen_hash(self) -> str:
         txt = await self._tui.text()
-        return hashlib.md5(txt.encode()).hexdigest()
+        return hashlib.md5(txt.encode(), usedforsecurity=False).hexdigest()
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(tui={self._tui!r})"
@@ -565,7 +565,7 @@ def _tail_delta(before: Sequence[str], after: Sequence[str]) -> str:
     prefix, with blank edges trimmed.
     """
     n = 0
-    for a, b in zip(before, after):
+    for a, b in zip(before, after, strict=False):
         if a != b:
             break
         n += 1

@@ -39,6 +39,7 @@ The public surface:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
 import uuid
@@ -46,6 +47,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from enum import StrEnum
 from html import escape as _html_escape
+from pathlib import Path
 from types import TracebackType
 from typing import Self, TypeAlias
 
@@ -124,9 +126,10 @@ def _build_xterm_cube() -> tuple[RGB, ...]:
     indexed from 0, so palette index `n` maps to `_XTERM_CUBE[n - 16]`.
     """
     cube_levels = (0, 95, 135, 175, 215, 255)
-    out: list[RGB] = []
-    for i in range(216):
-        out.append((cube_levels[i // 36], cube_levels[(i // 6) % 6], cube_levels[i % 6]))
+    out: list[RGB] = [
+        (cube_levels[i // 36], cube_levels[(i // 6) % 6], cube_levels[i % 6])
+        for i in range(216)
+    ]
     for i in range(24):
         gray = 8 + i * 10
         out.append((gray, gray, gray))
@@ -166,10 +169,9 @@ class Theme:
         """
         text = source
         if "\n" not in source:
-            expanded = os.path.expanduser(source)
-            if os.path.exists(expanded):
-                with open(expanded, encoding="utf-8") as fh:
-                    text = fh.read()
+            expanded = Path(source).expanduser()
+            if expanded.exists():
+                text = expanded.read_text(encoding="utf-8")
             elif "/" in source or source.startswith("~"):
                 # Looks like a path but is not there: a typo'd path would
                 # otherwise parse as (key-less) theme text and silently return
@@ -776,11 +778,9 @@ class Tui:
         exc: BaseException | None,
         tb: TracebackType | None,
     ) -> None:
-        try:
+        # Best-effort: the child may already be gone.
+        with contextlib.suppress(Exception):
             await self._raw.close_async()
-        except Exception:
-            # Best-effort: the child may already be gone.
-            pass
 
 
 # --------------------------------------------------------------------------- #

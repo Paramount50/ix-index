@@ -485,7 +485,7 @@ def spawn(argv: list[str], *, columns: int, rows: int) -> tuple[int, int]:
             os.close(master_fd)
             if slave_fd > 2:
                 os.close(slave_fd)
-            os.execvp(argv[0], argv)
+            os.execvp(argv[0], argv)  # noqa: S606 — exec replaces the child process, no shell
         except FileNotFoundError:
             os.write(2, f"run: command not found: {argv[0]}\n".encode())
             os._exit(127)
