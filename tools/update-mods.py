@@ -11,7 +11,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
+
+from pydantic import BaseModel, TypeAdapter
 
 API = "https://api.modrinth.com/v2"
 HEADERS = {"User-Agent": "indexable-inc/index update-mods (github.com/indexable-inc/index)"}
@@ -19,16 +21,91 @@ SEARCH_PAGE_SIZE = 100
 
 JsonObject = dict[str, Any]
 
-_project_cache: dict[str, JsonObject] = {}
-_version_cache: dict[tuple[str, tuple[str, ...], tuple[str, ...]], list[JsonObject]] = {}
+# ---------------------------------------------------------------------------
+# Pydantic models for Modrinth API responses.
+# Only the fields the code actually reads are declared; extras are ignored.
+# ---------------------------------------------------------------------------
+
+
+class _Hashes(BaseModel):
+    sha512: str
+
+
+class _VersionFile(BaseModel):
+    url: str
+    filename: str | None = None
+    hashes: _Hashes
+    size: int | None = None
+    primary: bool = False
+
+
+class _Dependency(BaseModel):
+    project_id: str | None = None
+    dependency_type: str | None = None
+
+
+class _Version(BaseModel):
+    id: str | None = None
+    project_id: str | None = None
+    version_number: str | None = None
+    name: str | None = None
+    version_type: str | None = None
+    game_versions: list[str] = []
+    loaders: list[str] = []
+    date_published: str | None = None
+    downloads: int | None = None
+    featured: bool = False
+    files: list[_VersionFile] = []
+    dependencies: list[_Dependency] = []
+
+
+class _Project(BaseModel):
+    id: str | None = None
+    project_id: str | None = None
+    slug: str
+    project_type: str | None = None
+    title: str | None = None
+    description: str | None = None
+    icon_url: str | None = None
+    color: int | None = None
+    categories: list[str] = []
+    additional_categories: list[str] = []
+    client_side: str | None = None
+    server_side: str | None = None
+    downloads: int | None = None
+    followers: int | None = None
+    issues_url: str | None = None
+    source_url: str | None = None
+    wiki_url: str | None = None
+    discord_url: str | None = None
+    donation_urls: list[Any] = []
+    license: Any = None
+    game_versions: list[str] = []
+    loaders: list[str] = []
+    published: str | None = None
+    date_created: str | None = None
+    updated: str | None = None
+    date_modified: str | None = None
+    gallery: list[JsonObject] = []
+
+
+class _SearchPage(BaseModel):
+    hits: list[JsonObject] = []
+    total_hits: int = 0
+
+
+_VersionList = TypeAdapter(list[_Version])
+_ProjectList = TypeAdapter(list[_Project])
+
+_project_cache: dict[str, _Project] = {}
+_version_cache: dict[tuple[str, tuple[str, ...], tuple[str, ...]], list[_Version]] = {}
 
 
 def api_get(path: str, params: JsonObject | None = None) -> object:
     """Fetch and JSON-decode a Modrinth endpoint.
 
-    Returns the raw decoded JSON as `object`; each caller casts to the shape
-    that endpoint documents (a `JsonObject` for single resources, a
-    `list[JsonObject]` for collections).
+    Returns the raw decoded JSON as `object`; callers pass it to
+    `model_validate` / `validate_python` at the boundary.
     """
     url = f"{API}{path}"
     if params:
@@ -41,7 +118,7 @@ def api_get(path: str, params: JsonObject | None = None) -> object:
                 if resp.status == 429:
                     time.sleep(2**attempt)
                     continue
-                return cast(object, json.loads(resp.read()))
+                return json.loads(resp.read())
         except urllib.error.HTTPError as err:
             if err.code == 429 and attempt < 2:
                 time.sleep(2**attempt)
@@ -51,35 +128,34 @@ def api_get(path: str, params: JsonObject | None = None) -> object:
     raise RuntimeError(f"rate limited after retries: {url}")
 
 
-def get_project(id_or_slug: str) -> JsonObject:
+def get_project(id_or_slug: str) -> _Project:
     if id_or_slug not in _project_cache:
-        project = cast(JsonObject, api_get(f"/project/{id_or_slug}"))
+        project = _Project.model_validate(api_get(f"/project/{id_or_slug}"))
         cache_project(project)
     return _project_cache[id_or_slug]
 
 
-def cache_project(project: JsonObject) -> None:
-    project_id = project.get("id") or project.get("project_id")
-    slug = project["slug"]
-    _project_cache[slug] = project
+def cache_project(project: _Project) -> None:
+    project_id = project.id or project.project_id
+    _project_cache[project.slug] = project
     if project_id:
         _project_cache[project_id] = project
 
 
-def get_projects(ids_or_slugs: list[str]) -> list[JsonObject]:
+def get_projects(ids_or_slugs: list[str]) -> list[_Project]:
     missing = [ref for ref in dict.fromkeys(ids_or_slugs) if ref not in _project_cache]
     for offset in range(0, len(missing), SEARCH_PAGE_SIZE):
         chunk = missing[offset : offset + SEARCH_PAGE_SIZE]
         if not chunk:
             continue
-        projects = cast(list[JsonObject], api_get("/projects", {"ids": json.dumps(chunk)}))
+        projects = _ProjectList.validate_python(api_get("/projects", {"ids": json.dumps(chunk)}))
         for project in projects:
             cache_project(project)
 
     return [get_project(ref) for ref in ids_or_slugs if ref in _project_cache]
 
 
-def get_versions(project_id: str, game_versions: list[str], loaders: list[str]) -> list[JsonObject]:
+def get_versions(project_id: str, game_versions: list[str], loaders: list[str]) -> list[_Version]:
     key = (project_id, tuple(game_versions), tuple(loaders))
     if key not in _version_cache:
         # Modrinth's /version endpoint treats an empty filter array as "match
@@ -91,17 +167,17 @@ def get_versions(project_id: str, game_versions: list[str], loaders: list[str]) 
             params["game_versions"] = json.dumps(game_versions)
         if loaders:
             params["loaders"] = json.dumps(loaders)
-        _version_cache[key] = cast(
-            list[JsonObject], api_get(f"/project/{project_id}/version", params)
+        _version_cache[key] = _VersionList.validate_python(
+            api_get(f"/project/{project_id}/version", params)
         )
     return _version_cache[key]
 
 
-def pick_version(versions: list[JsonObject]) -> JsonObject | None:
+def pick_version(versions: list[_Version]) -> _Version | None:
     if not versions:
         return None
-    releases = [version for version in versions if version["version_type"] == "release"]
-    featured = [version for version in releases if version["featured"]]
+    releases = [version for version in versions if version.version_type == "release"]
+    featured = [version for version in releases if version.featured]
     if featured:
         return featured[0]
     if releases:
@@ -109,14 +185,14 @@ def pick_version(versions: list[JsonObject]) -> JsonObject | None:
     return versions[0]
 
 
-def primary_file(version: JsonObject) -> JsonObject:
-    files = cast(list[JsonObject], version["files"])
-    return next((file for file in files if file["primary"]), files[0])
+def primary_file(version: _Version) -> _VersionFile:
+    files = version.files
+    return next((file for file in files if file.primary), files[0])
 
 
-def sri_from_modrinth(file: JsonObject) -> str:
+def sri_from_modrinth(file: _VersionFile) -> str:
     """Convert Modrinth's hex SHA-512 into an SRI string usable by pkgs.fetchurl."""
-    sha512_bytes = bytes.fromhex(file["hashes"]["sha512"])
+    sha512_bytes = bytes.fromhex(file.hashes.sha512)
     return "sha512-" + base64.b64encode(sha512_bytes).decode()
 
 
@@ -130,9 +206,9 @@ def sri_from_url(url: str) -> str:
     return "sha256-" + base64.b64encode(sha256.digest()).decode()
 
 
-def artifact_lock(file: JsonObject, extra: JsonObject | None = None) -> JsonObject:
-    value = {
-        "url": file["url"],
+def artifact_lock(file: _VersionFile, extra: JsonObject | None = None) -> JsonObject:
+    value: JsonObject = {
+        "url": file.url,
         "hash": sri_from_modrinth(file),
     }
     if extra:
@@ -144,29 +220,32 @@ def catalog_extra(ref: JsonObject) -> JsonObject:
     return {key: ref[key] for key in ["pluginName"] if key in ref}
 
 
-def summarize_file(file: JsonObject) -> JsonObject:
+def summarize_file(file: _VersionFile) -> JsonObject:
     return {
-        "filename": file.get("filename"),
-        "url": file.get("url"),
-        "hashes": file.get("hashes", {}),
-        "size": file.get("size"),
-        "primary": file.get("primary", False),
+        "filename": file.filename,
+        "url": file.url,
+        "hashes": {"sha512": file.hashes.sha512},
+        "size": file.size,
+        "primary": file.primary,
     }
 
 
-def summarize_version(version: JsonObject, file: JsonObject) -> JsonObject:
+def summarize_version(version: _Version, file: _VersionFile) -> JsonObject:
     return compact({
-        "id": version.get("id"),
-        "project_id": version.get("project_id"),
-        "version_number": version.get("version_number"),
-        "name": version.get("name"),
-        "version_type": version.get("version_type"),
-        "game_versions": version.get("game_versions", []),
-        "loaders": version.get("loaders", []),
-        "date_published": version.get("date_published"),
-        "downloads": version.get("downloads"),
+        "id": version.id,
+        "project_id": version.project_id,
+        "version_number": version.version_number,
+        "name": version.name,
+        "version_type": version.version_type,
+        "game_versions": version.game_versions,
+        "loaders": version.loaders,
+        "date_published": version.date_published,
+        "downloads": version.downloads,
         "file": summarize_file(file),
-        "dependencies": version.get("dependencies", []),
+        "dependencies": [
+            {"project_id": d.project_id, "dependency_type": d.dependency_type}
+            for d in version.dependencies
+        ],
     })
 
 
@@ -184,36 +263,36 @@ def summarize_gallery(gallery: list[JsonObject]) -> list[JsonObject]:
     ]
 
 
-def summarize_project(project: JsonObject) -> JsonObject:
-    project_type = project.get("project_type")
-    slug = project["slug"]
+def summarize_project(project: _Project) -> JsonObject:
+    project_type = project.project_type
+    slug = project.slug
     return compact({
         "source": "modrinth",
-        "project_id": project.get("id") or project.get("project_id"),
+        "project_id": project.id or project.project_id,
         "slug": slug,
         "project_type": project_type,
         "page_url": f"https://modrinth.com/{project_type}/{slug}" if project_type else None,
-        "title": project.get("title"),
-        "description": project.get("description"),
-        "icon_url": project.get("icon_url"),
-        "color": project.get("color"),
-        "categories": project.get("categories", []),
-        "additional_categories": project.get("additional_categories", []),
-        "client_side": project.get("client_side"),
-        "server_side": project.get("server_side"),
-        "downloads": project.get("downloads"),
-        "followers": project.get("followers"),
-        "issues_url": project.get("issues_url"),
-        "source_url": project.get("source_url"),
-        "wiki_url": project.get("wiki_url"),
-        "discord_url": project.get("discord_url"),
-        "donation_urls": project.get("donation_urls", []),
-        "license": project.get("license"),
-        "game_versions": project.get("game_versions", []),
-        "loaders": project.get("loaders", []),
-        "date_created": project.get("published") or project.get("date_created"),
-        "date_modified": project.get("updated") or project.get("date_modified"),
-        "gallery": summarize_gallery(project.get("gallery", [])),
+        "title": project.title,
+        "description": project.description,
+        "icon_url": project.icon_url,
+        "color": project.color,
+        "categories": project.categories,
+        "additional_categories": project.additional_categories,
+        "client_side": project.client_side,
+        "server_side": project.server_side,
+        "downloads": project.downloads,
+        "followers": project.followers,
+        "issues_url": project.issues_url,
+        "source_url": project.source_url,
+        "wiki_url": project.wiki_url,
+        "discord_url": project.discord_url,
+        "donation_urls": project.donation_urls,
+        "license": project.license,
+        "game_versions": project.game_versions,
+        "loaders": project.loaders,
+        "date_created": project.published or project.date_created,
+        "date_modified": project.updated or project.date_modified,
+        "gallery": summarize_gallery(project.gallery),
         "selected_versions": {},
     })
 
@@ -252,12 +331,12 @@ def compact(value: JsonObject) -> JsonObject:
 
 def remember_selected_version(
     projects: dict[str, JsonObject],
-    project: JsonObject,
+    project: _Project,
     selection_key: str,
-    version: JsonObject,
-    file: JsonObject,
+    version: _Version,
+    file: _VersionFile,
 ) -> None:
-    slug = project["slug"]
+    slug = project.slug
     projects.setdefault(slug, summarize_project(project))
     projects[slug].setdefault("selected_versions", {})[selection_key] = summarize_version(version, file)
 
@@ -294,7 +373,7 @@ def resolve(
             ref = slug
 
         project = get_project(ref)
-        pid = project["id"]
+        pid = project.id or project.project_id or ""
         if pid in seen_pids:
             continue
         seen_pids.add(pid)
@@ -302,17 +381,17 @@ def resolve(
         versions = get_versions(pid, game_versions, loaders)
         version = pick_version(versions)
         if version is None:
-            print(f"  SKIP {project['slug']}: no compatible version", file=sys.stderr)
+            print(f"  SKIP {project.slug}: no compatible version", file=sys.stderr)
             continue
 
         file = primary_file(version)
-        resolved[project["slug"]] = artifact_lock(file, extra)
+        resolved[project.slug] = artifact_lock(file, extra)
         remember_selected_version(projects, project, selection_key, version, file)
-        print(f"  {project['slug']}: {version['name']}", file=sys.stderr)
+        print(f"  {project.slug}: {version.name}", file=sys.stderr)
 
-        for dep in version.get("dependencies", []):
-            dep_id = dep.get("project_id")
-            if dep.get("dependency_type") == "required" and dep_id and dep_id not in seen_pids:
+        for dep in version.dependencies:
+            dep_id = dep.project_id
+            if dep.dependency_type == "required" and dep_id and dep_id not in seen_pids:
                 queue.append(dep_id)
 
     return resolved
@@ -346,9 +425,9 @@ def discover_projects(
         if facets:
             params["facets"] = json.dumps(facets)
 
-        page = cast(JsonObject, api_get("/search", params))
-        hits = page.get("hits", [])
-        total_hits = page.get("total_hits", total_hits)
+        page = _SearchPage.model_validate(api_get("/search", params))
+        hits = page.hits
+        total_hits = page.total_hits
         if not hits:
             break
 
@@ -365,11 +444,12 @@ def discover_projects(
 
     print(f"{name}: discovered {len(slugs)} of {total_hits} hits", file=sys.stderr)
     for project in get_projects(slugs):
-        slug = project["slug"]
+        slug = project.slug
         projects.setdefault(slug, summarize_project(project))
 
         if game_versions and loaders:
-            versions = get_versions(project["id"], game_versions, loaders)
+            pid = project.id or project.project_id or ""
+            versions = get_versions(pid, game_versions, loaders)
             version = pick_version(versions)
             if version is None:
                 continue
@@ -413,12 +493,13 @@ def generate(
             if projects.get(slug, {}).get("source") == "explicit":
                 continue
             project = get_project(slug)
-            versions = get_versions(project["id"], common_game_versions, [loader])
+            pid = project.id or project.project_id or ""
+            versions = get_versions(pid, common_game_versions, [loader])
             version = pick_version(versions)
             if version is None:
                 evicted.append(slug)
                 continue
-            supported = set(version["game_versions"])
+            supported = set(version.game_versions)
             missing = [game_version for game_version in common_game_versions if game_version not in supported]
             if missing:
                 print(f"  evict {slug}: does not cover {missing}", file=sys.stderr)

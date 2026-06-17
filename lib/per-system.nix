@@ -308,6 +308,9 @@ let
     name = "update-mods";
     src = paths.tools.updateMods;
     pyChecker = "zuban";
+    # pydantic validates Modrinth API responses at the boundary so upstream
+    # drift fails with a path-precise error rather than a bare KeyError.
+    python = pkgs.python314.withPackages (ps: [ ps.pydantic ]);
     meta.description = "Regenerate Minecraft mod catalogs";
   };
 

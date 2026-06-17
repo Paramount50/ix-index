@@ -21,7 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -42,7 +42,8 @@ def http_get(url: str) -> bytes:
                 if response.status == 429:
                     time.sleep(2**attempt)
                     continue
-                return cast(bytes, response.read())
+                body: bytes = response.read()
+                return body
         except urllib.error.HTTPError as err:
             if err.code in (429, 502, 503, 504) and attempt < 2:
                 time.sleep(2**attempt)
