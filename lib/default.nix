@@ -125,6 +125,10 @@ let
   # for the search `-c` output, and the base profile generates its
   # Neovim colorscheme from the same data through this value.
   islandsTheme = lib.importJSON (paths.packagesRoot + "/code/code-highlight/src/islands-theme.json");
+  # Repo-default JVM major: imported once here (single source of truth) and
+  # threaded into `languages.java`, which re-exports it as
+  # `ix.languages.java.defaultJvmVersion` for modules/examples that pin the JDK.
+  defaultJvmVersion = import ./languages/jvm-defaults.nix;
   languages = {
     cpp = import ./languages/cpp.nix { inherit errors; };
     dhall = import ./languages/dhall.nix { };
@@ -135,7 +139,7 @@ let
     go = import ./languages/go.nix { inherit errors; };
     haskell = import ./languages/haskell.nix { inherit errors; };
     idris = import ./languages/idris.nix { };
-    java = import ./languages/java { inherit errors lib; };
+    java = import ./languages/java { inherit errors lib defaultJvmVersion; };
     javascript = import ./languages/javascript.nix { inherit errors; };
     kotlin = import ./languages/kotlin.nix { inherit errors; };
     ocaml = import ./languages/ocaml.nix { inherit errors; };
@@ -413,6 +417,7 @@ let
       mkMinecraftNbtFormat
       mkMinecraftSyncManaged
       mutableJson
+      paths
       relativePath
       rustWorkspace
       rustWorkspaceFor

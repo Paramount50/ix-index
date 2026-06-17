@@ -1,9 +1,12 @@
 {
   errors,
   lib,
+  # Repo-default JVM major, imported once in `lib/default.nix` and threaded in
+  # so this is the single source of truth (surfaced as
+  # `ix.languages.java.defaultJvmVersion`).
+  defaultJvmVersion,
 }:
 let
-  defaultJvmVersion = import ../jvm-defaults.nix;
 
   validDistributions = [
     "openjdk"
@@ -244,4 +247,7 @@ in
     instruction is profiled (matches YourKit's startup-attach docs).
   */
   yourkit = import ./yourkit.nix { inherit errors lib; };
+
+  # Repo-default JVM major (single source of truth, from `./jvm-defaults.nix`).
+  inherit defaultJvmVersion;
 }
