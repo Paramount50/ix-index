@@ -110,11 +110,11 @@ def api_get(path: str, params: JsonObject | None = None) -> object:
     url = f"{API}{path}"
     if params:
         url += "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(url, headers=HEADERS)
+    req = urllib.request.Request(url, headers=HEADERS)  # noqa: S310 -- URL is always https:// (API constant + Modrinth artifact URLs)
 
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(req) as resp:
+            with urllib.request.urlopen(req) as resp:  # noqa: S310 -- same: HTTPS-only Modrinth API
                 if resp.status == 429:
                     time.sleep(2**attempt)
                     continue
@@ -198,9 +198,9 @@ def sri_from_modrinth(file: _VersionFile) -> str:
 
 def sri_from_url(url: str) -> str:
     """Download a hand-picked artifact and return a SHA-256 SRI string."""
-    req = urllib.request.Request(url, headers=HEADERS)
+    req = urllib.request.Request(url, headers=HEADERS)  # noqa: S310 -- explicit-artifact URLs come from the manifest, expected to be https://
     sha256 = hashlib.sha256()
-    with urllib.request.urlopen(req) as resp:
+    with urllib.request.urlopen(req) as resp:  # noqa: S310 -- same: manifest-supplied HTTPS URL
         while chunk := resp.read(1024 * 1024):
             sha256.update(chunk)
     return "sha256-" + base64.b64encode(sha256.digest()).decode()
@@ -468,6 +468,7 @@ def generate(
     manifest_path: Path,
     output_dir: Path,
     only_version: str | None,
+    *,
     skip_searches: bool,
 ) -> None:
     manifest = json.loads(manifest_path.read_text())
@@ -565,13 +566,10 @@ def main() -> None:
     parser.add_argument("--skip-searches", action="store_true", help="Skip broad Modrinth search indexes")
     args = parser.parse_args()
 
-    if args.manifest:
-        manifest_path = args.manifest
-    else:
-        manifest_path = default_manifest_path()
+    manifest_path = args.manifest or default_manifest_path()
 
     output_dir = args.output_dir or manifest_path.parent
-    generate(manifest_path, output_dir, args.only_version, args.skip_searches)
+    generate(manifest_path, output_dir, args.only_version, skip_searches=args.skip_searches)
 
 
 if __name__ == "__main__":

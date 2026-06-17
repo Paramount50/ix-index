@@ -35,10 +35,10 @@ FABRIC_META_API = "https://meta.fabricmc.net/v2"
 
 
 def http_get(url: str) -> bytes:
-    request = urllib.request.Request(url, headers=HEADERS)
+    request = urllib.request.Request(url, headers=HEADERS)  # noqa: S310 -- callers only pass https:// URLs (PAPER_FILL_API / FABRIC_META_API constants)
     for attempt in range(3):
         try:
-            with urllib.request.urlopen(request) as response:
+            with urllib.request.urlopen(request) as response:  # noqa: S310 -- same: HTTPS-only, audited at call sites
                 if response.status == 429:
                     time.sleep(2**attempt)
                     continue
@@ -132,7 +132,7 @@ def render_json(value: JsonObject) -> str:
     return json.dumps(value, indent=2, sort_keys=True) + "\n"
 
 
-def write_or_diff(path: Path, rendered: str, check: bool) -> bool:
+def write_or_diff(path: Path, rendered: str, *, check: bool) -> bool:
     """Write `rendered` to `path`, or report drift in `--check` mode.
 
     Returns True when the file would change.
@@ -154,7 +154,7 @@ def write_or_diff(path: Path, rendered: str, check: bool) -> bool:
     return True
 
 
-def refresh_papermc(root: Path, only_version: str | None, check: bool) -> bool:
+def refresh_papermc(root: Path, only_version: str | None, *, check: bool) -> bool:
     """Refresh Paper or Velocity locks. Returns True if anything would change."""
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
@@ -169,11 +169,11 @@ def refresh_papermc(root: Path, only_version: str | None, check: bool) -> bool:
         print(f"{root.name}/{version}: querying fill.papermc.io", file=sys.stderr)
         lock = latest_papermc_build(project, version, channel)
         rendered = render_json(lock)
-        drift |= write_or_diff(root / f"{version}.json", rendered, check)
+        drift |= write_or_diff(root / f"{version}.json", rendered, check=check)
     return drift
 
 
-def refresh_fabric(root: Path, only_version: str | None, check: bool) -> bool:
+def refresh_fabric(root: Path, only_version: str | None, *, check: bool) -> bool:
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     loader_version = manifest["loaderVersion"]
@@ -187,7 +187,7 @@ def refresh_fabric(root: Path, only_version: str | None, check: bool) -> bool:
         print(f"fabric/{version}: fetching meta.fabricmc.net", file=sys.stderr)
         lock = fabric_server_lock(version, loader_version, installer_version)
         rendered = render_json(lock)
-        drift |= write_or_diff(root / f"{version}.json", rendered, check)
+        drift |= write_or_diff(root / f"{version}.json", rendered, check=check)
     return drift
 
 
@@ -245,7 +245,7 @@ def main() -> None:
         if not (root / "manifest.json").exists():
             raise SystemExit(f"missing manifest: {root / 'manifest.json'}")
         refresher = REFRESHERS[loader]
-        drift |= refresher(root, args.only_version, args.check)
+        drift |= refresher(root, args.only_version, check=args.check)
 
     if args.check and drift:
         sys.exit(1)

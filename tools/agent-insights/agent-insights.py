@@ -38,12 +38,11 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import glob
 import json
-import os
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 INTERRUPT_MARK = "[Request interrupted by user"
 # Codex re-stamps replayed (resumed/forked) events at the resume instant; a real
@@ -63,7 +62,7 @@ class Turn:
     interrupted: bool    # did you cut it off
 
 
-def parse_ts(s):
+def parse_ts(s: str | None) -> datetime | None:
     if not s:
         return None
     try:
@@ -74,7 +73,7 @@ def parse_ts(s):
 
 # --- Claude ---------------------------------------------------------------
 
-def claude_user_kind(msg):
+def claude_user_kind(msg: dict) -> str | None:  # type: ignore[type-arg]
     """Classify a role=user entry: interrupt | prompt | tool_result | None."""
     content = msg.get("content")
     parts = []
@@ -93,26 +92,26 @@ def claude_user_kind(msg):
         return None
     if text.startswith(INTERRUPT_MARK):
         return "interrupt"
-    if text.startswith("<command-") or text.startswith("<local-command"):
+    if text.startswith(("<command-", "<local-command")):
         return None
     return "prompt"
 
 
-def scan_claude(root, since):
-    turns = []
-    for fp in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
-        if "/subagents/" in fp:  # the user interrupts the main agent, not sidechains
+def scan_claude(root: str, since: datetime | None) -> list[Turn]:
+    turns: list[Turn] = []
+    for fp in Path(root).rglob("*.jsonl"):
+        if "subagents" in fp.parts:  # the user interrupts the main agent, not sidechains
             continue
         run_start = None
         last_activity = None
         try:
-            with open(fp, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
+            with fp.open(encoding="utf-8") as f:
+                for raw in f:
+                    stripped = raw.strip()
+                    if not stripped:
                         continue
                     try:
-                        d = json.loads(line)
+                        d = json.loads(stripped)
                     except json.JSONDecodeError:
                         continue
                     if d.get("isSidechain"):
@@ -127,12 +126,12 @@ def scan_claude(root, since):
                         elif kind == "interrupt":
                             if run_start and ts and (since is None or run_start >= since):
                                 turns.append(Turn("claude", run_start,
-                                                  (ts - run_start).total_seconds(), True))
+                                                  (ts - run_start).total_seconds(), interrupted=True))
                             run_start = last_activity = None
                         elif kind == "prompt":
                             if run_start and last_activity and (since is None or run_start >= since):
                                 turns.append(Turn("claude", run_start,
-                                                  (last_activity - run_start).total_seconds(), False))
+                                                  (last_activity - run_start).total_seconds(), interrupted=False))
                             run_start = last_activity = ts
                         elif ts:
                             last_activity = ts
@@ -140,7 +139,7 @@ def scan_claude(root, since):
                         last_activity = ts
             if run_start and last_activity and (since is None or run_start >= since):
                 turns.append(Turn("claude", run_start,
-                                  (last_activity - run_start).total_seconds(), False))
+                                  (last_activity - run_start).total_seconds(), interrupted=False))
         except OSError:
             continue
     return turns
@@ -148,9 +147,9 @@ def scan_claude(root, since):
 
 # --- Codex ----------------------------------------------------------------
 
-def codex_meta_ts(fp):
+def codex_meta_ts(fp: Path) -> datetime | None:
     try:
-        with open(fp, encoding="utf-8") as f:
+        with fp.open(encoding="utf-8") as f:
             d = json.loads(f.readline())
     except (OSError, json.JSONDecodeError):
         return None
@@ -160,19 +159,19 @@ def codex_meta_ts(fp):
     return parse_ts(p.get("timestamp"))
 
 
-def scan_codex(root, since):
-    turns = []
-    for fp in glob.glob(os.path.join(root, "*", "*", "*", "rollout-*.jsonl")):
+def scan_codex(root: str, since: datetime | None) -> list[Turn]:
+    turns: list[Turn] = []
+    for fp in Path(root).glob("*/*/*/rollout-*.jsonl"):
         meta_ts = codex_meta_ts(fp)
         cur_start = None
         try:
-            with open(fp, encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
+            with fp.open(encoding="utf-8") as f:
+                for raw in f:
+                    stripped = raw.strip()
+                    if not stripped:
                         continue
                     try:
-                        d = json.loads(line)
+                        d = json.loads(stripped)
                     except json.JSONDecodeError:
                         continue
                     if d.get("type") != "event_msg":
@@ -203,28 +202,28 @@ def scan_codex(root, since):
 
 # --- metrics --------------------------------------------------------------
 
-def week_start(dt):
+def week_start(dt: datetime) -> datetime:
     d = (dt - timedelta(days=dt.weekday())).date()
     return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
 
 
-def pct(vals, p):
+def pct(vals: list[float], p: float) -> float:
     if not vals:
         return 0.0
     s = sorted(vals)
     return s[max(0, min(len(s) - 1, round(p / 100 * (len(s) - 1))))]
 
 
-def fmt_dur(seconds):
-    seconds = int(seconds)
-    if seconds < 90:
-        return f"{seconds}s"
-    if seconds < 5400:
-        return f"{seconds / 60:.1f}m"
-    return f"{seconds / 3600:.1f}h"
+def fmt_dur(seconds: float) -> str:
+    secs = int(seconds)
+    if secs < 90:
+        return f"{secs}s"
+    if secs < 5400:
+        return f"{secs / 60:.1f}m"
+    return f"{secs / 3600:.1f}h"
 
 
-def summarize(name, turns):
+def summarize(name: str, turns: list[Turn]) -> None:
     n = len(turns)
     interrupts = sum(1 for t in turns if t.interrupted)
     run = sum(t.run_seconds for t in turns)
@@ -241,7 +240,10 @@ def summarize(name, turns):
               f"p90 {fmt_dur(pct(ttis, 90))}, max {fmt_dur(max(ttis))}")
 
 
-def weekly_series(turns, min_week_hours):
+def weekly_series(
+    turns: list[Turn],
+    min_week_hours: float,
+) -> tuple[list[datetime], dict[str, list[tuple[datetime, float | None]]]]:
     """Return {tool: [(week_start, interrupts_per_hour), ...]} over a shared week axis."""
     agg = defaultdict(lambda: defaultdict(lambda: [0, 0.0]))  # tool -> week -> [intr, run_s]
     weeks = set()
@@ -265,7 +267,11 @@ def weekly_series(turns, min_week_hours):
 
 # --- SVG rendering --------------------------------------------------------
 
-def render_svg(axis, series, out_path):
+def render_svg(
+    axis: list[datetime],
+    series: dict[str, list[tuple[datetime, float | None]]],
+    out_path: str,
+) -> None:
     W, H = 940, 460
     ml, mr, mt, mb = 64, 150, 48, 70
     pw, ph = W - ml - mr, H - mt - mb
@@ -273,10 +279,10 @@ def render_svg(axis, series, out_path):
     ymax = max(1.0, ymax * 1.15)
     n = max(1, len(axis))
 
-    def x(i):
+    def x(i: int) -> float:
         return ml + (pw * i / (n - 1) if n > 1 else pw / 2)
 
-    def y(v):
+    def y(v: float) -> float:
         return mt + ph * (1 - v / ymax)
 
     colors = {"claude": CLAUDE_BLUE, "codex": CODEX_ORANGE}
@@ -341,15 +347,14 @@ def render_svg(axis, series, out_path):
         ly += 24
 
     s.append('</svg>')
-    with open(out_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(s))
+    Path(out_path).write_text("\n".join(s), encoding="utf-8")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--claude-dir", default=os.path.expanduser("~/.claude/projects"))
-    ap.add_argument("--codex-dir", default=os.path.expanduser("~/.codex/sessions"))
+    ap.add_argument("--claude-dir", default=str(Path("~/.claude/projects").expanduser()))
+    ap.add_argument("--codex-dir", default=str(Path("~/.codex/sessions").expanduser()))
     ap.add_argument("--tool", choices=["claude", "codex", "both"], default="both")
     ap.add_argument("--since", help="ISO date, e.g. 2026-01-01 (only later activity)")
     ap.add_argument("--out", default="agent-insights.svg", help="SVG output path")
@@ -360,10 +365,10 @@ def main():
 
     since = parse_ts(args.since + "T00:00:00+00:00") if args.since else None
 
-    turns = []
-    if args.tool in ("claude", "both") and os.path.isdir(args.claude_dir):
+    turns: list[Turn] = []
+    if args.tool in ("claude", "both") and Path(args.claude_dir).is_dir():
         turns += scan_claude(args.claude_dir, since)
-    if args.tool in ("codex", "both") and os.path.isdir(args.codex_dir):
+    if args.tool in ("codex", "both") and Path(args.codex_dir).is_dir():
         turns += scan_codex(args.codex_dir, since)
 
     if not turns:
