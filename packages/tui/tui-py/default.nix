@@ -26,6 +26,15 @@ let
     name = "tui-py-python-source";
     path = ./python;
   };
+
+  # Strict type + annotation gate over the Python source (zuban --strict + ruff
+  # ANN), mirroring buildUvApplication's pyChecker="zuban" path. The `_tui.pyi`
+  # stub imports numpy, so the checker env needs it; the harness is pure stdlib.
+  pyStrictTest = ix.buildPyStrictCheck pkgs {
+    pname = "tui-py";
+    pythonSrc = pythonSource;
+    pythonPackages = ps: [ ps.numpy ];
+  };
 in
 pkgs.runCommand "ix-tui-wheel"
   {
@@ -36,7 +45,10 @@ pkgs.runCommand "ix-tui-wheel"
       pkgs.patchelf
       pkgs.removeReferencesTo
     ];
-    passthru = { inherit library; };
+    passthru = {
+      inherit library;
+      tests.pyStrict = pyStrictTest;
+    };
     meta.description = "ix-tui Python wheel (PyO3 bindings for the tui PTY manager)";
   }
   ''

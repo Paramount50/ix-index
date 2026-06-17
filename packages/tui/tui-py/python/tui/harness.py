@@ -311,7 +311,7 @@ class Agent:
         while True:
             txt = await self._tui.text()
             digest = hashlib.md5(txt.encode()).hexdigest()
-            busy = bool(self._busy) and self._busy.lower() in txt.lower()
+            busy = self._busy is not None and self._busy.lower() in txt.lower()
             if not busy and digest == last:
                 stable_since = stable_since if stable_since is not None else loop.time()
                 if loop.time() - stable_since >= settle:

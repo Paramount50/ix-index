@@ -26,6 +26,15 @@ let
     name = "search-py-python-source";
     path = ./python;
   };
+
+  # Strict type + annotation gate over the Python source (zuban --strict + ruff
+  # ANN), mirroring buildUvApplication's pyChecker="zuban" path. The sources
+  # resolve `import polars`; the `_search.pyi` stub travels with the tree.
+  pyStrictTest = ix.buildPyStrictCheck pkgs {
+    pname = "search-py";
+    pythonSrc = pythonSource;
+    pythonPackages = ps: [ ps.polars ];
+  };
 in
 pkgs.runCommand "ix-search-wheel"
   {
@@ -36,7 +45,10 @@ pkgs.runCommand "ix-search-wheel"
       pkgs.patchelf
       pkgs.removeReferencesTo
     ];
-    passthru = { inherit library; };
+    passthru = {
+      inherit library;
+      tests.pyStrict = pyStrictTest;
+    };
     meta.description = "ix-search Python wheel (PyO3 bindings for content-addressed code search)";
   }
   ''

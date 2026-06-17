@@ -40,9 +40,13 @@ from ._scipql import rename as _rename
 
 __all__ = ["__version__", "facts", "fix", "index", "query", "rename"]
 
+# A polars dtype as `pl.DataFrame(schema=...)` accepts it: the class (`pl.Utf8`)
+# or an instance. The schema tables below hold the classes.
+_DType = type[pl.DataType] | pl.DataType
+
 # Column dtypes for each fact relation; byte offsets are integers, everything
 # else is a moniker/identifier string.
-_FACT_SCHEMAS: dict[str, dict[str, pl.DataType]] = {
+_FACT_SCHEMAS: dict[str, dict[str, _DType]] = {
     "occurrence": {
         "symbol": pl.Utf8,
         "path": pl.Utf8,
@@ -63,8 +67,17 @@ def facts(index_path: str, root: str | None = None) -> dict[str, pl.DataFrame]:
     the index's project root.
     """
     raw = _facts(index_path, root)
+    # Pair each relation's row list (typed per-key on the `Facts` TypedDict) with
+    # its schema. Listed explicitly rather than indexed by a dynamic name so the
+    # rows keep their precise row-dict type instead of widening to `object`.
+    relations: dict[str, list[dict[str, object]]] = {
+        "occurrence": [dict(row) for row in raw["occurrence"]],
+        "symbol_info": [dict(row) for row in raw["symbol_info"]],
+        "document": [dict(row) for row in raw["document"]],
+        "relationship": [dict(row) for row in raw["relationship"]],
+    }
     return {
-        name: pl.DataFrame(raw.get(name, []), schema=schema)
+        name: pl.DataFrame(relations[name], schema=schema)
         for name, schema in _FACT_SCHEMAS.items()
     }
 

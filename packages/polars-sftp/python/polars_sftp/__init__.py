@@ -9,7 +9,7 @@ predicate handling. The actual read + decode happens in Rust (``_polars_sftp``).
 
 from __future__ import annotations
 
-from typing import Iterator
+from typing import Iterator, TypedDict
 
 import polars as pl
 from polars.io.plugins import register_io_source
@@ -17,6 +17,22 @@ from polars.io.plugins import register_io_source
 from ._polars_sftp import __version__, read_sftp
 
 __all__ = ["scan_sftp", "read_sftp", "__version__"]
+
+
+class _ConnKwargs(TypedDict):
+    """The connection arguments forwarded to ``read_sftp`` on every read.
+
+    Typed so the ``**conn`` splat matches ``read_sftp``'s per-keyword types
+    (a bare dict literal would widen them to one union and fail strict checking).
+    """
+
+    port: int
+    username: str | None
+    password: str | None
+    private_key: str | None
+    storage_format: str | None
+    timeout_ms: int
+    check_host_key: bool
 
 
 def scan_sftp(
@@ -42,7 +58,7 @@ def scan_sftp(
     The remote file is fetched in full and decoded in memory, so projection trims
     decoding and output rather than bytes transferred over the wire.
     """
-    conn = {
+    conn: _ConnKwargs = {
         "port": port,
         "username": username,
         "password": password,

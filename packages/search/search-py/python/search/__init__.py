@@ -67,7 +67,14 @@ if TYPE_CHECKING:
 
     import polars as pl
 
-    _Raw = Callable[..., Awaitable[list[dict[str, object]]]]
+    from ._search import Hit
+
+    # A polars dtype as the schema/`cast` APIs accept it: the class (`pl.Utf8`)
+    # or an instance. The `_dtypes` table holds the classes.
+    _DType = type[pl.DataType] | pl.DataType
+    # The native bindings resolve to a list of `Hit` dicts (see `_search.pyi`);
+    # the wrapper frames them. Awaiting the framed function yields a DataFrame.
+    _Raw = Callable[..., Awaitable[list[Hit]]]
     _Framed = Callable[..., Awaitable[pl.DataFrame]]
 
 __all__ = ["__version__", "grep", "recent", "semantic"]
@@ -94,7 +101,7 @@ _COLUMNS: tuple[str, ...] = (
 )
 
 
-def _dtypes() -> dict[str, object]:
+def _dtypes() -> "dict[str, _DType]":
     import polars as pl
 
     return {
@@ -115,7 +122,7 @@ def _dtypes() -> dict[str, object]:
     }
 
 
-def _to_frame(rows: "list[dict[str, object]]") -> "pl.DataFrame":
+def _to_frame(rows: "list[Hit]") -> "pl.DataFrame":
     try:
         import polars as pl
     except ModuleNotFoundError as exc:  # pragma: no cover - env always has polars
@@ -138,6 +145,19 @@ def _to_frame(rows: "list[dict[str, object]]") -> "pl.DataFrame":
     return df.select([*_COLUMNS, *extra])
 
 
+def _with_framed_doc(fn: "_Framed", doc: str) -> "_Framed":
+    """Set ``fn.__doc__`` and return it.
+
+    Assigning ``wrapper.__doc__`` directly inside ``_framed`` trips strict type
+    checkers: a ``functools.wraps``-decorated local with no docstring is inferred
+    to have ``__doc__: None``, so a later ``str`` assignment is rejected. Routing
+    it through a plain ``Callable`` (whose ``__doc__`` is the normal
+    ``str | None``) keeps the assignment honest without a blanket ignore.
+    """
+    fn.__doc__ = doc
+    return fn
+
+
 def _framed(raw: "_Raw") -> "_Framed":
     """Wrap a native PyO3 coroutine so awaiting it yields a polars DataFrame.
 
@@ -150,11 +170,12 @@ def _framed(raw: "_Raw") -> "_Framed":
     async def wrapper(*args: object, **kwargs: object) -> "pl.DataFrame":
         return _to_frame(await raw(*args, **kwargs))
 
-    wrapper.__doc__ = (raw.__doc__ or "") + (
-        "\n\nReturns a polars DataFrame (one row per hit) with the stable "
-        "schema documented on the `search` module."
+    return _with_framed_doc(
+        wrapper,
+        (raw.__doc__ or "")
+        + "\n\nReturns a polars DataFrame (one row per hit) with the stable "
+        "schema documented on the `search` module.",
     )
-    return wrapper
 
 
 semantic = _framed(_semantic)

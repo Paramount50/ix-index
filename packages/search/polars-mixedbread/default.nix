@@ -121,12 +121,22 @@ let
         python3 ${./tests/test_overfetch.py} ${./python/polars_mixedbread/_overfetch.py}
         mkdir -p "$out"
       '';
+
+  # Strict type + annotation gate over the Python source (zuban --strict + ruff
+  # ANN), mirroring buildUvApplication's pyChecker="zuban" path. polars is the
+  # only third-party import the sources resolve.
+  pyStrictTest = ix.buildPyStrictCheck pkgs {
+    pname = "polars-mixedbread";
+    pythonSrc = pythonSource;
+    pythonPackages = ps: [ ps.polars ];
+  };
 in
 wheel.overrideAttrs (old: {
   passthru = (old.passthru or { }) // {
     tests = (old.passthru.tests or { }) // {
       pushdown = pushdownTest;
       overfetch = overfetchTest;
+      pyStrict = pyStrictTest;
     };
   };
 })

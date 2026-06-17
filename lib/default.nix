@@ -114,6 +114,7 @@ let
       inherit lib pkgs;
     };
   buildUvApplication = import ./build/uv-application.nix { inherit uvLockFor; };
+  buildPyStrictCheck = import ./build/py-strict-check.nix { inherit lib; };
   buildGradleFatJar = import ./build/gradle-fat-jar.nix { inherit lib; };
   secrets = import ./util/secrets.nix {
     inherit lib pkgs writeNushellApplication;
@@ -406,6 +407,7 @@ let
       buildJsSite
       buildLibghosttyVt
       buildNpmVitest
+      buildPyStrictCheck
       buildSvelteSite
       buildUvApplication
       buildZigPackage

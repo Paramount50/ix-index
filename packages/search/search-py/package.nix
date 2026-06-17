@@ -16,4 +16,9 @@
     "x86_64-linux"
     "aarch64-linux"
   ];
+  # Gate the strict Python type/annotation check (default.nix passthru.tests.pyStrict)
+  # in CI as `checks.<system>.search-py-pyStrict`.
+  passthruTests = {
+    prefix = "search-py";
+  };
 }
