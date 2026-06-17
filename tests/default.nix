@@ -57,8 +57,14 @@ let
   plainPkgs = import nixpkgs {
     inherit (pkgs.stdenv.hostPlatform) system;
   };
+  # Evaluates the JVM profile against a PLAIN nixpkgs package set (no repo
+  # overlay) to prove it resolves its JDK from stock nixpkgs. `ix` is supplied as
+  # a specialArg exactly as every real module eval does (lib/image/default.nix);
+  # that is independent of the pkgs overlay, so the no-overlay contract holds
+  # while the module reads `ix.languages.java.defaultJvmVersion` like its siblings.
   standaloneJvmProfile = lib.nixosSystem {
     inherit (pkgs.stdenv.hostPlatform) system;
+    specialArgs.ix = ix;
     modules = [
       (paths.modules + "/profiles/jvm")
       {
