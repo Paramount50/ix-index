@@ -30,6 +30,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import base64
+import binascii
 import contextvars
 import dataclasses
 import inspect
@@ -42,7 +43,8 @@ import time
 import traceback
 import types
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from typing import overload
 
 from . import registry
 
@@ -433,7 +435,15 @@ class _TextDescriptor:
     pages the text instead of dying with "'method' object is not subscriptable"
     (the bound constructor the old classmethod handed back)."""
 
-    def __get__(self, obj, objtype=None):
+    # Class access (`Result.text("hi")`) hands back the bound constructor; instance
+    # access (`result.text`) hands back the rendered text. The overloads let the
+    # checker see both, so `Result.text(...)` is callable and `result.text[-100:]`
+    # is a str.
+    @overload
+    def __get__(self, obj: None, objtype: type | None = ...) -> "Callable[..., Result]": ...
+    @overload
+    def __get__(self, obj: object, objtype: type | None = ...) -> str: ...
+    def __get__(self, obj: object, objtype: type | None = None) -> "Callable[..., Result] | str":
         if obj is None:
             return types.MethodType(_result_from_text, objtype)
         return obj.llm_result or ""
@@ -548,6 +558,9 @@ class Result:
             # the inline image and hand the model a real image block, not the
             # ~50k-char byte repr that would blow the result cap.
             img = _coerce_image(value)
+            # _image_bytes_mime returned a mime, so value is real PNG/JPEG bytes
+            # and _coerce_image always encodes them (never None on this path).
+            assert img is not None
             user = f'<img alt="" src="data:{img["mime"]};base64,{img["data"]}" />'
             note = llm_result if llm_result is not None else f"[{image_mime} image, {len(bytes(value))} bytes]"
             return cls(user_html=user, llm_result=note, llm_images=[value])
@@ -1078,6 +1091,9 @@ def _compile_generator(code: str, filename: str) -> "types.CodeType":
     user = ast.parse(code, filename, "exec")
     shell = ast.parse("async def __ix_cell__():\n    pass\n", filename, "exec")
     func = shell.body[0]
+    # The shell source is a single `async def`, so body[0] is that function def;
+    # narrow it so its `.body` is statically known.
+    assert isinstance(func, ast.AsyncFunctionDef)
     func.body = user.body  # the cell's own statements, original line numbers intact
     ast.fix_missing_locations(shell)
     probe = compile(shell, filename, "exec")
@@ -1652,7 +1668,7 @@ def _encode_image_b64(b64: str, mime: str) -> dict:
     (then it is passed through untouched)."""
     try:
         raw = base64.b64decode(b64, validate=True)
-    except (ValueError, base64.binascii.Error):
+    except (ValueError, binascii.Error):
         return {"mime": mime, "data": b64}
     return _encode_image_bytes(raw, mime)
 
