@@ -5,6 +5,9 @@ that finished after it)."""
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,7 +18,7 @@ from ix_notebook_mcp import runtime, store
 # --------------------------------------------------------------------------- #
 
 
-def test_latest_namespace_is_not_stale_after_clear(tmp_path) -> None:
+def test_latest_namespace_is_not_stale_after_clear(tmp_path: Path) -> None:
     # The dashboard namespace pane reads the newest *finished* run's globals,
     # empty or not, so clearing the namespace drops the pane instead of pinning
     # the last non-empty snapshot as stale data. A running job has no namespace
@@ -34,7 +37,7 @@ def test_latest_namespace_is_not_stale_after_clear(tmp_path) -> None:
     assert store.latest_namespace(conn) == []
 
 
-def test_snapshot_roundtrip_keeps_only_the_newest(tmp_path) -> None:
+def test_snapshot_roundtrip_keeps_only_the_newest(tmp_path: Path) -> None:
     conn = store.connect(tmp_path / "s.ixnb")
     store.save_snapshot(conn, created_at=1.0, blob=b"one", names=["a"], skipped=[])
     store.save_snapshot(
@@ -48,12 +51,12 @@ def test_snapshot_roundtrip_keeps_only_the_newest(tmp_path) -> None:
     assert conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] == 1
 
 
-def test_latest_snapshot_is_none_for_a_fresh_file(tmp_path) -> None:
+def test_latest_snapshot_is_none_for_a_fresh_file(tmp_path: Path) -> None:
     conn = store.connect(tmp_path / "s.ixnb")
     assert store.latest_snapshot(conn) is None
 
 
-def test_mark_interrupted_closes_running_rows_and_live_resources(tmp_path) -> None:
+def test_mark_interrupted_closes_running_rows_and_live_resources(tmp_path: Path) -> None:
     conn = store.connect(tmp_path / "s.ixnb")
     store.start(conn, id="dead", name="dead", code="x", started_at=1.0)
     store.start(conn, id="fine", name="fine", code="y", started_at=1.0)
@@ -68,7 +71,7 @@ def test_mark_interrupted_closes_running_rows_and_live_resources(tmp_path) -> No
     assert store.live_resources(conn) == []
 
 
-def test_replayable_anchors_on_ended_at_and_excludes_replays(tmp_path) -> None:
+def test_replayable_anchors_on_ended_at_and_excludes_replays(tmp_path: Path) -> None:
     conn = store.connect(tmp_path / "s.ixnb")
     # Finished before the checkpoint: captured by it, not replayed.
     store.start(conn, id="old", name="old", code="a = 1", started_at=1.0)
@@ -91,7 +94,7 @@ def test_replayable_anchors_on_ended_at_and_excludes_replays(tmp_path) -> None:
     assert [r["id"] for r in store.replayable(conn, since=None)] == ["old", "straddle", "new"]
 
 
-def test_kind_column_round_trips(tmp_path) -> None:
+def test_kind_column_round_trips(tmp_path: Path) -> None:
     conn = store.connect(tmp_path / "s.ixnb")
     store.start(conn, id="r", name="r", code="x", started_at=1.0, kind="replay")
     assert store.get(conn, "r")["kind"] == "replay"
@@ -102,7 +105,7 @@ def test_kind_column_round_trips(tmp_path) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_snapshot_candidates_filter(monkeypatch) -> None:
+def test_snapshot_candidates_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     import types as types_mod
 
     ns = {
@@ -136,7 +139,7 @@ def test_snapshot_payload_skips_the_unpicklable() -> None:
     assert skipped[0]["name"] == "bad"
     import pickle
 
-    named = pickle.loads(blob)
+    named = pickle.loads(blob)  # noqa: S301 -- blob produced by the test itself, not untrusted data
     assert set(named) == {"ok"}
 
 
@@ -146,7 +149,7 @@ def test_snapshot_payload_skips_the_unpicklable() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _wire(monkeypatch, conn, ns) -> None:
+def _wire(monkeypatch: pytest.MonkeyPatch, conn: sqlite3.Connection, ns: dict[str, Any]) -> None:
     monkeypatch.setattr(runtime, "_store", store)
     monkeypatch.setattr(runtime, "_store_conn", conn)
     monkeypatch.setattr(runtime, "_user_ns", ns)
@@ -154,7 +157,7 @@ def _wire(monkeypatch, conn, ns) -> None:
     monkeypatch.setattr(runtime, "_baseline_names", frozenset(ns))
 
 
-def test_session_reopen_restores_instantly_and_replays_the_gap(tmp_path, monkeypatch) -> None:
+def test_session_reopen_restores_instantly_and_replays_the_gap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("dill")
     path = tmp_path / "s.ixnb"
 
@@ -195,12 +198,13 @@ def test_session_reopen_restores_instantly_and_replays_the_gap(tmp_path, monkeyp
     # checkpoint).
     conn = store.connect(path)
     snap = store.latest_snapshot(conn)
-    assert snap is not None and {"x", "y", "double"} <= set(snap["names"])
+    assert snap is not None
+    assert {"x", "y", "double"} <= set(snap["names"])
     assert store.replayable(conn, since=snap["created_at"]) == []
     conn.close()
 
 
-def test_restore_without_checkpoint_replays_the_full_log(tmp_path, monkeypatch) -> None:
+def test_restore_without_checkpoint_replays_the_full_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "s.ixnb"
 
     async def first_run() -> None:

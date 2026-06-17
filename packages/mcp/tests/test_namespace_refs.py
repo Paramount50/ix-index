@@ -17,7 +17,7 @@ import types
 from ix_notebook_mcp import introspect, runtime
 
 
-def _job(job_id: str, code: str, status: str = "done"):
+def _job(job_id: str, code: str, status: str = "done") -> types.SimpleNamespace:
     """A minimal stand-in for a finished Job: _record_refs reads id, code, status."""
     return types.SimpleNamespace(id=job_id, code=code, status=status)
 

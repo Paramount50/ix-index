@@ -12,10 +12,11 @@ from __future__ import annotations
 import asyncio
 import sys
 import os
+from pathlib import Path
 
 # Make `import linear` work when running directly against the source tree.
 # In the nix env the module is installed; when running locally we add the src.
-_src = os.path.join(os.path.dirname(__file__), "..", "src", "linear")
+_src = str(Path(__file__).parent / ".." / "src" / "linear")
 if _src not in sys.path:
     sys.path.insert(0, _src)
 
@@ -92,7 +93,7 @@ class FakeLinearPort:
         return comment
 
 
-def _cfg(**overrides: Any) -> TriageConfig:
+def _cfg(**overrides: object) -> TriageConfig:
     defaults: dict[str, Any] = {
         "team_id": "team-uuid",
         "epic_id": "epic-uuid",
@@ -103,7 +104,7 @@ def _cfg(**overrides: Any) -> TriageConfig:
     return TriageConfig(**defaults)
 
 
-def _finding(key: str = "key-1", priority: int = 3, **overrides: Any) -> Finding:
+def _finding(key: str = "key-1", priority: int = 3, **overrides: object) -> Finding:
     defaults: dict[str, Any] = {
         "source": "ci",
         "kind": "lint",
@@ -116,9 +117,9 @@ def _finding(key: str = "key-1", priority: int = 3, **overrides: Any) -> Finding
     return Finding(**defaults)
 
 
-def run(coro):
+def run(coro: object) -> object:
     """Run an async coroutine synchronously for pytest compatibility."""
-    return asyncio.run(coro)
+    return asyncio.run(coro)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +128,7 @@ def run(coro):
 
 
 class TestFingerprintStability:
-    def test_nix_store_hash_differences_same_fp(self):
+    def test_nix_store_hash_differences_same_fp(self) -> None:
         """Two findings whose key/body differ only by nix store hashes are equal."""
         f1 = Finding(
             source="ci",
@@ -145,7 +146,7 @@ class TestFingerprintStability:
         )
         assert fingerprint(f1) == fingerprint(f2)
 
-    def test_nox_conformance_store_pid_same_fp(self):
+    def test_nox_conformance_store_pid_same_fp(self) -> None:
         """Findings differing only by nox-conformance-store-<pid> yield same fp."""
         f1 = Finding(
             source="nox",
@@ -163,7 +164,7 @@ class TestFingerprintStability:
         )
         assert fingerprint(f1) == fingerprint(f2)
 
-    def test_line_col_differences_same_fp(self):
+    def test_line_col_differences_same_fp(self) -> None:
         """Findings differing only by :line:col positions yield the same fp."""
         f1 = Finding(
             source="ci",
@@ -181,7 +182,7 @@ class TestFingerprintStability:
         )
         assert fingerprint(f1) == fingerprint(f2)
 
-    def test_pid_differences_same_fp(self):
+    def test_pid_differences_same_fp(self) -> None:
         """Findings differing only by pid numbers yield the same fp."""
         f1 = Finding(
             source="ci",
@@ -199,25 +200,25 @@ class TestFingerprintStability:
         )
         assert fingerprint(f1) == fingerprint(f2)
 
-    def test_tmp_path_differences_same_fp(self):
+    def test_tmp_path_differences_same_fp(self) -> None:
         """Findings differing only by /tmp paths yield the same fp."""
         f1 = Finding(
             source="ci",
             kind="test",
-            key="/tmp/run-abc123/output",
+            key="/tmp/run-abc123/output",  # noqa: S108 -- test data string, not a temp-file operation
             title="Test failure",
             body_md="Output at /tmp/run-abc123/output",
         )
         f2 = Finding(
             source="ci",
             kind="test",
-            key="/tmp/run-xyz789/output",
+            key="/tmp/run-xyz789/output",  # noqa: S108 -- test data string, not a temp-file operation
             title="Test failure",
             body_md="Output at /tmp/run-xyz789/output",
         )
         assert fingerprint(f1) == fingerprint(f2)
 
-    def test_different_source_different_fp(self):
+    def test_different_source_different_fp(self) -> None:
         """Findings from different sources yield different fingerprints."""
         f1 = _finding(source="ci")
         f2 = Finding(
@@ -229,7 +230,7 @@ class TestFingerprintStability:
         )
         assert fingerprint(f1) != fingerprint(f2)
 
-    def test_different_kind_different_fp(self):
+    def test_different_kind_different_fp(self) -> None:
         """Findings with different kinds yield different fingerprints."""
         f1 = _finding(kind="lint")
         f2 = Finding(
@@ -241,19 +242,19 @@ class TestFingerprintStability:
         )
         assert fingerprint(f1) != fingerprint(f2)
 
-    def test_different_key_different_fp(self):
+    def test_different_key_different_fp(self) -> None:
         """Findings with meaningfully different keys yield different fps."""
         f1 = _finding(key="attr-a::test_foo")
         f2 = _finding(key="attr-b::test_bar")
         assert fingerprint(f1) != fingerprint(f2)
 
-    def test_fp_is_16_hex_chars(self):
+    def test_fp_is_16_hex_chars(self) -> None:
         """fingerprint() returns exactly 16 hex characters."""
         fp = fingerprint(_finding())
         assert len(fp) == 16
         assert all(c in "0123456789abcdef" for c in fp)
 
-    def test_normalize_idempotent(self):
+    def test_normalize_idempotent(self) -> None:
         """_normalize applied twice yields the same result as once."""
         s = "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa1-foo/bar:10:5 pid 42"
         assert _normalize(_normalize(s)) == _normalize(s)
@@ -265,12 +266,12 @@ class TestFingerprintStability:
 
 
 class TestMarkerLine:
-    def test_format(self):
+    def test_format(self) -> None:
         """marker_line returns the expected format."""
         fp = "deadbeef01234567"
         assert marker_line(fp) == f"{MARKER_KEY}: {fp}"
 
-    def test_marker_key_constant(self):
+    def test_marker_key_constant(self) -> None:
         assert MARKER_KEY == "nox-fingerprint"
 
 
@@ -280,7 +281,7 @@ class TestMarkerLine:
 
 
 class TestIdempotency:
-    def test_first_pass_creates_issues(self):
+    def test_first_pass_creates_issues(self) -> None:
         """First triage pass over N fresh findings (no existing issues) creates N issues."""
         port = FakeLinearPort()
         findings = [_finding(key=f"k{i}") for i in range(3)]
@@ -290,7 +291,7 @@ class TestIdempotency:
         assert result.deferred == 0
         assert len(port.created) == 3
 
-    def test_second_pass_bumps_not_creates(self):
+    def test_second_pass_bumps_not_creates(self) -> None:
         """Second pass where search returns the already-created issues yields 0 creates."""
         port = FakeLinearPort()
         findings = [_finding(key=f"k{i}") for i in range(3)]
@@ -317,7 +318,7 @@ class TestIdempotency:
         # Bump comments posted.
         assert len(port.commented) == 3
 
-    def test_dry_run_no_api_calls(self):
+    def test_dry_run_no_api_calls(self) -> None:
         """dry_run=True makes decisions but performs no create/comment calls."""
         port = FakeLinearPort()
         findings = [_finding(key="k1"), _finding(key="k2")]
@@ -334,7 +335,7 @@ class TestIdempotency:
 
 
 class TestCapAndOrdering:
-    def test_max_new_per_run_respected(self):
+    def test_max_new_per_run_respected(self) -> None:
         """With max_new_per_run=3 and 5 findings, exactly 3 are created."""
         port = FakeLinearPort()
         findings = [_finding(key=f"k{i}", priority=i % 4 + 1) for i in range(5)]
@@ -344,7 +345,7 @@ class TestCapAndOrdering:
         assert result.deferred == 2
         assert len(port.created) == 3
 
-    def test_most_urgent_created_first(self):
+    def test_most_urgent_created_first(self) -> None:
         """The 3 most urgent findings (lowest priority int, excluding 0) are filed."""
         port = FakeLinearPort()
         findings = [
@@ -365,7 +366,7 @@ class TestCapAndOrdering:
         assert "Finding low" not in filed_titles
         assert "Finding none" not in filed_titles
 
-    def test_priority_zero_is_lowest_urgency(self):
+    def test_priority_zero_is_lowest_urgency(self) -> None:
         """priority=0 is treated as lower urgency than priority=4."""
         port = FakeLinearPort()
         findings = [
@@ -388,7 +389,7 @@ class TestCapAndOrdering:
 
 
 class TestExactTitleGuard:
-    def test_exact_title_match_bumps_instead_of_creating(self):
+    def test_exact_title_match_bumps_instead_of_creating(self) -> None:
         """A finding whose title matches an existing issue is bumped, not duplicated."""
         port = FakeLinearPort()
         existing = {
@@ -412,7 +413,7 @@ class TestExactTitleGuard:
 
 
 class TestResolvedIssue:
-    def test_closed_issue_gets_regression_comment(self):
+    def test_closed_issue_gets_regression_comment(self) -> None:
         """A finding matching a completed issue gets a regression comment."""
         port = FakeLinearPort()
         f = _finding(key="k1")
@@ -439,20 +440,20 @@ class TestResolvedIssue:
 
 
 class TestLinearModuleAdditions:
-    def test_issue_search_in_all(self):
+    def test_issue_search_in_all(self) -> None:
         assert "issue_search" in linear.__all__
 
-    def test_comment_create_in_all(self):
+    def test_comment_create_in_all(self) -> None:
         assert "comment_create" in linear.__all__
 
-    def test_version_bumped(self):
+    def test_version_bumped(self) -> None:
         # 0.3.0: public functions return typed pydantic models instead of dicts.
         assert linear.__version__ == "0.3.0"
 
-    def test_issue_search_callable(self):
+    def test_issue_search_callable(self) -> None:
         assert callable(linear.issue_search)
 
-    def test_comment_create_callable(self):
+    def test_comment_create_callable(self) -> None:
         assert callable(linear.comment_create)
 
 
@@ -462,7 +463,7 @@ class TestLinearModuleAdditions:
 
 
 class TestIssueSearchWire:
-    def test_issue_search_posts_searchissues_query(self):
+    def test_issue_search_posts_searchissues_query(self) -> None:
         """issue_search posts a searchIssues query and returns nodes."""
         import json
         import httpx
@@ -528,24 +529,24 @@ class TestTeamResolution:
     """
 
     @staticmethod
-    def _wire(handler):
+    def _wire(handler: object) -> object:
         """Install a MockTransport handler + fake api key; return a restore fn."""
         import httpx
 
         orig_client, orig_key = linear._client, linear._api_key
         linear._client = lambda **kw: httpx.AsyncClient(
-            transport=httpx.MockTransport(handler), **kw
+            transport=httpx.MockTransport(handler), **kw  # type: ignore[arg-type]
         )
         linear._api_key = lambda: "test-key"
         linear._team_id_cache.clear()
 
-        def restore():
+        def restore() -> None:
             linear._client, linear._api_key = orig_client, orig_key
             linear._team_id_cache.clear()
 
         return restore
 
-    def test_key_resolved_to_uuid_and_cached(self):
+    def test_key_resolved_to_uuid_and_cached(self) -> None:
         """A key triggers one TeamByKey lookup; the UUID is reused on later calls."""
         import json
         import httpx
@@ -577,7 +578,7 @@ class TestTeamResolution:
         assert len(lookups) == 1, "key resolution must be cached, not re-queried"
         assert teamids == ["team-uuid-eng", "team-uuid-eng"]
 
-    def test_uuid_passes_through_without_lookup(self):
+    def test_uuid_passes_through_without_lookup(self) -> None:
         """A teamId already in UUID form is sent as-is, no TeamByKey query."""
         import json
         import httpx
@@ -603,7 +604,7 @@ class TestTeamResolution:
         teamids = [b["variables"]["input"]["teamId"] for b in received if "IssueCreate" in b["query"]]
         assert teamids == [uuid]
 
-    def test_unknown_key_raises_linear_error(self):
+    def test_unknown_key_raises_linear_error(self) -> None:
         """A key with no matching team surfaces a clear LinearError."""
         import httpx
 
@@ -617,7 +618,7 @@ class TestTeamResolution:
         finally:
             restore()
 
-    def test_project_create_resolves_each_team(self):
+    def test_project_create_resolves_each_team(self) -> None:
         """project_create resolves every team key in its list to a UUID."""
         import json
         import httpx
@@ -661,7 +662,7 @@ class TestGqlRetry:
     """
 
     @staticmethod
-    def _wire(handler, *, sleep_calls: list[float] | None = None):
+    def _wire(handler: object, *, sleep_calls: list[float] | None = None) -> object:
         """Install MockTransport, fake api key, and stub asyncio.sleep."""
         import httpx
 
@@ -688,7 +689,7 @@ class TestGqlRetry:
 
         return restore
 
-    def test_retries_on_transient_5xx(self):
+    def test_retries_on_transient_5xx(self) -> None:
         """A 500 followed by 200 succeeds and is observable as a single retry."""
         import httpx
 
@@ -713,7 +714,7 @@ class TestGqlRetry:
         assert calls["n"] == 2
         assert sleeps == [0.5]
 
-    def test_retries_on_graphql_internal_server_error(self):
+    def test_retries_on_graphql_internal_server_error(self) -> None:
         """A GraphQL ``Internal server error`` is retried and then succeeds."""
         import httpx
 
@@ -740,7 +741,7 @@ class TestGqlRetry:
         assert calls["n"] == 2
         assert sleeps == [0.5]
 
-    def test_retries_on_internal_server_error_with_null_data(self):
+    def test_retries_on_internal_server_error_with_null_data(self) -> None:
         """Regression: the GraphQL spec returns ``{"data": null, "errors": [...]}``
         for a top-level error. The envelope must accept ``data: null`` so the
         internal-server-error retry still fires (not a raw ValidationError)."""
@@ -768,7 +769,7 @@ class TestGqlRetry:
         assert calls["n"] == 2
         assert sleeps == [0.5]
 
-    def test_null_data_other_error_raises_linear_error(self):
+    def test_null_data_other_error_raises_linear_error(self) -> None:
         """A non-transient top-level error with ``data: null`` surfaces as
         LinearError (the documented contract), not a raw ValidationError."""
         import httpx
@@ -786,7 +787,7 @@ class TestGqlRetry:
         finally:
             restore()
 
-    def test_exhausts_retries_then_raises(self):
+    def test_exhausts_retries_then_raises(self) -> None:
         """Three consecutive 500s exhaust the retry budget and raise."""
         import httpx
 
@@ -807,7 +808,7 @@ class TestGqlRetry:
         assert calls["n"] == 3
         assert sleeps == [0.5, 1.5]
 
-    def test_does_not_retry_on_4xx(self):
+    def test_does_not_retry_on_4xx(self) -> None:
         """4xx is a caller bug and must raise on the first attempt."""
         import httpx
 
@@ -828,7 +829,7 @@ class TestGqlRetry:
         assert calls["n"] == 1
         assert sleeps == []
 
-    def test_does_not_retry_on_other_graphql_errors(self):
+    def test_does_not_retry_on_other_graphql_errors(self) -> None:
         """A non-transient GraphQL error must surface immediately as LinearError."""
         import httpx
 
@@ -852,7 +853,7 @@ class TestGqlRetry:
         assert calls["n"] == 1
         assert sleeps == []
 
-    def test_mutations_do_not_retry_on_5xx(self):
+    def test_mutations_do_not_retry_on_5xx(self) -> None:
         """Mutations must fail fast on 5xx -- the server may have committed
         the write, so a retry would duplicate (no idempotency key in the API)."""
         import httpx
@@ -874,7 +875,7 @@ class TestGqlRetry:
         assert calls["n"] == 1
         assert sleeps == []
 
-    def test_mutations_do_not_retry_on_internal_server_error(self):
+    def test_mutations_do_not_retry_on_internal_server_error(self) -> None:
         """Mutations must fail fast on GraphQL 'Internal server error' too --
         the write may have committed before the error was returned."""
         import httpx
@@ -905,7 +906,7 @@ class TestGqlRetry:
 
 
 class TestDedupSearchTerm:
-    def test_search_is_called_with_bare_fingerprint(self):
+    def test_search_is_called_with_bare_fingerprint(self) -> None:
         """``triage`` must search the 16-hex fingerprint to ride above Linear's
         fuzzy ranking; a hit keyed only by the bare fingerprint must dedup."""
         port = FakeLinearPort()

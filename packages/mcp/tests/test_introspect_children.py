@@ -16,9 +16,10 @@ from __future__ import annotations
 import os
 
 from ix_notebook_mcp import introspect
+from typing import NoReturn
 
 
-def _only_row(value, **kwargs) -> dict:
+def _only_row(value: object, **kwargs: object) -> dict:
     """The single row for a one-name namespace (the common test fixture)."""
     rows = introspect.namespace_rows({"v": value}, **kwargs)
     assert len(rows) == 1
@@ -215,7 +216,7 @@ class _Exploding:
         self.safe = 1
 
     @property
-    def boom(self):  # a property that raises if anyone touches it
+    def boom(self) -> NoReturn:  # a property that raises if anyone touches it
         raise RuntimeError("do not read me")
 
 
@@ -231,7 +232,7 @@ def test_property_that_raises_does_not_blow_up_namespace_rows() -> None:
 
 def test_value_whose_describe_raises_degrades_to_no_row() -> None:
     class _Hostile:
-        def __getattribute__(self, name):  # type: ignore[override]
+        def __getattribute__(self, name: str) -> None:  # type: ignore[override]
             raise RuntimeError("everything explodes")
 
     # The top-level value's introspection raises, so it is dropped, not fatal.

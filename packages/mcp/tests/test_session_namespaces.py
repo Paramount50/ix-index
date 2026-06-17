@@ -15,13 +15,16 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 from ix_notebook_mcp import config as config_module
 from ix_notebook_mcp import runtime, tools
 from ix_notebook_mcp.config import Config
 
 
-def _wire(monkeypatch, ns) -> None:
+def _wire(monkeypatch: pytest.MonkeyPatch, ns: dict[str, Any]) -> None:
     """A controlled shared namespace with the helper surface as the baseline,
     plus a clean per-session map, mirroring what install() leaves behind."""
     monkeypatch.setattr(runtime, "_user_ns", ns)
@@ -44,18 +47,20 @@ def run_cell(code: str, session: str | None = None) -> runtime.Job:
 # --------------------------------------------------------------------------- #
 
 
-def test_two_sessions_do_not_clobber_each_others_variables(monkeypatch) -> None:
+def test_two_sessions_do_not_clobber_each_others_variables(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {"Result": runtime.Result})
     # The production failure: both agents bind the same name in parallel.
     run_cell("x = 'agent-a'\nResult.ok('a')", session="sess-a")
     run_cell("x = 'agent-b'\nResult.ok('b')", session="sess-b")
     a = run_cell("Result.text(x)", session="sess-a")
     b = run_cell("Result.text(x)", session="sess-b")
-    assert a.status == "done" and a.result.llm_result == "agent-a"
-    assert b.status == "done" and b.result.llm_result == "agent-b"
+    assert a.status == "done"
+    assert a.result.llm_result == "agent-a"
+    assert b.status == "done"
+    assert b.result.llm_result == "agent-b"
 
 
-def test_a_session_namespace_persists_across_calls(monkeypatch) -> None:
+def test_a_session_namespace_persists_across_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {"Result": runtime.Result})
     run_cell("def double(n):\n    return n * 2\nbase = 21\nResult.ok('set')", session="s1")
     job = run_cell("Result.text(str(double(base)))", session="s1")
@@ -63,7 +68,7 @@ def test_a_session_namespace_persists_across_calls(monkeypatch) -> None:
     assert job.result.llm_result == "42"
 
 
-def test_sessions_see_the_shared_helpers_but_not_each_other(monkeypatch) -> None:
+def test_sessions_see_the_shared_helpers_but_not_each_other(monkeypatch: pytest.MonkeyPatch) -> None:
     shared = {"Result": runtime.Result, "jobs": runtime.jobs}
     _wire(monkeypatch, shared)
     # The baseline helper surface (here: Result) is visible in a fresh session...
@@ -75,7 +80,7 @@ def test_sessions_see_the_shared_helpers_but_not_each_other(monkeypatch) -> None
     assert other.result.llm_result == "n"
 
 
-def test_session_assignments_never_leak_into_the_shared_namespace(monkeypatch) -> None:
+def test_session_assignments_never_leak_into_the_shared_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     shared = {"Result": runtime.Result}
     _wire(monkeypatch, shared)
     run_cell("leaky = 1\nResult.ok('set')", session="s1")
@@ -87,7 +92,7 @@ def test_session_assignments_never_leak_into_the_shared_namespace(monkeypatch) -
     assert job.result.llm_result == "n"
 
 
-def test_no_session_keeps_the_single_shared_namespace(monkeypatch) -> None:
+def test_no_session_keeps_the_single_shared_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
     shared = {"Result": runtime.Result}
     _wire(monkeypatch, shared)
     run_cell("x = 40\nResult.ok('set')")
@@ -96,7 +101,7 @@ def test_no_session_keeps_the_single_shared_namespace(monkeypatch) -> None:
     assert shared["x"] == 40  # writes land in the shared dict, as before
 
 
-def test_ix_read_evaluates_in_the_callers_session(monkeypatch) -> None:
+def test_ix_read_evaluates_in_the_callers_session(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {"Result": runtime.Result})
     run_cell("answer = 41\nResult.ok('set')", session="s1")
 
@@ -119,7 +124,7 @@ def test_ix_read_evaluates_in_the_callers_session(monkeypatch) -> None:
 
 
 class _FakeCtx:
-    def __init__(self, session) -> None:
+    def __init__(self, session: object) -> None:
         self.session = session
 
 
@@ -127,7 +132,7 @@ class _FakeSession:
     pass
 
 
-def test_session_id_is_stable_per_session_and_distinct_across(monkeypatch, tmp_path) -> None:
+def test_session_id_is_stable_per_session_and_distinct_across(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(config_module, "_CONFIG", Config(workdir=Path(tmp_path), transport="http"))
     one, two = _FakeSession(), _FakeSession()
     first = tools._session_id(_FakeCtx(one))
@@ -136,7 +141,7 @@ def test_session_id_is_stable_per_session_and_distinct_across(monkeypatch, tmp_p
     assert tools._session_id(_FakeCtx(two)) != first
 
 
-def test_session_id_is_none_on_stdio_so_checkpointing_keeps_working(monkeypatch, tmp_path) -> None:
+def test_session_id_is_none_on_stdio_so_checkpointing_keeps_working(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # stdio serves one client per process; its state must stay in the shared
     # namespace so `serve --session FILE` checkpoint/restore still covers it.
     monkeypatch.setattr(config_module, "_CONFIG", Config(workdir=Path(tmp_path), transport="stdio"))
@@ -148,13 +153,13 @@ def test_session_id_is_none_on_stdio_so_checkpointing_keeps_working(monkeypatch,
 # --------------------------------------------------------------------------- #
 
 
-def _capture_stdout(monkeypatch) -> None:
+def _capture_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     """Route prints to the running job's buffer the way install() does (the
     in-process tests skip install, so wire the tee explicitly)."""
     monkeypatch.setattr(sys, "stdout", runtime._Tee(sys.stdout))
 
 
-def test_print_only_cell_auto_returns_its_stdout(monkeypatch) -> None:
+def test_print_only_cell_auto_returns_its_stdout(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {})
     _capture_stdout(monkeypatch)
     job = run_cell("print('hello-from-stdout')")
@@ -163,7 +168,7 @@ def test_print_only_cell_auto_returns_its_stdout(monkeypatch) -> None:
     assert "hello-from-stdout" in job.result.llm_result
 
 
-def test_assignment_only_cell_auto_oks_quietly(monkeypatch) -> None:
+def test_assignment_only_cell_auto_oks_quietly(monkeypatch: pytest.MonkeyPatch) -> None:
     shared: dict = {}
     _wire(monkeypatch, shared)
     job = run_cell("x = 5")
@@ -172,7 +177,7 @@ def test_assignment_only_cell_auto_oks_quietly(monkeypatch) -> None:
     assert "done" in job.result.llm_result  # a quiet confirmation, not stdout
 
 
-def test_auto_returned_stdout_is_clipped_with_a_paging_pointer(monkeypatch) -> None:
+def test_auto_returned_stdout_is_clipped_with_a_paging_pointer(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {})
     _capture_stdout(monkeypatch)
     monkeypatch.setattr(runtime, "_AUTO_RESULT_CHARS", 100)
@@ -182,14 +187,14 @@ def test_auto_returned_stdout_is_clipped_with_a_paging_pointer(monkeypatch) -> N
     assert len(job.result.llm_result) < 500
 
 
-def test_a_bare_scalar_is_the_result_jupyter_style(monkeypatch) -> None:
+def test_a_bare_scalar_is_the_result_jupyter_style(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {})
     job = run_cell("1 + 1")
     assert job.status == "done", (job.status, job.error)
     assert "2" in job.result.llm_result
 
 
-def test_stdout_rides_with_a_bare_final_value(monkeypatch) -> None:
+def test_stdout_rides_with_a_bare_final_value(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {})
     _capture_stdout(monkeypatch)
     job = run_cell("print('logged')\n40 + 2")
@@ -198,7 +203,7 @@ def test_stdout_rides_with_a_bare_final_value(monkeypatch) -> None:
     assert "42" in job.result.llm_result
 
 
-def test_an_explicit_result_is_unchanged(monkeypatch) -> None:
+def test_an_explicit_result_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
     _wire(monkeypatch, {"Result": runtime.Result})
     job = run_cell("print('noise')\nResult.text('explicit')")
     assert job.status == "done"

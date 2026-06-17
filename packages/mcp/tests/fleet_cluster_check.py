@@ -21,7 +21,7 @@ import fleet
 from fleet import cluster
 
 
-def check_nodes_merge():
+def check_nodes_merge() -> None:
     status = {
         "Self": {
             "DNSName": "hydra.ts.net.",
@@ -42,7 +42,7 @@ def check_nodes_merge():
         }
     ]
 
-    async def fake_status():
+    async def fake_status() -> dict:
         return status
 
     cluster._tailscale_status = fake_status
@@ -63,14 +63,14 @@ class _FakeRemote:
     """Stands in for ray.remote(fn).options(...); .remote() records the pinned
     node instead of scheduling anything."""
 
-    def __init__(self, node_id):
+    def __init__(self, node_id: object) -> None:
         self._node_id = node_id
 
-    def remote(self, *args, **kwargs):
+    def remote(self, *args: object, **kwargs: object) -> str:
         return "ref:" + str(self._node_id)
 
 
-def check_submit_shape():
+def check_submit_shape() -> None:
     cluster.connect = lambda *a, **k: None
     cluster._alive_ray_nodes = lambda: [
         {"NodeID": "n1", "NodeManagerHostname": "a", "NodeManagerAddress": "100.0.0.1"},
@@ -91,7 +91,7 @@ def check_submit_shape():
         raise AssertionError("expected ClusterError for an unknown target")
 
 
-def check_in_kernel_tokenless():
+def check_in_kernel_tokenless() -> None:
     # in_kernel no longer hard-requires a token: a tailnet-trust cluster accepts
     # the call on membership alone. With no token and no reachable targets it
     # returns an empty frame rather than raising.
@@ -100,7 +100,7 @@ def check_in_kernel_tokenless():
     os.environ.pop("IX_MCP_EXEC_TOKEN", None)
     os.environ.pop("IX_MCP_EXEC_TOKEN_FILE", None)
 
-    async def no_targets(_on):
+    async def no_targets(_on: object) -> list:
         return []
 
     cluster._http_targets = no_targets
@@ -108,7 +108,7 @@ def check_in_kernel_tokenless():
     assert df.height == 0, df
 
 
-def check_exec_auth():
+def check_exec_auth() -> None:
     from aiohttp.test_utils import TestClient, TestServer
 
     from ix_notebook_mcp import dashboard, kernel, store
@@ -117,12 +117,14 @@ def check_exec_auth():
     tmp = pathlib.Path(tempfile.mkdtemp())
 
     class _FakeKernel:
-        async def python_exec(self, code, budget):
+        async def python_exec(self, code: str, budget: float) -> tuple:
             return [], {"output": "", "result": "2", "error": None, "status": "ok"}
 
-    kernel.current_kernel = lambda: _FakeKernel()
+    kernel.current_kernel = _FakeKernel
 
-    async def request(token, auth, payload={"code": "1+1"}, *, trust=False, host="127.0.0.1"):
+    async def request(token: str | None, auth: str | None, payload: dict | None = None, *, trust: bool = False, host: str = "127.0.0.1") -> tuple:
+        if payload is None:
+            payload = {"code": "1+1"}
         conn = store.connect(tmp / "store.db")
         cfg = Config(
             workdir=tmp,
@@ -144,11 +146,13 @@ def check_exec_auth():
     status, _ = asyncio.run(request(None, None, trust=True, host="127.0.0.1"))
     assert status == 403, status
     status, body = asyncio.run(request(None, None, trust=True, host="100.0.0.5"))
-    assert status == 200 and body["result"] == "2", (status, body)  # tailnet trust
+    assert status == 200, (status, body)  # tailnet trust
+    assert body["result"] == "2", (status, body)
     status, _ = asyncio.run(request("secret", "Bearer wrong"))
     assert status == 401, status  # a configured token is always required
     status, body = asyncio.run(request("secret", "Bearer secret"))
-    assert status == 200 and body["result"] == "2", (status, body)
+    assert status == 200, (status, body)
+    assert body["result"] == "2", (status, body)
     # A non-numeric budget is a clean 400, not an unhandled 500.
     status, _ = asyncio.run(
         request("secret", "Bearer secret", {"code": "1", "budget": "abc"})
@@ -156,7 +160,7 @@ def check_exec_auth():
     assert status == 400, status
 
 
-def check_spark_dials_connect_url():
+def check_spark_dials_connect_url() -> None:
     # Mock pyspark so the smoke runs without a Spark cluster: assert fleet.spark
     # builds a Connect session against sc://<resolved-ip>:<SPARK_CONNECT_PORT>.
     import sys
@@ -165,15 +169,15 @@ def check_spark_dials_connect_url():
     captured = {}
 
     class _Builder:
-        def remote(self, url):
+        def remote(self, url: str) -> "_Builder":
             captured["url"] = url
             return self
 
-        def config(self, key, value):
+        def config(self, key: str, value: object) -> "_Builder":
             captured.setdefault("config", {})[key] = value
             return self
 
-        def getOrCreate(self):
+        def getOrCreate(self) -> str:
             return "spark-session"
 
     class _SparkSession:

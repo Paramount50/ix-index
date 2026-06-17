@@ -21,7 +21,7 @@ def _status(name: str) -> requirements.Status:
 
 
 @pytest.fixture(autouse=True)
-def no_ambient_credentials(monkeypatch, tmp_path):
+def no_ambient_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No ambient credential can leak into a test: clear every declared env var
     and point HOME at an empty directory so token-path probes miss."""
     for _, credential in registry.credentialed():
@@ -30,7 +30,7 @@ def no_ambient_credentials(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
 
 
-def test_missing_credential_remedy_names_every_route():
+def test_missing_credential_remedy_names_every_route() -> None:
     # The line is the whole user experience of a missing credential: it must
     # carry the env var, where to get a key, and the login alternative, so the
     # user can fix it without reading docs.
@@ -40,26 +40,26 @@ def test_missing_credential_remedy_names_every_route():
         assert needle in status.line, status.line
 
 
-def test_env_credential_names_the_var_not_the_value(monkeypatch):
+def test_env_credential_names_the_var_not_the_value(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("EXA_API_KEY", "hunter2-super-secret")
     status = _status("exa_py")
     assert status.satisfied_via == "EXA_API_KEY"
     assert "hunter2-super-secret" not in status.line
 
 
-def test_blank_env_value_is_not_a_credential(monkeypatch):
+def test_blank_env_value_is_not_a_credential(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LINEAR_API_KEY", "   ")
     assert _status("linear").satisfied_via is None
 
 
-def test_token_file_satisfies_when_env_is_absent(tmp_path):
+def test_token_file_satisfies_when_env_is_absent(tmp_path: Path) -> None:
     token = tmp_path / ".mgrep" / "token.json"
     token.parent.mkdir(parents=True)
     token.write_text("{}")
     assert _status("search").satisfied_via == "token at ~/.mgrep/token.json"
 
 
-def test_report_emits_one_line_per_credential_and_gates_on_all(monkeypatch):
+def test_report_emits_one_line_per_credential_and_gates_on_all(monkeypatch: pytest.MonkeyPatch) -> None:
     emitted: list[str] = []
     assert requirements.report(emitted.append) is False
     assert len(emitted) == len(registry.credentialed())

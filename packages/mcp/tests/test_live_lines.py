@@ -7,6 +7,7 @@ code HTML whose data-line numbers match the compiler's (and so the traceback's).
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 from ix_notebook_mcp import runtime, store
 
@@ -58,7 +59,8 @@ def test_syntax_error_records_its_line_without_plumbing_frames() -> None:
     assert job.status == "error"
     assert job.error_line == 2
     assert "SyntaxError" in job.error
-    assert "_compile" not in job.error and "runtime.py" not in job.error
+    assert "_compile" not in job.error
+    assert "runtime.py" not in job.error
 
 
 def test_generator_cell_keeps_real_line_numbers_on_error() -> None:
@@ -120,7 +122,7 @@ def test_sync_cell_has_no_current_line() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_store_round_trips_line_and_error_line(tmp_path) -> None:
+def test_store_round_trips_line_and_error_line(tmp_path: Path) -> None:
     conn = store.connect(tmp_path / "exec.sqlite")
     store.start(conn, id="j1", name="j1", code="x", started_at=0.0)
     store.update_output(conn, "j1", "out", line=3)

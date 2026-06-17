@@ -67,18 +67,18 @@ class _Browser:
     """One headless Chromium + one page, driven on a private event loop so the
     sync Hypothesis test body can `run(...)` each example against it."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.loop = asyncio.new_event_loop()
         self._pw = None
         self._browser = None
         self._ctx = None
         self.page = None
 
-    def run(self, coro):
-        return self.loop.run_until_complete(coro)
+    def run(self, coro: object) -> object:
+        return self.loop.run_until_complete(coro)  # type: ignore[arg-type]
 
-    def start(self):
-        async def _start():
+    def start(self) -> None:
+        async def _start() -> None:
             self._pw = await async_playwright().start()
             self._browser = await self._pw.chromium.launch(
                 headless=True,
@@ -91,8 +91,8 @@ class _Browser:
 
         self.run(_start())
 
-    def stop(self):
-        async def _stop():
+    def stop(self) -> None:
+        async def _stop() -> None:
             if self._browser is not None:
                 await self._browser.close()
             if self._pw is not None:
@@ -105,7 +105,7 @@ class _Browser:
 
 
 @pytest.fixture(scope="module")
-def live():
+def live() -> _Browser:
     b = _Browser()
     b.start()
     try:
@@ -123,7 +123,7 @@ def live():
 _uniq = st.integers(min_value=0, max_value=10**9)
 
 
-def _interactive(sid: int):
+def _interactive(sid: int) -> object:
     return st.sampled_from(
         [
             f"<a href='/p{sid}'>Link{sid}</a>",
@@ -148,10 +148,10 @@ _HEADINGS = ["h1", "h2", "h3"]
 #  - opacity:0 set DIRECTLY on the element zeroes its own computed opacity.
 # opacity:0 on an *ancestor* is intentionally absent: it is NOT pruned today
 # (indexable-inc/index#1077), so including it would assert a false guarantee.
-def _excluded_subtree(sid: int):
+def _excluded_subtree(sid: int) -> object:
     sent = f"SENTINEL{sid}X"
 
-    def link(wrap_kind: str, css: str):
+    def link(wrap_kind: str, css: str) -> tuple[str, dict[str, str]]:
         return (
             f"<div style='{css}'><a href='/e{sid}'>{sent}{wrap_kind}</a></div>",
             {f"{sent}{wrap_kind}": wrap_kind},
@@ -175,7 +175,7 @@ def _excluded_subtree(sid: int):
 
 
 @st.composite
-def _body(draw, depth=0):
+def _body(draw: object, depth: int = 0) -> object:
     """Return (html, {sentinel: excluded_kind})."""
     parts: list[str] = []
     excluded: dict[str, str] = {}
@@ -218,7 +218,7 @@ _doc = st.tuples(_body(), st.sampled_from([MAX_TEXT_DEFAULT, 40]))
 # ---------------------------------------------------------------------------
 
 
-async def _assert_invariants(page, body: str, excluded: dict, max_text: int):
+async def _assert_invariants(page: object, body: str, excluded: dict, max_text: int) -> None:
     await page.set_content(
         f"<!doctype html><html><head><title>T</title></head><body>{body}</body></html>"
     )
@@ -271,7 +271,8 @@ async def _assert_invariants(page, body: str, excluded: dict, max_text: int):
             assert n.get("ref") is None, ("group node has a ref", n.get("ref"))
     if refs:
         nd = v.node(refs[-1])
-        assert nd is not None and nd.get("ref") == refs[-1]
+        assert nd is not None
+        assert nd.get("ref") == refs[-1]
         for pruned in ("children", "group", "depth"):
             assert pruned not in nd, ("node() leaked tree-walk key", pruned)
     assert v.node(max(refs, default=0) + 1) is None  # out-of-range -> None
@@ -280,7 +281,8 @@ async def _assert_invariants(page, body: str, excluded: dict, max_text: int):
     for n in v.flat:
         for ax in ("x", "y", "w", "h"):
             assert isinstance(n.get(ax), int), ("geometry not int", ax, n.get(ax))
-        assert (n.get("w") or 0) >= 0 and (n.get("h") or 0) >= 0, ("negative size", n)
+        assert (n.get("w") or 0) >= 0, ("negative size", n)
+        assert (n.get("h") or 0) >= 0, ("negative size", n)
 
     # 5. Determinism: a second snapshot of the same static page matches .json.
     v2 = await browser.vdom(page, max_text=max_text)
@@ -316,16 +318,16 @@ async def _assert_invariants(page, body: str, excluded: dict, max_text: int):
     suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow],
 )
 @given(doc=_doc)
-def test_vdom_invariants(live, doc):
+def test_vdom_invariants(live: _Browser, doc: object) -> None:
     (body, excluded), max_text = doc
     live.run(_assert_invariants(live.page, body, excluded, max_text))
 
 
-def test_max_text_smaller_opt_is_honored(live):
+def test_max_text_smaller_opt_is_honored(live: _Browser) -> None:
     """A long accessible name is clamped to a smaller max_text when one is passed,
     independent of the random sweep (a direct check of the maxText knob)."""
 
-    async def _check():
+    async def _check() -> None:
         long = "WORD " * 60  # ~300 chars, far over any cap
         await live.page.set_content(
             f"<!doctype html><html><head><title>T</title></head>"

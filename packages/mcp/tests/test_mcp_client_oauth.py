@@ -38,6 +38,7 @@ sys.path.insert(0, str(SRC))
 
 import mcp_client
 from mcp_client import _oauth
+from typing import Any, NoReturn
 
 pytestmark = pytest.mark.asyncio
 
@@ -47,7 +48,7 @@ pytestmark = pytest.mark.asyncio
 # ---------------------------------------------------------------------------
 
 
-async def test_storage_roundtrip_and_permissions(tmp_path):
+async def test_storage_roundtrip_and_permissions(tmp_path: Path) -> None:
     from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
     base = tmp_path / "state" / "oauth"
@@ -55,19 +56,19 @@ async def test_storage_roundtrip_and_permissions(tmp_path):
     assert await store.get_tokens() is None
     assert await store.get_client_info() is None
 
-    tokens = OAuthToken(access_token="at-1", refresh_token="rt-1", expires_in=3600)
+    tokens = OAuthToken(access_token="at-1", refresh_token="rt-1", expires_in=3600)  # noqa: S106 -- test credential values, not real passwords
     await store.set_tokens(tokens)
     info = OAuthClientInformationFull(
         client_id="cid-1",
         redirect_uris=["http://127.0.0.1:50000/callback"],
-        token_endpoint_auth_method="none",
+        token_endpoint_auth_method="none",  # noqa: S106 -- test credential values, not real passwords
     )
     await store.set_client_info(info)
 
     got_tokens = await store.get_tokens()
     assert got_tokens is not None
-    assert got_tokens.access_token == "at-1"
-    assert got_tokens.refresh_token == "rt-1"
+    assert got_tokens.access_token == "at-1"  # noqa: S105 -- test credential value
+    assert got_tokens.refresh_token == "rt-1"  # noqa: S105 -- test credential value
     got_info = await store.get_client_info()
     assert got_info is not None
     assert got_info.client_id == "cid-1"
@@ -76,13 +77,13 @@ async def test_storage_roundtrip_and_permissions(tmp_path):
     assert stat.S_IMODE(store.path.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(store.path.stat().st_mode) == 0o600
     data = json.loads(store.path.read_text())
-    assert data["tokens"]["access_token"] == "at-1"
+    assert data["tokens"]["access_token"] == "at-1"  # noqa: S105 -- test credential value
     assert data["client_info"]["client_id"] == "cid-1"
     assert data["server_url"] == "https://example.com/mcp"
 
     # A fresh instance for the same server sees the same cache.
     again = _oauth.FileTokenStorage("https://example.com/mcp", base_dir=base)
-    assert (await again.get_tokens()).access_token == "at-1"
+    assert (await again.get_tokens()).access_token == "at-1"  # noqa: S105 -- test credential value
 
     # clear() forgets the grant.
     store.clear()
@@ -90,7 +91,7 @@ async def test_storage_roundtrip_and_permissions(tmp_path):
     store.clear()  # idempotent
 
 
-async def test_storage_corrupt_file_returns_none(tmp_path):
+async def test_storage_corrupt_file_returns_none(tmp_path: Path) -> None:
     store = _oauth.FileTokenStorage("https://example.com/mcp", base_dir=tmp_path)
     store.path.parent.mkdir(parents=True, exist_ok=True)
     store.path.write_text("{not json")
@@ -98,7 +99,7 @@ async def test_storage_corrupt_file_returns_none(tmp_path):
     assert await store.get_client_info() is None
 
 
-async def test_storage_key_canonicalization(tmp_path):
+async def test_storage_key_canonicalization(tmp_path: Path) -> None:
     same = [
         "https://Example.COM/mcp",
         "https://example.com/mcp/",
@@ -112,7 +113,7 @@ async def test_storage_key_canonicalization(tmp_path):
     assert name == sha256(b"https://example.com/mcp").hexdigest() + ".json"
 
 
-async def test_default_token_dir_honors_xdg(monkeypatch, tmp_path):
+async def test_default_token_dir_honors_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     assert _oauth.default_token_dir() == tmp_path / "ix-mcp" / "oauth"
     monkeypatch.delenv("XDG_STATE_HOME")
@@ -124,7 +125,7 @@ async def test_default_token_dir_honors_xdg(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-async def test_loopback_delivers_code_and_state_once():
+async def test_loopback_delivers_code_and_state_once() -> None:
     listener = _oauth._LoopbackListener()
     uri = await listener.start()
     try:
@@ -138,7 +139,8 @@ async def test_loopback_delivers_code_and_state_once():
             assert r.status_code == 200
             assert "close this tab" in r.text.lower()
             # Static page: query data is never reflected.
-            assert "abc" not in r.text and "xyz" not in r.text
+            assert "abc" not in r.text
+            assert "xyz" not in r.text
 
             # A duplicate hit before the result is consumed is rejected.
             r = await client.get(uri, params={"code": "evil", "state": "evil"})
@@ -156,7 +158,7 @@ async def test_loopback_delivers_code_and_state_once():
         await listener.close()
 
 
-async def test_loopback_error_redirect_raises():
+async def test_loopback_error_redirect_raises() -> None:
     listener = _oauth._LoopbackListener()
     uri = await listener.start()
     try:
@@ -171,7 +173,7 @@ async def test_loopback_error_redirect_raises():
         await listener.close()
 
 
-async def test_loopback_timeout():
+async def test_loopback_timeout() -> None:
     listener = _oauth._LoopbackListener()
     await listener.start()
     try:
@@ -181,7 +183,7 @@ async def test_loopback_timeout():
         await listener.close()
 
 
-async def test_loopback_falls_back_when_preferred_port_busy():
+async def test_loopback_falls_back_when_preferred_port_busy() -> None:
     url = "https://busy.example.com/mcp"
     preferred = _oauth._preferred_port(url)
     blocker = socket.socket()
@@ -197,7 +199,7 @@ async def test_loopback_falls_back_when_preferred_port_busy():
         blocker.close()
 
 
-async def test_preferred_port_is_stable_and_in_range():
+async def test_preferred_port_is_stable_and_in_range() -> None:
     a = _oauth._preferred_port("https://example.com/mcp")
     b = _oauth._preferred_port("https://example.com/mcp/")
     assert a == b
@@ -209,7 +211,7 @@ async def test_preferred_port_is_stable_and_in_range():
 # ---------------------------------------------------------------------------
 
 
-async def test_redirect_handler_headless_prints_url(monkeypatch, capsys):
+async def test_redirect_handler_headless_prints_url(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.setattr(_oauth.sys, "platform", "linux")
@@ -222,7 +224,7 @@ async def test_redirect_handler_headless_prints_url(monkeypatch, capsys):
     assert "OAuth" in err
 
 
-async def test_redirect_handler_opens_browser_with_display(monkeypatch, capsys):
+async def test_redirect_handler_opens_browser_with_display(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setenv("DISPLAY", ":0")
     calls = []
     monkeypatch.setattr(_oauth.webbrowser, "open", lambda u: calls.append(u) or True)
@@ -232,11 +234,11 @@ async def test_redirect_handler_opens_browser_with_display(monkeypatch, capsys):
 
 
 async def test_redirect_handler_falls_back_to_print_when_browser_fails(
-    monkeypatch, capsys
-):
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setenv("DISPLAY", ":0")
 
-    def boom(_u):
+    def boom(_u: str) -> NoReturn:
         raise RuntimeError("no browser")
 
     monkeypatch.setattr(_oauth.webbrowser, "open", boom)
@@ -281,10 +283,11 @@ class StubOAuthMCPServer:
     async def start(self) -> None:
         import uvicorn
         from mcp.server.fastmcp import FastMCP
+        from collections.abc import Awaitable, Callable
         from starlette.applications import Starlette
         from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.requests import Request
-        from starlette.responses import JSONResponse, RedirectResponse
+        from starlette.responses import JSONResponse, RedirectResponse, Response
         from starlette.routing import Mount, Route
 
         fast = FastMCP("stub", stateless_http=True, json_response=True)
@@ -297,7 +300,7 @@ class StubOAuthMCPServer:
         mcp_app = fast.streamable_http_app()
         stub = self
 
-        async def prm(request: Request):
+        async def prm(request: Request) -> Response:
             return JSONResponse(
                 {
                     "resource": stub.mcp_url,
@@ -305,7 +308,7 @@ class StubOAuthMCPServer:
                 }
             )
 
-        async def asm(request: Request):
+        async def asm(request: Request) -> Response:
             return JSONResponse(
                 {
                     "issuer": stub.base,
@@ -316,7 +319,7 @@ class StubOAuthMCPServer:
                 }
             )
 
-        async def register(request: Request):
+        async def register(request: Request) -> Response:
             body = await request.json()
             stub.registrations.append(body)
             return JSONResponse(
@@ -324,7 +327,7 @@ class StubOAuthMCPServer:
                 status_code=201,
             )
 
-        async def authorize(request: Request):
+        async def authorize(request: Request) -> Response:
             q = dict(request.query_params)
             stub.authorize_hits.append(q)
             redirect_uri = q["redirect_uri"]
@@ -338,7 +341,7 @@ class StubOAuthMCPServer:
                 f"{redirect_uri}?code={code}&state={q['state']}", status_code=302
             )
 
-        async def token(request: Request):
+        async def token(request: Request) -> Response:
             import base64
             from hashlib import sha256 as _sha256
 
@@ -383,7 +386,7 @@ class StubOAuthMCPServer:
             )
 
         class BearerGate(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
+            async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
                 if request.url.path.startswith("/mcp"):
                     auth = request.headers.get("authorization", "")
                     tok = auth.removeprefix("Bearer ").strip()
@@ -431,7 +434,7 @@ class StubOAuthMCPServer:
 
 
 @pytest_asyncio.fixture
-async def stub_server():
+async def stub_server() -> StubOAuthMCPServer:
     srv = StubOAuthMCPServer()
     await srv.start()
     try:
@@ -441,7 +444,7 @@ async def stub_server():
 
 
 @pytest.fixture
-def oauth_env(monkeypatch, tmp_path):
+def oauth_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
     """Isolate the token cache and replace the browser with a local GET."""
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     redirects: list[str] = []
@@ -449,7 +452,7 @@ def oauth_env(monkeypatch, tmp_path):
     async def fake_redirect(url: str) -> None:
         redirects.append(url)
 
-        def follow():
+        def follow() -> None:
             with httpx.Client(follow_redirects=True, timeout=10) as client:
                 client.get(url)
 
@@ -459,14 +462,15 @@ def oauth_env(monkeypatch, tmp_path):
     return redirects
 
 
-async def test_full_oauth_flow_then_cached_then_refresh(stub_server, oauth_env, tmp_path):
+async def test_full_oauth_flow_then_cached_then_refresh(stub_server: StubOAuthMCPServer, oauth_env: list[str], tmp_path: Path) -> None:
     url = stub_server.mcp_url
 
     # --- first connect: full interactive flow ---
     srv = await mcp_client.connect(url, timeout=10, oauth_timeout=20)
     try:
         assert len(oauth_env) == 1, "browser consent should run exactly once"
-        assert "code_challenge=" in oauth_env[0] and "state=" in oauth_env[0]
+        assert "code_challenge=" in oauth_env[0]
+        assert "state=" in oauth_env[0]
         assert srv.tools.height == 1
         out = await srv.call("ping", text="hi")
         assert out.text == "pong: hi"
@@ -500,7 +504,7 @@ async def test_full_oauth_flow_then_cached_then_refresh(stub_server, oauth_env, 
     import time
 
     cached = json.loads(path.read_text())
-    cached["tokens"]["access_token"] = "at-expired"
+    cached["tokens"]["access_token"] = "at-expired"  # noqa: S105 -- test credential value
     cached["expires_at"] = time.time() - 10
     path.write_text(json.dumps(cached))
     srv3 = await mcp_client.connect(url, timeout=10, oauth_timeout=20)
@@ -513,8 +517,8 @@ async def test_full_oauth_flow_then_cached_then_refresh(stub_server, oauth_env, 
         await srv3.close()
 
 
-async def test_static_token_bypasses_oauth(stub_server, oauth_env):
-    srv = await mcp_client.connect(stub_server.mcp_url, token="static-secret", timeout=10)
+async def test_static_token_bypasses_oauth(stub_server: StubOAuthMCPServer, oauth_env: list[str]) -> None:
+    srv = await mcp_client.connect(stub_server.mcp_url, token="static-secret", timeout=10)  # noqa: S106 -- test credential value
     try:
         assert oauth_env == []
         assert stub_server.registrations == []
@@ -526,14 +530,14 @@ async def test_static_token_bypasses_oauth(stub_server, oauth_env):
     assert not _oauth.token_path(stub_server.mcp_url).exists()
 
 
-async def test_oauth_false_disables_flow(stub_server, oauth_env):
-    with pytest.raises(Exception):
+async def test_oauth_false_disables_flow(stub_server: StubOAuthMCPServer, oauth_env: list[str]) -> None:
+    with pytest.raises(Exception, match=r"."):  # any exception proves oauth=False blocks the flow; no specific type is guaranteed
         await mcp_client.connect(stub_server.mcp_url, oauth=False, timeout=5)
     assert oauth_env == []
     assert stub_server.authorize_hits == []
 
 
-async def test_configured_client_id_skips_registration(stub_server, oauth_env):
+async def test_configured_client_id_skips_registration(stub_server: StubOAuthMCPServer, oauth_env: list[str]) -> None:
     srv = await mcp_client.connect(
         stub_server.mcp_url,
         client_id="preconfigured-id",

@@ -15,12 +15,13 @@ import copy
 import json
 import os
 import sys
+from pathlib import Path
 
 # Make imports work when running directly against the source tree.
 # In the nix env the modules are installed; when running locally we add src.
-_mcp = os.path.join(os.path.dirname(__file__), "..")
-_src_linear = os.path.join(_mcp, "src", "linear")
-_src_nox = os.path.join(_mcp, "src", "nox_autotriage")
+_mcp = Path(__file__).parent / ".."
+_src_linear = str(_mcp / "src" / "linear")
+_src_nox = str(_mcp / "src" / "nox_autotriage")
 for _p in (_src_linear, _src_nox):
     if _p not in sys.path:
         sys.path.insert(0, _p)
@@ -43,13 +44,13 @@ from nox_autotriage import findings_from_conformance, config_from_env, run
 # Shared fixtures
 # ---------------------------------------------------------------------------
 
-FIXTURE_PATH = os.path.join(os.path.dirname(__file__), "fixtures", "conformance_divergences.json")
+FIXTURE_PATH = Path(__file__).parent / "fixtures" / "conformance_divergences.json"
 
 
 @pytest.fixture
 def report() -> dict[str, Any]:
     """Full conformance report covering all outcome kinds."""
-    with open(FIXTURE_PATH) as fh:
+    with FIXTURE_PATH.open() as fh:
         return json.load(fh)
 
 
@@ -119,8 +120,8 @@ class FakeLinearPort:
         return comment
 
 
-def _run(coro):  # type: ignore[no-untyped-def]
-    return asyncio.run(coro)
+def _run(coro: object) -> object:
+    return asyncio.run(coro)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +297,7 @@ class TestRevStability:
 
 class TestRunDryRun:
     def test_dry_run_no_files_created(
-        self, report: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path
+        self, report: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """run(..., dry_run=True) returns the expected shape and files nothing."""
         import nox_autotriage as _mod
@@ -328,7 +329,7 @@ class TestRunDryRun:
         assert fake_port.commented == []
 
     def test_dry_run_filed_keys_match_findings(
-        self, report: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path
+        self, report: dict[str, Any], monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """dry_run filed keys match the keys of the mismatch+nox_error findings."""
         import nox_autotriage as _mod
