@@ -10,7 +10,9 @@ result-*
 
 # Build outputs
 .gradle/
-build/
+# Anchored to the repo root: ignores a real top-level build-output dir without
+# shadowing the tracked source dir lib/build/ (issue #1146).
+/build/
 target/
 target-*/
 buck-out/
