@@ -3282,9 +3282,9 @@ let
           && lib.hasInfix "services.minecraft.configFiles./absolute/bad.toml" msg
           && lib.hasInfix "services.minecraft.serverFiles.plugins/../bukkit.yml" msg
           && lib.hasInfix "services.minecraft.serverFiles.$(bad).json" msg
-          && lib.hasInfix "services.minecraft.datapacks.bad.fileName=(paths.root + " /bad ")" msg
+          && lib.hasInfix "services.minecraft.datapacks.bad.fileName=../bad" msg
           && lib.hasInfix "services.minecraft.datapacks.bad.files.data/../bad.json" msg
-          && lib.hasInfix "services.minecraft world directory (paths.root + " /bad-world ")" msg;
+          && lib.hasInfix "services.minecraft world directory ../bad-world" msg;
         message = "minecraft managed file options should reject unsafe relative paths at eval time";
       }
       {
