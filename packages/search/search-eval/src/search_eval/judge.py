@@ -17,11 +17,27 @@ at a time), not pairwise.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, cast
 
 import anthropic
+from pydantic import BaseModel
 
 from .model import BinaryVerdict, Hit, RelevanceGrade
+
+
+class _RelevanceOutput(BaseModel):
+    """Structured output from the judge's relevance tool call."""
+
+    reasoning: str
+    score: float
+    confidence: float
+
+
+class _CorrectnessOutput(BaseModel):
+    """Structured output from the judge's correctness tool call."""
+
+    reasoning: str
+    passed: bool
+
 
 # A capable mid-tier judge, the analog of the GPT-4.1 grader Exa reports.
 DEFAULT_JUDGE_MODEL = "claude-sonnet-4-6"
@@ -64,7 +80,7 @@ class Judge:
 
     def _call(
         self, system: str, user: str, schema: dict[str, object]
-    ) -> dict[str, Any]:
+    ) -> dict[str, object]:
         resp = self._client().messages.create(
             model=self.model,
             max_tokens=512,
@@ -86,19 +102,17 @@ class Judge:
         )
         for block in resp.content:
             if isinstance(block, anthropic.types.ToolUseBlock):
-                out = cast("dict[str, Any]", block.input)
-                missing = [key for key in schema if key not in out]
-                if missing:
-                    # A grade missing required fields is an error, not a default:
-                    # silently treating it as 0/false would hide a broken judge.
-                    raise RuntimeError(f"judge omitted required fields: {missing}")
-                return out
+                if not isinstance(block.input, dict):
+                    raise RuntimeError(
+                        f"judge tool input was not a dict: {type(block.input)}"
+                    )
+                return block.input
         raise RuntimeError("judge returned no tool call")
 
     def grade_relevance(self, query: str, hit: Hit) -> RelevanceGrade:
         """Pointwise relevance of one hit to the query (Tier A)."""
         user = f"QUERY:\n{query}\n\nRESULT (path: {hit.path}):\n{hit.text[:2000]}"
-        out = self._call(
+        raw = self._call(
             _RELEVANCE_RUBRIC,
             user,
             {
@@ -107,23 +121,25 @@ class Judge:
                 "confidence": {"type": "number", "minimum": 0, "maximum": 1},
             },
         )
+        out = _RelevanceOutput.model_validate(raw)
         return RelevanceGrade(
-            score=_clamp(float(out.get("score", 0.0))),
-            confidence=_clamp(float(out.get("confidence", 0.0))),
-            reasoning=str(out.get("reasoning", "")),
+            score=_clamp(out.score),
+            confidence=_clamp(out.confidence),
+            reasoning=out.reasoning,
         )
 
     def grade_correctness(self, question: str, gold: str, answer: str) -> BinaryVerdict:
         """Whether ``answer`` conveys the gold fact (Tier B)."""
         user = f"QUESTION:\n{question}\n\nGOLD ANSWER:\n{gold}\n\nCANDIDATE ANSWER:\n{answer}"
-        out = self._call(
+        raw = self._call(
             _CORRECTNESS_RUBRIC,
             user,
             {"reasoning": {"type": "string"}, "passed": {"type": "boolean"}},
         )
+        out = _CorrectnessOutput.model_validate(raw)
         return BinaryVerdict(
-            passed=bool(out.get("passed", False)),
-            reasoning=str(out.get("reasoning", "")),
+            passed=out.passed,
+            reasoning=out.reasoning,
         )
 
 
