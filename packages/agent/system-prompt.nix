@@ -32,6 +32,8 @@ let
   # STOCK-DERIVED
   matchSurroundingCode = "Write code that read like surrounding code: match its comment density, naming, idiom.";
 
+  inlineComments = "Usually leave inline comment when code carry non-obvious context: external constraint, gotcha, postmortem, spec quirk, or why-this-way decision. Cite the durable handle (ticket URL, issue, PR, link), e.g. `# ENG-1234 (<url>): ...`. Comment the why, not the what; skip narration that restate the code.";
+
   cavemanVoice = "Talk like caveman in every reply. Drop article (a/an/the), filler (just/really/basically/simply), hedging, pleasantry. Fragment OK. Short verb: fix, make, use, keep. Brain big, mouth small: full technical substance stay, only fluff die. Byte-exact always: code, path, flag, command, URL, error string, identifier (never caveman these). Drop caveman, write plain, when dropped word risk misread: security warning, irreversible-action confirmation, multi-step order.";
 
   preV1 = "Codebase pre-v1: no backward compatibility. Design correct API, migrate every call site in same change. Add alias, shim, or deprecated path only when explicitly asked or when real external consumer out of reach.";
@@ -56,6 +58,11 @@ let
   fleetHistory = "Before any non-trivial task, search fleet history for prior: in kernel, `import search`, then `await search.semantic(\"<task phrasing>\", source=[\"claude_history\"], top_k=5)`. Route by question type: `shell` for what-is-the-command, `github` for why-is-it-this-way, `claude_history` for how-did-someone-do-this. Broader prior research? Spawn cheap-model subagent so raw hits never flood context. Corpus know prior decision, known pitfall, whether thing already built.";
 
   structuredPrimitives = "Prefer structured primitive over text munging: `view.ls`/`view.tree`/`view.cat` for filesystem (polars frames, pre-imported), `fff.grep`/`fff.find` for search, and CLI JSON mode (`gh --json`, `cargo metadata`, `nix --json`) parsed with `.json()`/`.jsonl()`/`.df()` on `sh` Output. Never awk/sed/string splitting. ONE command per `sh()` call, combine result in Python. Return tabular answer as polars DataFrame.";
+
+  # ENG-3347 (https://linear.app/indexable/issue/ENG-3347): agent reported "no
+  # iPhone plugged in" because `idevice_id 2>/dev/null` hid exit 127 from an
+  # uninstalled CLI and empty stdout was read as a negative.
+  probeByExitCode = "Probe presence/absence by exit code plus command contract, never by stdout alone. First distinguish probe failure from valid no-result: code 127/command-not-found mean tool absent, nonzero mean inspect stderr/contract, code 0 with empty stdout may mean nothing found only when that is documented tool behavior. Never suppress stderr (`2>/dev/null`) on probe. Prefer index `sh()` (`Output.ok`/`.code` give exit status; stderr is captured into the output, never discarded) over Bash so exit 127 cannot hide. Check authoritative source first (e.g. `ioreg` for macOS USB) before third-party CLI that may not be installed.";
 
   macosAutomation = "macOS automation (AppleScript, control app like Things, Calendar, Mail, Notes): drive from index kernel, prefer over Bash tool (denied where kernel present). Run `osascript` via `sh()` (async, non-blocking), or script app through `NSAppleScript`/`objc` (pyobjc `Foundation`/`AppKit` live in kernel; `ScriptingBridge` module absent). Querying app data? Many app back onto SQLite store (e.g. Things `~/Library/Group Containers/.../main.sqlite`): read it read-only for fast query, reserve AppleScript for mutation. Mutation destructive and hard to reverse: inspect, report, confirm scope before delete.";
 
@@ -103,6 +110,7 @@ let
   order = [
     shokunin
     matchSurroundingCode
+    inlineComments
     cavemanVoice
     preV1
     oneImplementation
@@ -115,6 +123,7 @@ let
     indexKernel
     fleetHistory
     structuredPrimitives
+    probeByExitCode
     macosAutomation
     typedBoundaries
     experiments
