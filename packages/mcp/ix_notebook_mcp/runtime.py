@@ -790,13 +790,50 @@ class Resource:
 def register_resource(
     source: Any = None, *, title: str | None = None, render: Any = None, id: str | None = None, kind: str = "html", alive: Any = None
 ) -> Resource:
-    """Register a live HTML resource for the dashboard sidebar.
+    """Register a live HTML resource: a view the dashboard shows in its sidebar.
 
-    Pass a ``render`` callable returning the current HTML (sync or async), or a
-    ``source`` object the runtime renders by calling its ``resource_html()`` /
-    ``to_html()`` (whichever it has). ``alive`` is an optional predicate; when it
-    returns False the resource closes itself and leaves the sidebar. Returns the
-    :class:`Resource` handle (call ``.close()`` to remove it explicitly).
+    A resource is a *live* HTML pane (unlike ``cells``, which are static
+    snapshots): its ``render`` is re-invoked on refresh, so returning fresh HTML
+    updates the pane in place. Use it for a dashboard you want to keep glancing at
+    -- a status board, a queue, a metric -- rather than a one-shot result.
+
+    Arguments::
+
+        register_resource(render=lambda: html, title="queue", id="queue")  # callable
+        register_resource(obj)            # obj.resource_html() / obj.to_html()
+        register_resource(render=fn, alive=lambda: job.running)  # auto-closes
+
+    - ``render``: a callable (sync or async) returning the current HTML. Or pass a
+      ``source`` object with ``resource_html()`` / ``to_html()``.
+    - ``id``: give a STABLE id so re-registering REPLACES the same resource (a loop
+      updating one view), instead of spawning a new pane each call. Omitted -> a
+      random id, i.e. a new resource every time.
+    - ``alive``: optional predicate; when it returns False the resource closes
+      itself and leaves the sidebar. Else call ``.close()`` on the returned handle.
+
+    Viewing it as a native overlay window (macOS): besides the web dashboard, the
+    ``ix-windows`` consumer renders each live resource as its own floating, blurred,
+    auto-sizing overlay window. Run it alongside your session::
+
+        nix run .#ix-windows
+
+    Windows open/close/refresh automatically as resources appear, update, and
+    close. Move one by dragging its card chrome (the padding around the content);
+    it is not resizable (size follows the content).
+
+    Prefer SELF-CONTAINED HTML. The body is rendered inside a sandboxed,
+    opaque-origin ``<iframe>`` (``sandbox="allow-scripts"``, no
+    ``allow-same-origin``) in both the dashboard and the overlay, so same-origin
+    ``fetch``, cookies, and storage are unavailable. Absolute HTTPS scripts/styles
+    may still load (subject to the browser and the remote server / CORS), but they
+    are a live network dependency, not an isolated pane -- and an ES-module
+    ``import`` from a CDN was observed to fail under the opaque origin. For
+    reproducible, offline panes, pre-render anything needing a library and embed
+    the static output -- e.g. render a mermaid diagram to SVG server-side
+    (``kroki.io``, the ``mermaid`` CLI, ...) and put the static ``<svg>`` in the
+    HTML.
+
+    Returns the :class:`Resource` handle (call ``.close()`` to remove it).
     """
     if render is None:
         if source is None:
