@@ -86,6 +86,74 @@ def test_tap_is_coordinate_based() -> None:
     # tap moved from a (broken) WDA selector to W3C coordinate taps.
     params = list(inspect.signature(iphone.tap).parameters)
     assert params[:2] == ["x", "y"], params
+    # The coordinate space is opt-in and defaults to points (back-compat).
+    assert inspect.signature(iphone.tap).parameters["space"].default == "points"
+
+
+def test_to_points_identity_for_points() -> None:
+    # Points pass through unchanged (only rounded to ints).
+    assert iphone._to_points(10.4, 20.6, "points", 3.0, (402, 874)) == (10, 21)
+
+
+def test_to_points_pixels_divides_by_scale() -> None:
+    # A screenshot pixel (1206, 2622) on a scale-3 device is point (402, 874):
+    # exactly the bug we hit (pixels read as points landed 3× too far).
+    assert iphone._to_points(1206, 2622, "pixels", 3.0, (402, 874)) == (402, 874)
+
+
+def test_to_points_fraction_scales_to_size() -> None:
+    assert iphone._to_points(0.5, 0.5, "fraction", 3.0, (402, 874)) == (201, 437)
+    assert iphone._to_points(0.0, 1.0, "fraction", 3.0, (402, 874)) == (0, 874)
+
+
+def test_to_points_pixels_roundtrip_over_grid() -> None:
+    # center(points) -> pixels(×scale) -> back must recover the point, for a
+    # spread of real-looking coordinates and scales.
+    for scale in (2.0, 3.0):
+        for px in range(0, 402, 37):
+            for py in range(0, 874, 53):
+                bx, by = px * scale, py * scale
+                assert iphone._to_points(bx, by, "pixels", scale, (402, 874)) == (px, py)
+
+
+def test_to_points_fraction_out_of_range_raises() -> None:
+    with pytest.raises(iphone.IphoneError, match=r"0\.\.1"):
+        iphone._to_points(1.5, 0.5, "fraction", 3.0, (402, 874))
+
+
+def test_to_points_unknown_space_raises() -> None:
+    with pytest.raises(iphone.IphoneError, match="coordinate space"):
+        iphone._to_points(1, 2, "inches", 3.0, (402, 874))
+
+
+def test_wda_stop_clears_cached_scale(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The display scale is cached per device; wda_stop must drop it so a later
+    # wda_start against a different-scale device cannot reuse a stale value.
+    monkeypatch.setattr(iphone, "_wda_scale", 3.0)
+    monkeypatch.setattr(iphone, "_wda_session", "sid")
+    monkeypatch.setattr(iphone, "_wda_device", "udid")
+    asyncio.run(iphone.wda_stop())
+    assert iphone._wda_scale is None
+    assert iphone._wda_session is None
+    assert iphone._wda_device is None
+
+
+def test_ui_actions_require_wda(monkeypatch: pytest.MonkeyPatch) -> None:
+    # When WDA is down, UI actions must raise a one-line precondition error
+    # (naming wda_start) rather than failing deep in a urllib stack.
+    async def _down() -> bool:
+        return False
+
+    monkeypatch.setattr(iphone, "_wda_up", _down)
+    for call in (
+        iphone.tap(1, 2),
+        iphone.swipe(1, 2, 3, 4),
+        iphone.press("home"),
+        iphone.type_text("x"),
+        iphone.home(),
+    ):
+        with pytest.raises(iphone.IphoneError, match="wda_start"):
+            asyncio.run(call)
 
 
 def test_wda_down_raises_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
