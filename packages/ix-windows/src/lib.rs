@@ -58,6 +58,10 @@ pub enum UserEvent {
         width: f64,
         height: f64,
     },
+    /// The user pressed on the card chrome; begin an interactive move of the
+    /// window. A borderless, non-resizable window has no native title bar to
+    /// drag, so `OUTER_JS` starts the drag and the loop calls `drag_window`.
+    Drag { window: WindowId },
 }
 
 /// A pane's global identity across producers: `(producer id, pane id)`. A pane id
@@ -268,6 +272,19 @@ impl WindowManager {
         }
     }
 
+    /// Begin an interactive move of the window whose chrome the user pressed.
+    /// `OUTER_JS` posts `"drag"` on mousedown over the card chrome; `drag_window`
+    /// hands the rest of the gesture to the OS so the overlay tracks the cursor.
+    /// A failure (e.g. no active press) is non-fatal -- the click is just ignored.
+    pub fn begin_drag(&self, window: WindowId) {
+        let Some(key) = self.by_window.get(&window) else {
+            return;
+        };
+        if let Some(open) = self.windows.get(key) {
+            let _ = open.window.drag_window();
+        }
+    }
+
     /// Whether any resource windows are currently open.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -286,14 +303,20 @@ impl WindowManager {
         // Cascade each overlay so several do not perfectly overlap.
         let step = f64::from(self.opened % 8) * 32.0;
         self.opened = self.opened.wrapping_add(1);
-        // Borderless + transparent + always-on-top: a floating overlay card. The
-        // macOS window server only rounds *titled* windows, so dropping
-        // decorations leaves the corners to the blur view's own rounded layer.
+        // Borderless + transparent + always-on-top: a floating overlay card. Not
+        // user-resizable -- the window size is owned by the content (auto-fit via
+        // `resize`), so a manual resize would just fight the next content report.
+        // It stays movable: `OUTER_JS` starts a window drag on mousedown over the
+        // card chrome (`UserEvent::Drag` -> `drag_window`), since a borderless,
+        // non-resizable window has no native title bar to grab.
+        // `install_blur` rounds the corners (the macOS server only rounds *titled*
+        // windows, so a borderless window is square until its layer is rounded).
         let builder = tao::window::WindowBuilder::new()
             .with_title(&pane.title)
             .with_decorations(false)
             .with_transparent(true)
             .with_always_on_top(true)
+            .with_resizable(false)
             .with_inner_size(LogicalSize::new(INITIAL_SIZE.0, INITIAL_SIZE.1))
             .with_position(LogicalPosition::new(64.0 + step, 64.0 + step));
         let window = match builder.build(target) {
@@ -317,7 +340,10 @@ impl WindowManager {
         let webview = match WebViewBuilder::new()
             .with_transparent(true)
             .with_ipc_handler(move |request| {
-                if let Some((w, h)) = parse_size(request.body().as_str()) {
+                let body = request.body().as_str();
+                if body == "drag" {
+                    let _ = proxy.send_event(UserEvent::Drag { window: id });
+                } else if let Some((w, h)) = parse_size(body) {
                     let _ = proxy.send_event(UserEvent::Resize {
                         window: id,
                         width: w,
@@ -498,6 +524,14 @@ const OUTER_JS: &str = "\
   var frame = document.getElementById('ix-frame');
   var root = document.getElementById('ix-root');
   if (!frame || !root) return;
+  // Drag the borderless window by its chrome: a mousedown that reaches this
+  // (outer, trusted) document landed on the card padding/background, not inside
+  // the iframe (which captures its own events), so producer content stays
+  // interactive while the surrounding card is a move handle.
+  root.addEventListener('mousedown', function (event) {
+    if (event.button !== 0) return;
+    if (window.ipc && window.ipc.postMessage) window.ipc.postMessage('drag');
+  });
   window.addEventListener('message', function (event) {
     if (event.source !== frame.contentWindow) return;
     var data = event.data;
@@ -602,6 +636,15 @@ fn install_blur(window: &Window) {
         // Place the blur beneath the webview (added as the content view's first
         // subview), so the rendered HTML paints on top of it.
         content.addSubview_positioned_relativeTo(&effect, NSWindowOrderingMode::Below, None);
+
+        // Round the *content view* itself (not just the blur), so the webview on
+        // top is clipped to the same radius -- otherwise its square layer paints
+        // over the blur's rounded corners and the overlay looks square.
+        content.setWantsLayer(true);
+        if let Some(layer) = content.layer() {
+            layer.setCornerRadius(14.0);
+            layer.setMasksToBounds(true);
+        }
 
         ns_window.setHasShadow(true);
         ns_window.invalidateShadow();
