@@ -197,24 +197,94 @@ def parse_session(path: Path) -> Session | None:
     return session
 
 
-def project_key(session: Session, transcript_dir: str) -> str:
-    """Project identity: the real cwd when recorded, else the decoded dir name."""
-    if session.cwd:
-        return session.cwd
-    # `-home-andrew-index` -> `/home/andrew/index` (lossy but stable).
-    return "/" + transcript_dir.strip("-").replace("-", "/")
-
-
 def project_slug(project: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "-", project.strip("/")).strip("-")
     return slug or "unknown"
 
 
+# cwd values that are not a project checkout: temp scratch and the distiller's
+# own ``claude -p`` sandboxes (``/tmp/ix-distiller-*``), plus bare ``$HOME`` /
+# ``/root``. Keying lessons on these creates silos that help no future session.
+_SCRATCH_RE = re.compile(r"(^|/)(tmp|private/tmp|var/folders)(/|$)|ix-distiller-")
+_HOME_RE = re.compile(r"^/(home|Users)/[^/]+/?$|^/root/?$")
+# Generic container dirs that hold many repos: a cwd ending here names no single
+# repo, so it is not a partition of its own.
+_CONTAINER_DIRS = frozenset(
+    {
+        "github", "projects", "src", "code", "repos", "repositories",
+        "dev", "git", "work", "documents", "desktop", "downloads",
+    }
+)
+
+
+def _resolve_path(cwd: str | None, transcript_dir: str) -> str:
+    """The session's working dir: the recorded cwd, else the decoded dir name."""
+    if cwd:
+        return cwd
+    # `-home-andrew-index` -> `/home/andrew/index` (lossy but stable).
+    return "/" + transcript_dir.strip("-").replace("-", "/")
+
+
+def repo_identity(cwd: str | None, transcript_dir: str) -> str | None:
+    """Canonical repo slug for a session, or ``None`` for non-repo cwds.
+
+    The memory partition key must be repo identity, not the raw cwd: two clones
+    of one repo (``~/Github/nox`` and ``~/nox``) must collapse to one silo, and
+    scratch dirs and bare ``$HOME`` must not become silos at all. Transcripts
+    carry no git remote (only ``cwd`` and ``gitBranch``), so this is a path
+    heuristic: drop a worktree suffix, reject scratch/home/container dirs, then
+    take the project-root basename. It cannot collapse two clones whose
+    basenames differ, but it fixes the common clone and worktree cases.
+    """
+    path = _resolve_path(cwd, transcript_dir).rstrip("/")
+    if not path or _SCRATCH_RE.search(path) or _HOME_RE.match(path):
+        return None
+    # A git worktree lives at ``<repo>/.claude/worktrees/<name>``; the repo root
+    # is the segment before ``.claude``, not the worktree name.
+    marker = "/.claude/"
+    if marker in path:
+        path = path[: path.index(marker)]
+    name = path.rsplit("/", 1)[-1]
+    if name.startswith(".") or name.lower() in _CONTAINER_DIRS:
+        return None
+    slug = project_slug(name)
+    return slug if slug != "unknown" else None
+
+
+def legacy_state_slugs(sessions: list[Session]) -> list[str]:
+    """Old per-cwd state filenames the given sessions wrote before repo-keying.
+
+    Before this change the state file was keyed on the raw cwd slug
+    (``/home/u/repo`` -> ``home-u-repo.json``); now it is keyed on the repo
+    identity (``repo.json``). On the first run after the switch the new path is
+    absent, so ``state.load`` would silently start fresh and the rewritten
+    corpus would drop every previously learned item. Returning the legacy
+    slug(s) for a repo's sessions lets ``load`` migrate the old file forward
+    (newest cwd first, so the most recent silo wins on collision).
+
+    The old key used ``_resolve_path`` -- the recorded ``cwd`` when present, else
+    the decoded transcript-dir name -- so a session that never recorded a ``cwd``
+    still wrote a legacy file under that decoded path. Use the same fallback here
+    so those transcripts migrate too instead of starting from empty state.
+    """
+    seen: set[str] = set()
+    slugs: list[str] = []
+    for session in sorted(sessions, key=lambda s: s.last_ts or 0, reverse=True):
+        raw = _resolve_path(session.cwd, Path(session.path).parent.name)
+        slug = project_slug(raw)
+        if slug == "unknown" or slug in seen:
+            continue
+        seen.add(slug)
+        slugs.append(slug)
+    return slugs
+
+
 def scan(root: Path, days: float, now: float | None = None) -> dict[str, list[Session]]:
     """Parse every transcript under ``root`` newer than the window.
 
-    Returns sessions grouped by project key, newest first. The mtime gate
-    avoids parsing the long tail of old transcripts; the message-timestamp
+    Returns sessions grouped by repo slug, newest first. Sessions whose cwd is
+    not a repo checkout (scratch dirs, bare ``$HOME``) are dropped. The mtime
+    gate avoids parsing the long tail of old transcripts; the message-timestamp
     gate then trims sessions whose activity falls outside the window.
     """
 
@@ -236,8 +306,10 @@ def scan(root: Path, days: float, now: float | None = None) -> dict[str, list[Se
             continue
         if session.last_ts is not None and session.last_ts < cutoff:
             continue
-        key = project_key(session, path.parent.name)
-        groups.setdefault(key, []).append(session)
+        repo = repo_identity(session.cwd, path.parent.name)
+        if repo is None:
+            continue  # scratch / home / container dir -> not a repo silo
+        groups.setdefault(repo, []).append(session)
     for sessions in groups.values():
         sessions.sort(key=lambda s: s.last_ts or 0, reverse=True)
     return groups

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from . import corpus, distill, markdown, state, transcripts
-from .types import Item, SessionRecord, State
+from .types import Item, Row, SessionRecord, State
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,10 +45,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-new-items", type=int, default=8, help="cap of new items per project per run"
     )
     parser.add_argument(
+        "--max-delete", type=int, default=3, help="cap of items deleted per project per run"
+    )
+    parser.add_argument(
+        "--max-item-age-days",
+        type=float,
+        default=90.0,
+        help="retire items not re-evidenced within this many days (default 90)",
+    )
+    parser.add_argument(
         "--project",
         action="append",
         default=None,
-        help="only distill projects whose path contains this substring (repeatable)",
+        help="only distill repos whose slug contains this substring, e.g. 'nox' (repeatable)",
     )
     parser.add_argument(
         "--min-sessions", type=int, default=1, help="skip projects with fewer new sessions"
@@ -97,8 +106,12 @@ def run(args: argparse.Namespace) -> int:
             all_outcomes_by_project[project] = st.session_outcomes
 
     for project, sessions in sorted(groups.items()):
-        slug = transcripts.project_slug(project)
-        st = state.load(args.out, args.user, slug)
+        slug = project  # scan() already keys groups by the canonical repo slug
+        # Migrate any pre-repo-keying state (keyed on the raw cwd slug) on the
+        # first run after the switch, so previously learned items survive.
+        st = state.load(
+            args.out, args.user, slug, legacy_slugs=transcripts.legacy_state_slugs(sessions)
+        )
         st.project = project
         seen = st.distilled_sessions
         fresh = [
@@ -128,8 +141,13 @@ def run(args: argparse.Namespace) -> int:
             s.session_id: SessionRecord(last_ts=s.last_ts) for s in fresh
         }
         st.items = distill.apply_operations(
-            st.items, result.operations, sessions_meta, max_new=args.max_new_items
+            st.items,
+            result.operations,
+            sessions_meta,
+            max_new=args.max_new_items,
+            max_delete=args.max_delete,
         )
+        st.items = distill.retire_stale(st.items, max_age_days=args.max_item_age_days)
         verdicts = distill.session_verdicts(result.session_outcomes, fresh)
         for s in fresh:
             verdict = verdicts[s.session_id]
@@ -157,20 +175,28 @@ def run(args: argparse.Namespace) -> int:
             print(f"[{slug}] model found nothing worth keeping")
         keep_state(project, st)
 
-    item_rows = [
-        corpus.item_row(
-            item,
-            project,
-            args.host,
-            args.user,
-            session_labels={
-                sid: rec.label
-                for sid, rec in all_outcomes_by_project.get(project, {}).items()
-            },
-        )
-        for project, items in sorted(all_items_by_project.items())
-        for item in items
-    ]
+    # Per-repo rows plus a cross-repo tier: every ``scope=shared`` item is also
+    # emitted under the synthetic ``__global__`` project so it surfaces in any
+    # repo. The global copy has a distinct external_id (project differs), so both
+    # coexist; the digest/pull can target tier=repo, tier=global, or both.
+    item_rows: list[Row] = []
+    global_rows: list[Row] = []
+    for project, items in sorted(all_items_by_project.items()):
+        label_map = {
+            sid: rec.label
+            for sid, rec in all_outcomes_by_project.get(project, {}).items()
+        }
+        for item in items:
+            item_rows.append(
+                corpus.item_row(item, project, args.host, args.user, session_labels=label_map)
+            )
+            if item.scope == "shared":
+                global_rows.append(
+                    corpus.item_row(
+                        item, corpus.GLOBAL_PROJECT, args.host, args.user, session_labels=label_map
+                    )
+                )
+    item_rows.extend(global_rows)
     session_rows = [
         corpus.session_row(sid, rec, project, args.host, args.user)
         for project, recs in sorted(all_outcomes_by_project.items())

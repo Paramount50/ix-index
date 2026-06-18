@@ -34,6 +34,10 @@ SOURCE = "distilled_facts"
 # Per-session outcome verdicts (ENG-2710) ride a sibling slice with the same
 # contract; the leader fold ingests any (host, user, source) slice generically.
 SESSIONS_SOURCE = "session_outcomes"
+# Synthetic project for the cross-repo tier: ``scope=shared`` lessons are emitted
+# a second time under this project so they surface regardless of the agent's repo
+# (a pipe-deadlock guardrail learned in one repo should reach every repo).
+GLOBAL_PROJECT = "__global__"
 MAX_METADATA_BYTES = 128 * 1024
 MAX_METADATA_KEYS = 256
 
@@ -117,7 +121,6 @@ def item_row(
     body = item_body(item, project, session_labels=labels)
     content_hash = hash_body(body.encode())
     timestamp = int(item.last_updated or 0) or None
-    scope = item.scope
     meta: dict[str, object] = {
         "source": SOURCE,
         "external_id": external_id,
@@ -126,7 +129,13 @@ def item_row(
         "host": host,
         "user": user,
         "project": project,
-        "scope": f"user:{user}" if scope == "user" else "shared",
+        # ``project`` is now the canonical repo slug (see transcripts.repo_identity);
+        # expose it under ``repo`` too so cross-repo queries filter unambiguously.
+        "repo": project,
+        # ``global`` rows are the cross-repo copies of shared lessons; ``repo``
+        # rows are scoped to one repo. Lets a query target one tier or both.
+        "tier": "global" if project == GLOBAL_PROJECT else "repo",
+        "scope": f"user:{user}" if item.scope == "user" else "shared",
         "outcome": item.outcome,
         "session_ids": ",".join(item.sessions[:16]),
         "item_id": item.id,
@@ -207,6 +216,7 @@ def session_row(session_id: str, rec: SessionRecord, project: str, host: str, us
         "host": host,
         "user": user,
         "project": project,
+        "repo": project,
         "session_id": session_id,
         "label": label,
         "reason": rec.reason or "",
