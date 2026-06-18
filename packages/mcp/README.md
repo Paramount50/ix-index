@@ -14,7 +14,7 @@ nix run .#mcp -- serve                       # MCP over stdio (what an MCP clien
 nix run .#mcp -- serve --http :8000          # MCP over streamable HTTP instead
 nix run .#mcp -- serve --session work.ixnb   # same, recorded in a reopenable session file
 nix run .#mcp -- notebook work.ixnb          # the engine alone: kernel + dashboard, no MCP
-nix run .#mcp -- dashboard                   # open the running server's dashboard URL
+nix run .#mcp -- dashboard                   # print/open this server's data-API URL (human UI: nix run .#dashboard)
 nix run .#mcp -- eval '1 + 2'                # one-shot expression on a throwaway kernel
 ```
 
@@ -110,11 +110,10 @@ set `IX_MCP_AUTO_DASHBOARD=1` to restore the old per-server auto-spawn.
   program-counter highlight while a job runs, and the failing line highlighted in
   red with the exception headline when it errors.
 - `store.py` is the append-only execution log (one SQLite file in WAL mode).
-- `dashboard.py` serves a one-page live view of that log. The first tool call
-  of a session pops that page in the local browser (via Python's
-  platform-independent `webbrowser`, a no-op on headless machines), so the
-  human is watching the moment work begins; an embedder with no human at
-  this machine's display disables it with `IX_MCP_NO_BROWSER=1`.
+- `dashboard.py` serves a one-page live view of that log. The server never
+  auto-pops a browser on a tool call; view it by running the standalone
+  aggregator (`nix run .#dashboard`, see above), or set `IX_MCP_AUTO_DASHBOARD=1`
+  to restore the per-server auto-spawn.
 - `outputs.py` renders kernel messages for the agent (text, images).
 - `tools.py` is the MCP surface: the general `python_exec`, plus `read` (pull a
   file or kernel value into the model's context while the dashboard stays quiet)
