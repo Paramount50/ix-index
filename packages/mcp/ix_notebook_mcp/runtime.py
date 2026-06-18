@@ -2160,6 +2160,13 @@ _snapshot_dirty = False
 _snapshot_busy = False
 _snapshot_last = 0.0
 _baseline_names: frozenset[str] = frozenset()
+# The bundled modules bound behind a lazy proxy (see _LazyModule). Seeded into
+# every per-session namespace (so `maps.nearby(...)` works with no import there
+# too) but deliberately kept OUT of `_baseline_names`, so a user variable that
+# shadows one of these names (e.g. a temp `x`) is still real user state for the
+# checkpoint and the namespace pane -- an untouched proxy is dropped by TYPE, not
+# by name (see _snapshot_candidates / _namespace_candidates).
+_lazy_module_names: frozenset[str] = frozenset()
 # True while __ix_restore is replaying. The debounced checkpoint must not fire
 # then: replayed cells' source rows carry ended_at from the PREVIOUS run, so a
 # mid-restore checkpoint would advance the anchor past the cells not yet
@@ -2250,6 +2257,7 @@ def _snapshot_candidates(ns: dict) -> dict:
         and not name.startswith("__")
         and not _IPYTHON_MACHINERY.fullmatch(name)
         and not isinstance(value, types.ModuleType)
+        and not isinstance(value, _LazyModule)  # untouched lazy proxy: not user state
     }
 
 
@@ -2264,6 +2272,7 @@ def _namespace_candidates(ns: dict) -> dict:
         if name not in _baseline_names
         and not name.startswith("__")
         and not _IPYTHON_MACHINERY.fullmatch(name)
+        and not isinstance(value, _LazyModule)  # untouched lazy proxy: not user state
     }
 
 
@@ -2463,6 +2472,13 @@ def _session_ns(session: str | None) -> dict:
         # namespace, so the session still sees Result and friends.
         names = _baseline_names or frozenset(shared)
         ns = {name: shared[name] for name in names if name in shared}
+        # Give the session its OWN fresh lazy proxies, so `maps.nearby(...)` works
+        # with no import here too -- but never copy `shared[name]` for a lazy name:
+        # a no-session cell (or a restored checkpoint) may have rebound that name to
+        # user state (e.g. `x = 5`), and copying it would leak one context's value
+        # into every fresh session. A fresh proxy is stateless and correct.
+        for name in _lazy_module_names:
+            ns[name] = _LazyModule(name)
         _session_namespaces[session] = ns
     return ns
 
@@ -2800,6 +2816,43 @@ def _install_signal_handlers() -> None:
         signal.signal(signal.SIGUSR2, _break)
 
 
+class _LazyModule:
+    """A stand-in bound into the kernel namespace so a bundled module is usable
+    with no ``import`` -- without paying its import cost until it is actually
+    touched. The first *public* attribute access imports the real module (cached by
+    ``sys.modules``, so repeat access is ~free) and delegates. An untouched module
+    therefore costs nothing at startup -- which matters for the framework-heavy
+    macOS modules (``maps`` alone pulls in MapKit + CoreLocation, ~120ms) -- and a
+    platform-absent one (a macOS-only module on Linux) raises an ordinary
+    ``ImportError`` only when first used, exactly as an explicit ``import`` would.
+    An explicit ``import maps`` still imports the same module and rebinds the name
+    to the real module object, so both styles agree.
+
+    Access to a dunder / underscore-prefixed name does NOT import: those are
+    introspection probes (pickle's ``__reduce_ex__``, IPython's ``_repr_html_``,
+    ``hasattr`` checks in the namespace/snapshot machinery), and importing a
+    macOS-only module on Linux just to answer one would raise spuriously. The
+    public module API a caller actually wants (``maps.nearby``, ``slack.channels``)
+    is always a non-underscore name, so this never blocks real use.
+    """
+
+    __slots__ = ("_ix_name",)
+
+    def __init__(self, name: str) -> None:
+        self._ix_name = name
+
+    def __getattr__(self, attr: str) -> Any:
+        # __getattr__ only fires for names absent on the class/slot, so the
+        # `_ix_name` slot resolves normally and never recurses here. Refuse to
+        # import for private/introspection names (see class docstring).
+        if attr.startswith("_"):
+            raise AttributeError(attr)
+        return getattr(__import__(self._ix_name), attr)
+
+    def __repr__(self) -> str:
+        return f"<bundled module {self._ix_name!r} (lazy: imports on first use)>"
+
+
 def install(user_ns: dict | None = None) -> None:
     """Wire the runtime into the kernel: tee stdout/err, open the store, start the
     flusher, install the rescue/trace signal handlers, and expose the registry +
@@ -2890,8 +2943,21 @@ def install(user_ns: dict | None = None) -> None:
     # Everything in the namespace up to here is the runtime's own surface plus
     # the kernel preamble -- not user state. Session checkpoints cover only the
     # names bound after this line (see _snapshot_candidates).
-    global _baseline_names
+    global _baseline_names, _lazy_module_names
     _baseline_names = frozenset(target)
+    # Bind every other bundled module behind a lazy proxy, so `await maps.nearby(...)`
+    # works with no `import maps` just like fff/view -- but deferring the import to
+    # first use, so framework-heavy modules (maps pulls in MapKit + CoreLocation,
+    # ~120ms) and platform-absent ones cost nothing at startup. Bound AFTER the
+    # baseline snapshot on purpose: these names must NOT count as runtime surface,
+    # so a user variable that shadows one (a temp `x`, say) stays real user state
+    # for the checkpoint / namespace pane; an untouched proxy is excluded by type
+    # instead (see _snapshot_candidates / _namespace_candidates). _session_ns seeds
+    # them explicitly so per-session namespaces get them too.
+    _lazy_names = [m for m in registry.module_names() if m not in target]
+    _lazy_module_names = frozenset(_lazy_names)
+    for _mod_name in _lazy_names:
+        target[_mod_name] = _LazyModule(_mod_name)
     # A fresh session starts with no recorded references (the namespace is empty of
     # user names; refs accumulate as runs touch them).
     _name_refs.clear()
