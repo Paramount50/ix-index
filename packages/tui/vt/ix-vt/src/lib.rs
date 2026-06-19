@@ -14,8 +14,9 @@
 //! [`uzaaft/libghostty-rs`]: https://github.com/uzaaft/libghostty-rs
 //! [`resize`]: Terminal::resize
 
-use std::ffi::c_void;
+use std::ffi::{CStr, c_void};
 use std::fmt;
+use std::os::raw::c_char;
 use std::ptr;
 
 use ix_vt_sys as sys;
@@ -684,5 +685,167 @@ fn read_resolved_color(
         sys::GhosttyResult::GHOSTTY_SUCCESS => Ok(Some(unsafe { out.assume_init() }.into())),
         sys::GhosttyResult::GHOSTTY_INVALID_VALUE => Ok(None),
         other => Err(check(other).unwrap_err()),
+    }
+}
+
+/// `ESC` (0x1b), the introducer of every escape sequence.
+const ESC: u8 = 0x1b;
+/// `BEL` (0x07), one of the two OSC terminators.
+const BEL: u8 = 0x07;
+/// `]` (0x5d): the byte after `ESC` that opens an OSC sequence.
+const OSC_INTRODUCER: u8 = b']';
+/// `\` (0x5c): the byte after `ESC` that forms a String Terminator (ST).
+const ST_FINAL: u8 = b'\\';
+/// `CAN` (0x18) and `SUB` (0x1a): per ECMA-48 either one aborts an in-progress
+/// control string, so they cancel a partial OSC rather than landing in its text.
+const CAN: u8 = 0x18;
+const SUB: u8 = 0x1a;
+
+/// Where the framing scanner is within an `ESC ] … (BEL | ESC | CAN | SUB)` OSC
+/// sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FrameState {
+    /// Outside any escape sequence.
+    Ground,
+    /// Saw `ESC`; a following `]` opens an OSC (and a following `\` after an OSC
+    /// is the tail of a String Terminator, which lands back in `Ground`).
+    Escape,
+    /// Inside an OSC payload, forwarding bytes to the parser.
+    Osc,
+}
+
+/// Tracks the most recent OSC window title in a raw terminal byte stream.
+///
+/// libghostty-vt's [`Terminal`] does not expose the window title an application
+/// sets via OSC 0/2 (there is no such `ghostty_terminal_get` key), so a consumer
+/// that needs it (e.g. a multiplexer labeling a session by its live title) feeds
+/// the same byte stream here. This wraps ghostty's streaming OSC parser behind a
+/// small `ESC ]` … `BEL`/`ST` framing scanner, so a title sequence split across
+/// reads is still captured. Using ghostty's parser (not a hand-rolled scan) is
+/// what makes the OSC 0 vs 1 vs 2 title/icon classification correct.
+///
+/// The captured [`title`](Self::title) is owned, so it stays valid after the
+/// next [`feed`](Self::feed). Like [`Terminal`], the underlying parser has
+/// thread affinity (the raw pointer keeps it `!Send`); keep the tracker on one
+/// thread and do not add an `unsafe impl Send`.
+///
+/// Framing covers the 7-bit OSC forms terminal programs actually emit (`ESC ]`
+/// opener, `BEL` or `ESC \` terminator, `CAN`/`SUB` abort); the 8-bit C1 forms
+/// (`0x9d` opener, `0x9c` ST) are not recognized.
+pub struct OscTitleTracker {
+    parser: sys::GhosttyOscParser_ptr,
+    frame: FrameState,
+    title: Option<String>,
+}
+
+impl OscTitleTracker {
+    /// Create an empty tracker.
+    ///
+    /// # Errors
+    /// Returns [`Error::OutOfMemory`] if ghostty cannot allocate the parser.
+    pub fn new() -> Result<Self> {
+        let mut parser: sys::GhosttyOscParser_ptr = ptr::null_mut();
+        check(unsafe { sys::ghostty_osc_new(ptr::null(), &raw mut parser) })?;
+        Ok(Self {
+            parser,
+            frame: FrameState::Ground,
+            title: None,
+        })
+    }
+
+    /// The most recent window title seen, if any.
+    #[must_use]
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    /// Feed a chunk of raw terminal output, updating [`title`](Self::title) when
+    /// a complete OSC title sequence is seen. Byte boundaries are arbitrary: the
+    /// framing state persists across calls, so a sequence split mid-stream is
+    /// still parsed.
+    pub fn feed(&mut self, data: &[u8]) {
+        for &byte in data {
+            self.frame = self.step(self.frame, byte);
+        }
+    }
+
+    /// Advance the framing scanner one byte from `state`, returning the next
+    /// state and driving the OSC parser for payload bytes / terminators.
+    fn step(&mut self, state: FrameState, byte: u8) -> FrameState {
+        match state {
+            FrameState::Ground if byte == ESC => FrameState::Escape,
+            FrameState::Ground => FrameState::Ground,
+            FrameState::Escape => match byte {
+                OSC_INTRODUCER => {
+                    // Reset on open so a previous OSC abandoned without a
+                    // terminator (e.g. an `ESC [` arrived mid-payload) cannot
+                    // bleed into this one.
+                    unsafe { sys::ghostty_osc_reset(self.parser) };
+                    FrameState::Osc
+                }
+                // Consecutive ESC: still waiting on the introducer.
+                ESC => FrameState::Escape,
+                _ => FrameState::Ground,
+            },
+            FrameState::Osc => match byte {
+                BEL => {
+                    self.finish(BEL);
+                    FrameState::Ground
+                }
+                // CAN/SUB abort the control string: drop the partial OSC.
+                CAN | SUB => {
+                    unsafe { sys::ghostty_osc_reset(self.parser) };
+                    FrameState::Ground
+                }
+                // ESC always ends the OSC string: a following `\` makes it a
+                // clean ST, but any other escape sequence still terminates and
+                // dispatches the OSC (ghostty does the same). So finish here and
+                // re-enter Escape; a following `\` then harmlessly falls back to
+                // Ground, and a `[`, `]`, … starts its own sequence.
+                ESC => {
+                    self.finish(ST_FINAL);
+                    FrameState::Escape
+                }
+                _ => {
+                    unsafe { sys::ghostty_osc_next(self.parser, byte) };
+                    FrameState::Osc
+                }
+            },
+        }
+    }
+
+    /// Terminate the current OSC and, if it set the window title, capture it.
+    fn finish(&mut self, terminator: u8) {
+        let command = unsafe { sys::ghostty_osc_end(self.parser, terminator) };
+        // Ask only for the title string rather than reading the command *type*:
+        // `ghostty_osc_command_data` returns false for any command that is not a
+        // window-title change, which both classifies the command and avoids
+        // materializing the `GhosttyOscCommandType` enum from the FFI return
+        // (ghostty could in principle return a tag outside the checked-in enum,
+        // which would be UB to form as a Rust enum).
+        let mut text: *const c_char = ptr::null();
+        let ok = unsafe {
+            sys::ghostty_osc_command_data(
+                command,
+                sys::GhosttyOscCommandData::GHOSTTY_OSC_DATA_CHANGE_WINDOW_TITLE_STR,
+                (&raw mut text).cast::<c_void>(),
+            )
+        };
+        // The string is owned by the parser and only valid until the next
+        // `ghostty_osc_*` call (including the reset below), so copy it now. Skip
+        // a title that is not valid UTF-8 (ghostty's stream path ignores those
+        // too) rather than substituting replacement characters.
+        if ok && !text.is_null()
+            && let Ok(title) = unsafe { CStr::from_ptr(text) }.to_str()
+        {
+            self.title = Some(title.to_owned());
+        }
+        unsafe { sys::ghostty_osc_reset(self.parser) };
+    }
+}
+
+impl Drop for OscTitleTracker {
+    fn drop(&mut self) {
+        unsafe { sys::ghostty_osc_free(self.parser) };
     }
 }
