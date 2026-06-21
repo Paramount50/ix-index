@@ -17,6 +17,11 @@
     "/home/*/ix"
   ],
 
+  # Andrew-only local startup context: cached notes and ~/Projects inventory.
+  # Disabled for the shared wrapper because those hooks print workstation-local
+  # context that is not meaningful for other users.
+  personalStartupContext ? false,
+
   # Sibling repo packages from the flake package set (threaded by
   # lib/packages.nix), used to locate the `ix-mcp` entrypoint for the baked
   # `index` MCP server. `{ }` in the overlay package set, where the `mcp`
@@ -90,18 +95,9 @@ let
     soft = entriesOf (ix.attrs.flattenToDotted settings) ++ ix.mcp.toCodexEntries mcpStdioServers;
   };
 
-  # Codex hooks come from the SAME declaration list as Claude's
-  # (../hooks.nix), rendered to codex's field-aligned hook schema. Codex does
-  # NOT discover hooks via a `-c` pointer; it reads `~/.codex/hooks.json` /
-  # inline `[hooks]` / plugin manifests, and a non-managed command hook is
-  # skipped until reviewed/trusted (its hash is recorded). So this wrapper does
-  # not bake the hooks into the launch spec — it EXPOSES the rendered file as
-  # `passthru.hooksJson`, which a consumer delivers to `~/.codex/hooks.json`
-  # (home-manager) and trusts once via `/hooks` (or installs as a managed
-  # `requirements.toml` layer). The hook commands are absolute store paths into
-  # the compiled `claude-hooks` binary, the same binary the claude-code wrapper
-  # builds (cached, one derivation).
-  claudeHooks = import (ix.paths.packagesRoot + "/agent/claude-code/hooks.nix") {
+  # Codex reads hooks from config, not from launch flags, so expose the rendered
+  # shared hook policy for home-manager or managed requirements consumers.
+  hookRunner = import (ix.paths.packagesRoot + "/agent/claude-code/hooks.nix") {
     inherit
       lib
       runCommand
@@ -114,14 +110,19 @@ let
   };
   hooksJson = (formats.json { }).generate "codex-hooks.json" {
     hooks =
-      (import (ix.paths.packagesRoot + "/agent/hooks.nix") {
+      (import (ix.paths.packagesRoot + "/agent/policy/hooks.nix") {
         inherit
           lib
-          claudeHooks
+          hookRunner
           primaryCheckouts
-          repoPackages
+          personalStartupContext
           ;
       }).codex;
+  };
+
+  # Codex does not use Claude's `permissions.deny` JSON shape.
+  sharedPermissions = import (ix.paths.packagesRoot + "/agent/policy/permissions.nix") {
+    inherit lib;
   };
 in
 # These baked defaults also reach the Codex GUI app's remote-SSH sessions, not
@@ -149,7 +150,10 @@ symlinkJoin {
   '';
   # The codex hooks.json rendered from the shared declaration list, for a
   # consumer to deliver to `~/.codex/hooks.json` (see the `hooksJson` comment).
-  passthru = { inherit hooksJson; };
+  passthru = {
+    inherit hooksJson;
+    permissions = sharedPermissions.codex;
+  };
   meta = codex.meta // {
     description = "${codex.meta.description or "OpenAI Codex CLI"} (index wrapper with baked defaults)";
     mainProgram = binName;
