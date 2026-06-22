@@ -1,5 +1,5 @@
 {
-  description = "ix example: nixos-switch";
+  description = "ix example: dev-fleet";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -10,9 +10,12 @@
   };
 
   outputs =
-    { index, ... }:
+    { self, index, ... }:
     let
-      fleet = import ./ix.nix { inherit index; };
+      fleet = import ./ix.nix {
+        inherit index;
+        src = self;
+      };
     in
     {
       ix.fleets.default = fleet;
