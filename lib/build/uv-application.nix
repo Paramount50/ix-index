@@ -245,6 +245,17 @@ pkgs.stdenvNoCC.mkDerivation (_: {
       --python "$out/venv/bin/python" \
       dist/*.whl
 
+    # uv writes a `uv_cache.json` build-provenance stamp into every installed
+    # package's dist-info, carrying a wall-clock timestamp. That makes the venv
+    # non-reproducible (each stamp differs per build, and its hash flips its
+    # dist-info RECORD line), which trips "hash mismatch importing path" on a
+    # cache that holds a different variant. They are build-cache metadata with
+    # no runtime role, so drop them and their RECORD entries for a bit-identical
+    # install. Done in Python (removing a RECORD line keys on the exact stamp
+    # path, not a hash we can know ahead of time, so substituteInPlace cannot
+    # express it).
+    ${pythonExecutable} ${./strip-uv-cache-stamp.py} "$out/venv"
+
     test -x "$out/venv/bin/${mainProgram}"
     makeWrapper "$out/venv/bin/${mainProgram}" "$out/bin/${mainProgram}" ${
       lib.optionalString (
