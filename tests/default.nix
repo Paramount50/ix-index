@@ -1676,9 +1676,7 @@ let
   vitestWorkspaceCases = builtins.attrValues vitestWorkspace.cases;
 
   svelteSite = ix.buildSvelteSite pkgs {
-    pname = "svelte-site-fixture";
-    version = "0.1.0";
-    src = npmSiteFixture;
+    sourceRoot = ./fixtures/npm-site;
     buildFlags = [
       "--class"
       "ix svelte"
@@ -1693,8 +1691,6 @@ let
       ];
     };
     devServer = {
-      name = "svelte-site-fixture-dev";
-      checkoutSubdir = "tests/fixtures/npm-site";
       script = "build";
       port = 5177;
     };
@@ -2371,6 +2367,47 @@ let
       }).planValue
       true
   );
+
+  # --- wrapPackage typed argument surface (RFC 0008) -------------------------
+  # The module schema must reject unknown keys and a missing `mainProgram` at
+  # eval time, and stay introspectable via `.options` / `.optionsDoc`.
+  wrappedHello = ix.wrapPackage pkgs {
+    package = pkgs.hello;
+    # Hostile literal: `$`, backticks, and quotes must reach the wrapper
+    # verbatim (heredoc + runtime-shell escaping), never expand at build time.
+    env.WRAP_FIXTURE = "literal $HOME `code` \"quoted\"";
+    # Exercises the PATH line; the helpers check asserts the wrapper defers
+    # `$PATH` to runtime instead of baking the build sandbox PATH.
+    pathSuffix = [ pkgs.hello ];
+  };
+  wrapPackageTypoEval = builtins.tryEval (
+    builtins.seq
+      (ix.wrapPackage pkgs {
+        package = pkgs.hello;
+        symlinkz.hello-alias = "hello";
+      }).drvPath
+      true
+  );
+  # A minimal fixture (not an overridden `hello`) so the only reachable throw
+  # when forcing the wrapper drvPath is the builder's own missing-`mainProgram`
+  # message; a real package's own eval could throw first and pass this
+  # vacuously.
+  wrapPackageNoMainProgramEval = builtins.tryEval (
+    builtins.seq
+      (ix.wrapPackage pkgs {
+        package = pkgs.stdenv.mkDerivation {
+          pname = "wrap-package-no-main-fixture";
+          version = "0";
+          strictDeps = true;
+          dontUnpack = true;
+        };
+      }).drvPath
+      true
+  );
+  wrapPackageMainProgramDoc = lib.findFirst (
+    opt: opt.name == "mainProgram"
+  ) null ix.wrapPackage.optionsDoc;
+
   # --- Module and example assertion groups ----------------------------------
 
   # --- Idiomatic fleet API (expose / healthChecks.unit / endpoint) ----------
@@ -2482,6 +2519,34 @@ let
   ];
 
   groups = {
+    wrap-package = [
+      {
+        assertion = !wrapPackageTypoEval.success;
+        message = "wrapPackage should reject unknown argument names at eval time";
+      }
+      {
+        assertion = !wrapPackageNoMainProgramEval.success;
+        message = "wrapPackage should throw when mainProgram is unset and the package lacks meta.mainProgram";
+      }
+      {
+        assertion = wrappedHello.meta.mainProgram == "hello" && wrappedHello.unwrapped == pkgs.hello;
+        message = "wrapPackage should default mainProgram from the package meta and expose the unwrapped package";
+      }
+      {
+        assertion = lib.isString ix.wrapPackage.options.resources.description;
+        message = "wrapPackage should expose an introspectable option schema at .options";
+      }
+      {
+        # `defaultText` stands in for the config-computed default; without it
+        # the doc view would present `mainProgram` as required. The null guard
+        # keeps a missing entry a clean assertion failure instead of an
+        # attribute-selection crash inside mkTest.
+        assertion =
+          wrapPackageMainProgramDoc != null
+          && wrapPackageMainProgramDoc.default.text == "package.meta.mainProgram";
+        message = "wrapPackage optionsDoc should render the computed mainProgram default via defaultText";
+      }
+    ];
     mcp = [
       {
         assertion =
@@ -5144,14 +5209,22 @@ let
     test -d ${bunSite.bunNodeModules}/node_modules/clsx
     test -x ${bunSite.bunNodeModules.nodeCompat}/bin/node
     grep -q 'class="ix npm"' ${npmSite}/share/npm-site-fixture/index.html
-    grep -q 'class="ix svelte"' ${svelteSite}/share/svelte-site-fixture/index.html
-    test ! -L ${svelteSite}/share/svelte-site-fixture
-    test ! -L ${svelteSite}/share/svelte-site-fixture/index.html
+    grep -q 'class="ix svelte"' ${svelteSite}/share/npm-site-fixture/index.html
+    test ! -L ${svelteSite}/share/npm-site-fixture
+    test ! -L ${svelteSite}/share/npm-site-fixture/index.html
     grep -q -- '--route-prefix' ${svelteSite.passthru.serve}/bin/svelte-site-fixture
     grep -q -- '/fixture' ${svelteSite.passthru.serve}/bin/svelte-site-fixture
     test -x ${svelteSite}/bin/svelte-site-fixture
     grep -q -- "Svelte Site Fixture" ${svelteSite}/bin/svelte-site-fixture
-    test -x ${svelteSite.passthru.devServer}/bin/svelte-site-fixture-dev
+    test -x ${svelteSite.passthru.devServer}/bin/npm-site-fixture-dev
+
+    # wrapPackage wrapper contract: the operator's runtime PATH is preserved
+    # (literal $PATH, not the baked build-sandbox PATH) and hostile env
+    # literals survive both the build heredoc and the runtime sh parse.
+    grep -qF 'export PATH="$PATH:' ${wrappedHello}/bin/hello
+    grep -qF 'literal $HOME `code` "quoted"' ${wrappedHello}/bin/hello
+    ${wrappedHello}/bin/hello > wrapped-hello.out
+    grep -q 'Hello, world!' wrapped-hello.out
 
     ${uvApplication}/bin/uv-app-fixture > uv-app-fixture.out
     grep -q 'hello from uv app fixture' uv-app-fixture.out
