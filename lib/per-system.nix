@@ -469,7 +469,7 @@ let
     name = "mc-source";
     text = builtins.readFile paths.tools.mcSource;
     runtimeInputs = [
-      (pkgs.callPackage packageRegistry.byId.vineflower.path { })
+      (pkgs.callPackage packageRegistry.byId.vineflower.path { inherit ix; })
     ];
     meta.description = "Decompile a Minecraft server jar with Mojang mappings via Vineflower";
   };
