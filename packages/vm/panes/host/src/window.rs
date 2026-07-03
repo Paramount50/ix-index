@@ -189,8 +189,9 @@ pub struct PaneWindow {
     _win_delegate: Retained<WinDelegate>,
     _link_delegate: Retained<LinkDelegate>,
     surface: Option<Surface>,
-    /// Guest render scale from `WindowNew`, used to convert protocol pixel
-    /// sizes to window points.
+    /// Scale from `WindowNew`: the fixed unit for this window's protocol
+    /// min/max sizes (protocol contract; the guest converts `WindowMinMax`
+    /// at the same announced scale even if the client rescales later).
     guest_scale: u32,
     pending_ack: Option<u64>,
     dirty: bool,
@@ -395,6 +396,29 @@ impl PaneWindow {
         let Some(surface) = self.surface.as_mut() else {
             unreachable!("unpresentable path returned above");
         };
+
+        // A frame that mismatches the drawable presents scaled (the render
+        // pass samples, it never crops), which must never happen silently.
+        // Logged once per settled buffer size (fresh surface, outside live
+        // resize where per-tick mismatch is the norm) and worded as a state
+        // note, not an error: one line per window is the EXPECTED startup
+        // transition when a client that mapped at 1x re-renders 2x after the
+        // host's scale reaches it. Only a persistent repeat (every resize
+        // settles mismatched) means a scale-blind client rendering soft.
+        if fresh_surface && !self.view.inLiveResize() {
+            let drawable = self.layer.drawableSize();
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            let (dw, dh) =
+                (drawable.width.round().max(0.0) as u32, drawable.height.round().max(0.0) as u32);
+            if (width, height) != (dw, dh) {
+                eprintln!(
+                    "panes-host: window {}: presenting {width}x{height} frames scaled onto the \
+                     {dw}x{dh} drawable (brief while the guest adopts a scale change; persistent \
+                     only for a client stuck at another buffer scale)",
+                    self.id
+                );
+            }
+        }
 
         let in_bounds = |rect: Rect| {
             rect.w > 0
