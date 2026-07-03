@@ -50,7 +50,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, overload
 
-from . import registry
+from . import registry, typecheck
 
 _ix_current: contextvars.ContextVar = contextvars.ContextVar("ix_current_job", default=None)
 
@@ -219,6 +219,15 @@ class Job:
         # than hand back a misleading None.
         self._result = None
         self.error: str | None = None
+        # The actual exception a failed cell raised, kept so `await jobs['<id>']`
+        # can re-raise it (with its original traceback) instead of handing back a
+        # misleading None -- the documented "raises rather than return a
+        # misleading None" contract. None while running, done, or cancelled.
+        # `_exc_tb` pins the traceback as captured at failure time: each re-raise
+        # restores it first, so awaiting the same failed job repeatedly does not
+        # keep growing the shared exception object's traceback chain.
+        self._exc: BaseException | None = None
+        self._exc_tb: types.TracebackType | None = None
         self._buf: list[str] = []
         self._buflen = 0
         # Rich outputs (mime bundles) display()-ed while this job runs.
@@ -246,6 +255,18 @@ class Job:
     @property
     def output(self) -> str:
         return "".join(self._buf)
+
+    @property
+    def text(self) -> str:
+        """The finished run's model-facing result text (its `Result.llm_result`).
+
+        The sibling of `.output` (stdout): `sh()`'s Output and a `Result` both
+        answer `.text`, so a job handle does too, letting `jobs['id'].text` page
+        the returned value without first reaching through `.result`. Empty while
+        the job is still running (background it and `await jobs['id']` for the
+        value); on a failed job it is empty too (the failure is in `.error`, and
+        `await`-ing the job re-raises it)."""
+        return _result_text(self)
 
     @property
     def pageable(self) -> str:
@@ -382,9 +403,23 @@ class Job:
 
     def __await__(self) -> Any:
         # `await jobs['id']` should yield the job's result, but the runner task
-        # returns None, so wait for it then hand back the captured result.
+        # returns None (it swallows the cell's exception to keep the shared kernel
+        # alive), so wait for it then hand back the captured result -- or, if the
+        # cell FAILED, re-raise the exception it raised. Returning `self._result`
+        # unconditionally handed back None on a failed job, so `(await
+        # jobs[id]).text` then died with an opaque AttributeError; the documented
+        # contract is that awaiting raises rather than return a misleading None.
         async def _await_result() -> Result | None:
-            await self.task
+            if self.task is not None:
+                await self.task
+            if self._exc is not None:
+                # Re-raise the original exception object, so its type, message,
+                # and traceback (the cell's own frames) all reach the caller --
+                # the same failure they would have seen running the code inline.
+                # Restore the traceback captured at failure time first, so a
+                # repeated await re-raises from the same baseline instead of
+                # accreting one more raise-frame chain per await.
+                raise self._exc.with_traceback(self._exc_tb)
             return self._result
 
         return _await_result().__await__()
@@ -730,6 +765,17 @@ class Result:
         images = [img for img in (_coerce_image(i) for i in self.llm_images) if img]
         bundle[IX_LLM_MIME] = {"text": self.llm_result or "", "images": images}
         return bundle
+
+    @property
+    def output(self) -> str:
+        """Alias for the model text (same as ``.text`` / ``.llm_result``).
+
+        A live/errored job handle exposes ``.output`` (its captured stdout) and
+        ``sh()``'s Output exposes ``.output`` too; a finished ``Result`` is the
+        third thing an agent pages, so it answers the same attribute -- reading a
+        result via ``.output`` returns its model text instead of dying with an
+        AttributeError and a guessing game about which surface owns which name."""
+        return self.llm_result or ""
 
     def __call__(self) -> Result:
         """Calling a Result returns it unchanged. ``Job.result`` is a property,
@@ -1854,6 +1900,23 @@ def _error_line(exc: BaseException, job: Job) -> int | None:
     return line
 
 
+def _typecheck_enabled() -> bool:
+    """Whether per-cell type checking runs. Default ON; the escape hatch is the
+    ``IX_MCP_TYPECHECK`` env var (``0``/``false``/``no``/``off`` disables it) or,
+    when a Config is set, its ``typecheck`` flag. The env var wins if present, so
+    a session can toggle it without a config rebuild."""
+    raw = os.environ.get("IX_MCP_TYPECHECK")
+    if raw is not None:
+        return raw.strip().lower() not in ("0", "false", "no", "off")
+    try:
+        from . import config as _config_mod
+
+        return _config_mod.config().typecheck
+    except Exception:
+        # No config set (one-shot eval, bare kernel, tests): default on.
+        return True
+
+
 async def _runner(job: Job, ns: dict) -> None:
     token = _ix_current.set(job)
     if _store is not None and _store_conn is not None:
@@ -1868,6 +1931,27 @@ async def _runner(job: Job, ns: dict) -> None:
                 kind=job.kind,
             )
     try:
+        # Static type check BEFORE running (default on; IX_MCP_TYPECHECK=0 or the
+        # `typecheck` config flag disables it). A type error is caught here and
+        # returned as the result -- the cell never executes -- so the agent fixes
+        # it and retries instead of hitting it three lines into a side-effecting
+        # cell. The checker's own failures never block a cell (see typecheck.check).
+        # Replays are exempt: a session reopen re-runs cells that ALREADY executed
+        # successfully (kind="replay", see store.replayable), and blocking one on
+        # a checker finding would silently drop its bindings from the restored
+        # namespace -- the check already had its chance when the cell first ran.
+        if job.kind != "replay" and _typecheck_enabled():
+            verdict = await typecheck.check(job.code, ns)
+            if not verdict.ok:
+                # Record it like any other failed cell: `error` (the dashboard's
+                # error highlight, and what the summary carries), and the report as
+                # the result so the model's reply is the diagnostic to fix. No
+                # `_exc`: the agent should read and fix the diagnostic, not have
+                # `await jobs['<id>']` raise an opaque error.
+                job.status = "error"
+                job.error = verdict.report
+                job._result = Result.of(verdict.report)
+                return
         # Compile inside the runner so a SyntaxError is recorded as a job error
         # (status + traceback in the store/dashboard) instead of escaping __ix_run.
         mode, code_obj = _compile(job.code, f"<job {job.id}>")
@@ -1933,11 +2017,17 @@ async def _runner(job: Job, ns: dict) -> None:
                 "it in `await asyncio.to_thread(...)` or use an async API, and run "
                 "anything slow as a background job."
             )
+            # Keep the interrupt as the job's exception (with the actionable
+            # message) so `await jobs['<id>']` re-raises rather than yielding None.
+            job._exc = _kexc
+            _kexc.args = (job.error,)
         else:
             # The user's own code raised KeyboardInterrupt; keep its real
             # traceback (trimmed to the cell's frames) and the failing line.
             job.error = _user_traceback(_kexc)
             job.error_line = _error_line(_kexc, job)
+            job._exc = _kexc
+        job._exc_tb = _kexc.__traceback__
         job._append(job.error)
     except (Exception, SystemExit) as _exc:
         # Isolate user code from the kernel: a job's SyntaxError, exception, or
@@ -1952,6 +2042,10 @@ async def _runner(job: Job, ns: dict) -> None:
         job.error_line = _error_line(_exc, job)
         hint = _type_error_hint(_exc) if isinstance(_exc, TypeError) else ""
         job.error = tb + hint
+        # Keep the exception object itself, so `await jobs['<id>']` re-raises it
+        # (type + message + the cell's own traceback) instead of yielding None.
+        job._exc = _exc
+        job._exc_tb = _exc.__traceback__
         job._append(job.error)
     finally:
         job.ended = time.time()
@@ -2150,6 +2244,14 @@ def _df_llm_text(df: Any) -> str:
         schema = ", ".join(f"{name}:{dtype}" for name, dtype in zip(df.columns, df.dtypes, strict=False))
         body = _nuon_table(list(head.columns), head.to_dicts())
         more = f"\n... ({rows - _DF_LLM_ROWS} more rows)" if rows > _DF_LLM_ROWS else ""
+        # A frame flagging an incomplete scan (fsearch's PartialFrame: `truncated`
+        # + `reason`, duck-typed so the runtime stays decoupled) must SAY so in
+        # the model text: this NUON render is what the agent reads, and its repr
+        # banner never reaches this path, so without the note a timed-out search
+        # would read as a complete result.
+        if getattr(df, "truncated", False):
+            reason = getattr(df, "reason", "") or "scan incomplete"
+            return f"[partial results: {reason}]\nshape: ({rows}, {cols}) | {schema}\n{body}{more}"
         return f"shape: ({rows}, {cols}) | {schema}\n{body}{more}"
     except Exception:
         # An exotic frame that resists row iteration falls back to safe NUON text.
