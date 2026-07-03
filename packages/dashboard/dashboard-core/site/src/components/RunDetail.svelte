@@ -1,10 +1,12 @@
 <script lang="ts">
   // The center stage for a selected run: a header (LED, intent, status pill,
   // duration, start time, session breadcrumb) over stacked foldable panels —
-  // code (collapsed), output (open), result (when it diverges from stdout), and
-  // rich output (the `<key>/out` attachment). The exec-detail behaviour is the
-  // feed's, refactored here: inline trace when attributed, else a code block, and
-  // a parsed failure on top for an error.
+  // code, stdout, result (only when it diverges from stdout AND there is no
+  // rich attachment), and output (the `<key>/out` attachment). Panels default
+  // collapsed with a one-line preview in each summary, so a run scans without
+  // opening anything. The exec-detail behaviour is the feed's, refactored here:
+  // inline trace when attributed, else a code block, and a parsed failure on
+  // top for an error.
   import { stripAnsi } from '$lib/ansi';
   import { store, timeline } from '$lib/stream.svelte';
   import { ui, humanDuration, humanTime } from '$lib/ui.svelte';
@@ -49,7 +51,39 @@
   const hasStreamOut = $derived(!!stdoutTxt || !!stripAnsi(pane.stderr ?? '').trim());
   const resultIsPrimary = $derived(!hasStreamOut && !outPane && !!resultTxt);
   const resultShownInline = $derived(!traced && resultIsPrimary);
-  const resultIsExtra = $derived(!!resultTxt && resultTxt !== stdoutTxt && !resultShownInline);
+  // A file-view attachment IS the result rendered (the read's body), so showing
+  // the result panel beside it would duplicate the output. Other attachments (a
+  // displayed plot, a table) can coexist with a genuinely distinct result —
+  // `display(df); "done"` — so only the file-view case suppresses it.
+  const outIsResultView = $derived(outPane?.kind === 'data' && outPane?.renderer === 'file-view');
+  const resultIsExtra = $derived(
+    !!resultTxt && resultTxt !== stdoutTxt && !resultShownInline && !outIsResultView,
+  );
+
+  // One-line summary previews so a collapsed panel still scans.
+  function firstLine(text: string): string {
+    const line = text.slice(0, 200).split('\n', 1)[0] ?? '';
+    return line.length > 80 ? line.slice(0, 80) + '…' : line;
+  }
+  const outputHint = $derived(firstLine(stdoutTxt || resultTxt) || 'stdout');
+  // The attachment's summary: a file-view names its file and span; anything else
+  // names its renderer/kind.
+  const outHint = $derived.by(() => {
+    if (!outPane) return '';
+    if (outPane.kind === 'data' && outPane.renderer === 'file-view') {
+      try {
+        const v: unknown = JSON.parse(outPane.body ?? '');
+        if (v && typeof v === 'object') {
+          const fv = v as { label?: string; start?: number; end?: number };
+          const span = fv.start != null && fv.end != null ? ` · ${fv.start}–${fv.end}` : '';
+          return `${fv.label ?? 'file'}${span}`;
+        }
+      } catch {
+        // fall through to the generic hint
+      }
+    }
+    return outPane.renderer ?? outPane.kind ?? '';
+  });
 </script>
 
 <div class="run-detail">
@@ -86,7 +120,7 @@
       {#if traced}
         <!-- Inline trace: source with each line's output beside it, one combined
              view, so it stands in for both the code and output panels. -->
-        <details class="panel" open>
+        <details class="panel">
           <summary><span class="caret"></span><span class="panel-label">code · output</span></summary>
           <div class="panel-body panel-body-flush">
             <InlineTrace source={pane.source ?? ''} lang={pane.lang ?? 'text'} trace={traceArr} />
@@ -105,8 +139,10 @@
           </details>
         {/if}
         {#if hasStreamOut || resultIsPrimary || running}
-          <details class="panel" open>
-            <summary><span class="caret"></span><span class="panel-label">output</span><span class="panel-hint">stdout</span></summary>
+          <details class="panel">
+            <!-- Labelled `stdout` when a rich attachment exists, so the run never
+                 shows two panels both called `output`. -->
+            <summary><span class="caret"></span><span class="panel-label">{outPane ? 'stdout' : 'output'}</span><span class="panel-hint">{outputHint}</span></summary>
             <div class="panel-body panel-body-flush">
               <ExecBody {pane} chrome={false} expanded hideResult={!resultIsPrimary} />
             </div>
@@ -125,10 +161,10 @@
 
       {#if outPane}
         {@const OutBody = rendererFor(outPane.kind, outPane.renderer)}
-        <details class="panel" open>
-          <summary><span class="caret"></span><span class="panel-label">rich output</span></summary>
+        <details class="panel">
+          <summary><span class="caret"></span><span class="panel-label">output</span><span class="panel-hint">{outHint}</span></summary>
           <div class="panel-body panel-body-flush pane">
-            <div class="body html-body"><OutBody pane={outPane} /></div>
+            <div class="body" class:html-body={outPane.kind === 'html'}><OutBody pane={outPane} /></div>
           </div>
         </details>
       {/if}
@@ -218,42 +254,35 @@
   }
 
   .panels {
-    padding: 14px clamp(16px, 2.4vw, 24px) 44px;
+    padding: 10px clamp(16px, 2.4vw, 24px) 44px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 2px;
   }
 
-  /* A foldable panel: a header strip (caret + label + hint) over its body. Uses
-     native <details> so folding is free and CSS-only. */
-  .panel {
-    border: 1px solid var(--edge);
-    background: var(--panel);
-  }
+  /* A foldable panel: a quiet caret + label row over its body. Flat — no strip
+     background, no box; the body carries a single hairline frame. Uses native
+     <details> so folding is free and CSS-only. */
   .panel > summary {
     list-style: none;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: var(--elev, var(--panel));
-    border-bottom: 1px solid transparent;
+    gap: 7px;
+    padding: 6px 2px;
     user-select: none;
-  }
-  .panel[open] > summary {
-    border-bottom-color: var(--edge);
+    min-width: 0;
   }
   .panel > summary::-webkit-details-marker {
     display: none;
   }
   /* A CSS chevron so no glyph font is needed; rotates open. */
   .panel > summary .caret {
-    width: 8px;
-    height: 8px;
+    width: 6px;
+    height: 6px;
     flex: none;
-    border-right: 1.4px solid var(--ink-faint);
-    border-bottom: 1.4px solid var(--ink-faint);
+    border-right: 1.2px solid var(--ink-faint);
+    border-bottom: 1.2px solid var(--ink-faint);
     transform: rotate(-45deg);
     transition: transform 0.12s ease;
   }
@@ -262,26 +291,38 @@
   }
   .panel-label {
     font-family: var(--mono);
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font-size: 11.5px;
     color: var(--ink-dim);
+  }
+  .panel > summary:hover .panel-label {
+    color: var(--ink);
   }
   .panel-hint {
     margin-left: auto;
     font-family: var(--mono);
-    font-size: 10px;
+    font-size: 10.5px;
     color: var(--ink-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  /* The hint is the collapsed row's preview; the open body says it better. */
+  .panel[open] > summary .panel-hint {
+    display: none;
   }
   .panel-body {
-    padding: 12px;
+    padding: 10px 2px;
   }
-  /* Renderer bodies (exec output, code, html frame) bring their own padding, so
-     the panel frame sits flush around them. */
+  /* Renderer bodies (exec output, code, html frame) bring their own padding and
+     background; frame them with one hairline. */
   .panel-body-flush {
     padding: 0;
     overflow: auto;
     max-height: 60vh;
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    margin: 2px 0 8px;
   }
   .panel-body-flush.pane .body.html-body {
     height: 300px;

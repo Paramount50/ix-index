@@ -1,7 +1,7 @@
 <script lang="ts">
   // The unified left sidebar: the ix logotype + live dot, a filter box, then three
   // foldable sections — SESSIONS (each session foldable, its runs nested
-  // newest-first), RESOURCES, and RECORDINGS. It owns the center-stage selection
+  // oldest-first, a log growing downward), RESOURCES, and RECORDINGS. It owns the center-stage selection
   // and the vim keyboard nav; fold state is persisted in ui. Folding is driven by
   // ui.folds (not native <details>) so the flattened keyboard walk matches exactly
   // what is visible.
@@ -76,8 +76,9 @@
     }
   }
 
-  // Keep the selection valid as the tree changes; default to the first visible
-  // run or resource so a fresh load shows something. Never repair onto a
+  // Keep the selection valid as the tree changes; default to the newest visible
+  // run (the runs are log-ordered, so that is the LAST run row), else the first
+  // resource, so a fresh load shows something current. Never repair onto a
   // recording row: onSelect would loadRecording() and close the live stream
   // without a user click (e.g. when /recordings wins the race against the
   // first SSE snapshot, or when filtering folds every run away).
@@ -87,8 +88,17 @@
       return;
     }
     if (!flat.some((f) => selectionEq(f.selection, ui.selection))) {
-      const first = flat.find((f) => f.selection.kind !== 'recording');
-      if (first) onSelect(first.selection);
+      // Newest by timestamp, not render order: sessions are ordered by first
+      // appearance, so an older session can hold the most recent run.
+      const runs = flat.filter((f) => f.selection.kind === 'run');
+      const newest = runs.reduce<(typeof runs)[number] | null>((best, f) => {
+        const key = (f.selection as { key: string }).key;
+        const t = store.panes[key]?.created_at ?? 0;
+        const bt = best ? (store.panes[(best.selection as { key: string }).key]?.created_at ?? 0) : -1;
+        return t >= bt ? f : best;
+      }, null);
+      const fallback = newest ?? flat.find((f) => f.selection.kind === 'resource');
+      if (fallback) onSelect(fallback.selection);
       else if (ui.selection) select(null);
     }
   });
