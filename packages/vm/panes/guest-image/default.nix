@@ -17,6 +17,13 @@
   # (lib/packages.nix); the overlay path leaves it null so `pkgs.*` carries no
   # updater. Same nullable-writer pattern as vector-bin.
   updateScriptWriter ? null,
+  # Public ssh key authorized for root in the guest, enabling the ssh
+  # switch-in-place loop (README, "Iterating on the guest"). Deliberately null
+  # by default: the image is repo-built and cacheable, so any default key
+  # would ship a static root credential to everyone. With null, sshd still
+  # runs but nothing can log in; bake your own key via
+  # `panes-guest-image.override { sshAuthorizedKey = ...; }`.
+  sshAuthorizedKey ? null,
 }:
 let
   nixos = import "${path}/nixos/lib/eval-config.nix" {
@@ -38,6 +45,11 @@ let
             };
           })
         ];
+        # The builder-chosen root login key (see the sshAuthorizedKey package
+        # arg above); an empty list leaves sshd running with no way in.
+        users.users.root.openssh.authorizedKeys.keys = lib.optional (
+          sshAuthorizedKey != null
+        ) sshAuthorizedKey;
       }
     ];
   };
@@ -59,7 +71,15 @@ in
 nixos.pkgs.runCommand "panes-guest.raw"
   {
     __structuredAttrs = true;
-    passthru = lib.optionalAttrs (updateScript != null) { inherit updateScript; };
+    passthru = {
+      # The system closure alone, for the ssh switch-in-place loop (README,
+      # "Iterating on the guest"): build
+      # `.#packages.aarch64-linux.panes-guest-image.toplevel`, `nix copy` it
+      # into the running guest, activate with its switch-to-configuration.
+      # Skips the disk assembly entirely.
+      toplevel = nixos.config.system.build.toplevel;
+    }
+    // lib.optionalAttrs (updateScript != null) { inherit updateScript; };
   }
   ''
     cp --sparse=always "${nixos.config.system.build.image}/${nixos.config.image.filePath}" "$out"

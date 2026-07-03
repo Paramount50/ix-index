@@ -15,6 +15,7 @@
   pkgs,
   config,
   modulesPath,
+  utils,
   ...
 }:
 let
@@ -57,6 +58,22 @@ let
         hostPath = runtimeDir;
         isReadOnly = false;
       };
+      # nixos-containers copies the guest's /etc/resolv.conf into the container
+      # once, in the unit's start script (`cp --remove-destination`). These
+      # autoStart containers race gvproxy's DHCP lease, so that copy is empty
+      # and never refreshed: in-container DNS was dead (MC restart-looped 79
+      # times on "piston-meta.mojang.com: Name or service not known", observed
+      # live). A read-only bind of the file shadows the stale copy with a live
+      # view; openresolv rewrites resolv.conf IN PLACE by default
+      # (resolv_conf_mv=NO in its libc subscriber, explicitly to keep bind
+      # mounts working), so the container sees the lease when it lands. The
+      # container's own resolvconf stays off via nixos' container profile
+      # (networking.useHostResolvConf defaults true there), so nothing inside
+      # fights the mount.
+      "/etc/resolv.conf" = {
+        hostPath = "/etc/resolv.conf";
+        isReadOnly = true;
+      };
     }
     # Only GPU apps bind /dev/dri: nspawn fails the whole container when a
     # bind source is missing, and the guest may boot GPU-less (no --gpu, or
@@ -66,11 +83,20 @@ let
         hostPath = "/dev/dri";
         isReadOnly = false;
       };
-    }
-    // lib.genAttrs (app.binds or [ ]) (bind: {
-      hostPath = bind;
-      isReadOnly = false;
-    });
+    };
+    # apps.nix `binds` as raw nspawn --bind flags, deliberately NOT
+    # `bindMounts`: nixos-containers turns every bindMounts source into
+    # unitConfig.RequiresMountsFor on container@<name>, which hard-requires
+    # the nofail data-disk mount (fileSystems."/var/lib/minecraft") and takes
+    # the whole container down when the optional /dev/vdb is absent. A raw
+    # --bind of a dir that always exists (host tmpfiles, below) binds whatever
+    # is mounted there instead: the data disk when attached, the root fs when
+    # not. That raw bind loses the generated ordering, and a nofail mount is
+    # NOT ordered before local-fs.target (systemd.mount(5)), so without the
+    # explicit After= on container@<name> (see the systemd.services merge
+    # below) a first-boot autoFormat could race the container into binding
+    # the root fs underneath the arriving data disk.
+    extraFlags = map (bind: "--bind=${bind}") (app.binds or [ ]);
     # The bind mount alone is not enough: nspawn's device cgroup policy still
     # denies the node unless whitelisted here. venus/zink renders on the
     # virtio-gpu render node.
@@ -143,6 +169,17 @@ in
         structuredExtraConfig.ARM64_16K_PAGES = lib.kernel.yes;
       }
     ];
+    # Register the shipped closure in the nix database on first boot: repart's
+    # `storePaths` copies store contents but writes no db, and without a db the
+    # switch-in-place loop (`nix copy` to the guest + switch-to-configuration,
+    # see the README) cannot verify or add paths. Same pattern as
+    # make-disk-image; the registration file is baked by the repart config
+    # below (it cannot live inside the toplevel: closureInfo depends on it).
+    postBootCommands = ''
+      if [ -f /nix-path-registration ]; then
+        ${config.nix.package.out}/bin/nix-store --load-db < /nix-path-registration && rm /nix-path-registration
+      fi
+    '';
   };
 
   # Root is the repart "root"-typed partition, found by its GPT partition label.
@@ -153,6 +190,27 @@ in
     device = "/dev/disk/by-partlabel/root";
     fsType = "ext4";
     autoResize = true;
+  };
+
+  # Optional second disk holding Minecraft's downloads (~700 MB of assets +
+  # jars), so they survive image swaps: `vmkit boot-linux --disk <image>
+  # --disk <data.raw>` attaches it as the second virtio-blk device, /dev/vdb
+  # (device order = --disk order; the boot disk is vda). autoFormat
+  # (x-systemd.makefs) turns a blank `truncate`d file into ext4 on first use;
+  # nofail keeps a data-diskless boot working, MC then just re-downloads onto
+  # the root fs as before. Addressing by /dev/vdb assumes exactly one data
+  # disk, in second position: systemd-makefs formats with no label, and this
+  # nixpkgs pin has removed fileSystems.formatOptions, so a by-label device
+  # is not an option here. See the README's "Persistent data disk".
+  fileSystems."/var/lib/minecraft" = {
+    device = "/dev/vdb";
+    fsType = "ext4";
+    autoFormat = true;
+    options = [
+      "nofail"
+      # Bound the device wait so a boot without the disk is not held up.
+      "x-systemd.device-timeout=3s"
+    ];
   };
 
   system.image = {
@@ -190,6 +248,11 @@ in
       };
       "root" = {
         storePaths = [ config.system.build.toplevel ];
+        # Closure registration consumed by boot.postBootCommands above (first
+        # boot loads it into the nix db, then deletes it).
+        contents."/nix-path-registration".source = "${
+          pkgs.closureInfo { rootPaths = [ config.system.build.toplevel ]; }
+        }/registration";
         repartConfig = {
           Type = "root";
           Format = "ext4";
@@ -213,10 +276,27 @@ in
   # the .1 gateway; without DHCP the guest has no route out.
   networking.useDHCP = true;
 
-  # Root autologin on the serial console: this guest is a local dev appliance
-  # reachable only through hvc0 (no ssh), and headless debugging (venus state,
-  # container journals, poking the MC launcher) needs a shell there.
+  # Root autologin on the serial console: this guest is a local dev appliance,
+  # and headless debugging (venus state, container journals, poking the MC
+  # launcher) needs a shell on hvc0 even when the network is down.
   services.getty.autologinUser = "root";
+
+  # sshd is what makes the guest iterable without a full image rebuild + fresh
+  # disk (which wipes /var/lib/minecraft): build the toplevel, `nix copy` it in
+  # over ssh, run its switch-to-configuration (README, "Iterating on the
+  # guest"). gvproxy (`--net`) forwards host 127.0.0.1:2222 -> guest :22 by
+  # default (its -ssh-port flag, default 2222; the guest holds a static DHCP
+  # lease at 192.168.127.2), so no vmkit flag is needed. Root's authorized key
+  # comes from the builder through the `sshAuthorizedKey` package arg
+  # (./default.nix); the stock image bakes NO key on purpose (a repo-built,
+  # cacheable image must not ship a static root credential), so out of the box
+  # nothing can log in.
+  services.openssh = {
+    enable = true;
+    # Key-only root login; the forward is loopback-bound on the host, but a
+    # password prompt on root is still wrong.
+    settings.PermitRootLogin = "prohibit-password";
+  };
 
   # Populates /run/opengl-driver (lib + share/vulkan/icd.d) with mesa, which
   # carries the venus ICD (virtio_icd.aarch64.json) on this nixpkgs pin; the
@@ -228,115 +308,141 @@ in
   # the v1 single-user guest simple.
   systemd.tmpfiles.rules = [
     "d ${runtimeDir} 0777 root root -"
-    # The repart root ships /nix/store contents (storePaths) but no nix
-    # database; nixos-containers' nspawn unit bind-mounts these two read-only
-    # and a missing bind source fails the whole container. Empty dirs satisfy
-    # the binds (nothing runs nix inside the containers).
+    # nixos-containers' nspawn unit bind-mounts these two read-only and a
+    # missing bind source fails the whole container; the dirs must exist even
+    # on a boot where postBootCommands' nix-store --load-db (which creates the
+    # db) did not run. Nothing runs nix inside the containers.
     "d /nix/var/nix/db 0755 root root -"
     "d /nix/var/nix/daemon-socket 0755 root root -"
   ]
   ++ map (bind: "d ${bind} 0755 root root -") appBinds
   ++ lib.mapAttrsToList (dest: source: "C ${dest} 0644 root root - ${source}") appSeedFiles;
 
-  systemd.services = {
-    panes-compositor = {
-      description = "panes guest compositor (Wayland toplevels -> vsock 7100)";
-      wantedBy = [ "multi-user.target" ];
-      # The socket dir is a tmpfiles.d entry (see above), not a
-      # RuntimeDirectory; order after tmpfiles so it exists on first start.
-      after = [ "systemd-tmpfiles-setup.service" ];
-      environment = clientEnv // {
-        # The compositor's `gpu` readback path dlopens `libEGL.so.1` at
-        # runtime (smithay's `backend_egl` via libloading; deliberately no
-        # link-time GL dep, so no rpath to resolve it). That soname is
-        # libglvnd's dispatcher, which nixpkgs compiles with
-        # /run/opengl-driver/share/glvnd/egl_vendor.d as its vendor-config
-        # default and mesa's vendor JSON points at the store absolutely, so
-        # the dispatcher alone is enough to land in the venus EGL driver
-        # hardware.graphics provides.
-        LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.libglvnd ];
-      };
-      serviceConfig = {
-        ExecStart = lib.getExe pkgs.panes-compositor;
-        Restart = "on-failure";
-        RestartSec = 5;
-        # Mirror to the serial console: `vmkit boot-linux` captures hvc0 and
-        # the boot smoke reads service state off it.
-        StandardOutput = "journal+console";
-        StandardError = "journal+console";
-      };
-    };
+  # escapeSystemdPath silently mis-escapes `.` segments and exotic characters
+  # (nixpkgs#515270), which would make the container@ After= below name a
+  # mount unit that never exists — quietly re-opening the first-boot bind
+  # race. Constrain binds to the simple absolute paths it escapes correctly.
+  assertions = [
+    {
+      assertion = lib.all (bind: builtins.match "(/[a-zA-Z0-9_-]+)+" bind != null) appBinds;
+      message = "apps.nix binds must be simple absolute paths ([a-zA-Z0-9_-] segments): ${toString appBinds}";
+    }
+  ];
 
-    # Boot-time diagnostic kept on purpose: prints the Vulkan device list to
-    # the serial console so a headless `vmkit boot-linux --gpu` smoke run can
-    # assert the venus path end to end. With --gpu it must show a
-    # "Virtio-GPU Venus" deviceName; lavapipe/llvmpipe only means the guest
-    # fell back to software (see packages/vm/vmkit/docs/linux-libkrun.md).
-    panes-venus-smoke = {
-      description = "Log Vulkan devices (expect Virtio-GPU Venus) to the serial console";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "multi-user.target" ];
-      path = [
-        pkgs.vulkan-tools
-        pkgs.gnugrep
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        StandardOutput = "journal+console";
-        StandardError = "journal+console";
-        TimeoutStartSec = 120;
+  # Each app container starts only after its bind sources' mount attempts have
+  # concluded: a nofail mount is not ordered before local-fs.target
+  # (systemd.mount(5)), so without this a first boot could race the data
+  # disk's autoFormat and --bind the root fs underneath it, silently writing
+  # that boot's app data to the ephemeral root. After= without Requires=
+  # keeps the disk optional: an absent /dev/vdb fails the mount job after its
+  # 3s device timeout and the container proceeds on the root fs as intended.
+  # After= naming a unit that does not exist for a path is inert.
+  systemd.services =
+    lib.mapAttrs' (
+      name: app:
+      lib.nameValuePair "container@${name}" {
+        after = map (bind: "${utils.escapeSystemdPath bind}.mount") (app.binds or [ ]);
+      }
+    ) apps
+    // {
+      panes-compositor = {
+        description = "panes guest compositor (Wayland toplevels -> vsock 7100)";
+        wantedBy = [ "multi-user.target" ];
+        # The socket dir is a tmpfiles.d entry (see above), not a
+        # RuntimeDirectory; order after tmpfiles so it exists on first start.
+        after = [ "systemd-tmpfiles-setup.service" ];
+        environment = clientEnv // {
+          # The compositor's `gpu` readback path dlopens `libEGL.so.1` at
+          # runtime (smithay's `backend_egl` via libloading; deliberately no
+          # link-time GL dep, so no rpath to resolve it). That soname is
+          # libglvnd's dispatcher, which nixpkgs compiles with
+          # /run/opengl-driver/share/glvnd/egl_vendor.d as its vendor-config
+          # default and mesa's vendor JSON points at the store absolutely, so
+          # the dispatcher alone is enough to land in the venus EGL driver
+          # hardware.graphics provides.
+          LD_LIBRARY_PATH = lib.makeLibraryPath [ pkgs.libglvnd ];
+        };
+        serviceConfig = {
+          ExecStart = lib.getExe pkgs.panes-compositor;
+          Restart = "on-failure";
+          RestartSec = 5;
+          # Mirror to the serial console: `vmkit boot-linux` captures hvc0 and
+          # the boot smoke reads service state off it.
+          StandardOutput = "journal+console";
+          StandardError = "journal+console";
+        };
       };
-      script = ''
-        echo "===PANES-VENUS-SMOKE-BEGIN==="
-        out=$(vulkaninfo --summary 2>&1 || true)
-        if printf '%s' "$out" | grep -qi venus; then
-          printf '%s\n' "$out" | grep -iE "venus|deviceName|driverName"
-        else
-          echo "PANES-VENUS-ABSENT"
-          # The full loader output is the diagnostic when venus is missing
-          # (no ICD, no render node, capset mismatch, ...).
-          printf '%s\n' "$out" | head -40
-        fi
-        ls -la /dev/dri 2>&1 || true
-        echo "===PANES-VENUS-SMOKE-END==="
-      '';
-    };
 
-    # Second boot-time diagnostic: dump why anything failed (the app
-    # containers especially) to the serial console, since a headless
-    # `vmkit boot-linux` run has no shell to poke around with.
-    panes-boot-report = {
-      description = "Log failed units and container journals to the serial console";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "multi-user.target" ];
-      path = [
-        pkgs.systemd
-        pkgs.iproute2
-      ];
-      serviceConfig = {
-        Type = "oneshot";
-        StandardOutput = "journal+console";
-        StandardError = "journal+console";
-        TimeoutStartSec = 180;
+      # Boot-time diagnostic kept on purpose: prints the Vulkan device list to
+      # the serial console so a headless `vmkit boot-linux --gpu` smoke run can
+      # assert the venus path end to end. With --gpu it must show a
+      # "Virtio-GPU Venus" deviceName; lavapipe/llvmpipe only means the guest
+      # fell back to software (see packages/vm/vmkit/docs/linux-libkrun.md).
+      panes-venus-smoke = {
+        description = "Log Vulkan devices (expect Virtio-GPU Venus) to the serial console";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "multi-user.target" ];
+        path = [
+          pkgs.vulkan-tools
+          pkgs.gnugrep
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          StandardOutput = "journal+console";
+          StandardError = "journal+console";
+          TimeoutStartSec = 120;
+        };
+        script = ''
+          echo "===PANES-VENUS-SMOKE-BEGIN==="
+          out=$(vulkaninfo --summary 2>&1 || true)
+          if printf '%s' "$out" | grep -qi venus; then
+            printf '%s\n' "$out" | grep -iE "venus|deviceName|driverName"
+          else
+            echo "PANES-VENUS-ABSENT"
+            # The full loader output is the diagnostic when venus is missing
+            # (no ICD, no render node, capset mismatch, ...).
+            printf '%s\n' "$out" | head -40
+          fi
+          ls -la /dev/dri 2>&1 || true
+          echo "===PANES-VENUS-SMOKE-END==="
+        '';
       };
-      script = ''
-        # Give autoStart containers a moment to attempt their first start.
-        sleep 10
-        echo "===PANES-BOOT-REPORT-BEGIN==="
-        systemctl --failed --no-legend --plain || true
-        for unit in $(systemctl --failed --no-legend --plain | cut -d' ' -f1); do
-          echo "--- journal: $unit ---"
-          journalctl -u "$unit" -n 20 --no-pager || true
-        done
-        # DHCP evidence: gvproxy leases 192.168.127.2/24 with gateway .1.
-        ip -4 addr show || true
-        ip route show default || true
-        ls -la /run/panes 2>&1 || true
-        df -h / || true
-        echo "===PANES-BOOT-REPORT-END==="
-      '';
+
+      # Second boot-time diagnostic: dump why anything failed (the app
+      # containers especially) to the serial console, since a headless
+      # `vmkit boot-linux` run has no shell to poke around with.
+      panes-boot-report = {
+        description = "Log failed units and container journals to the serial console";
+        wantedBy = [ "multi-user.target" ];
+        after = [ "multi-user.target" ];
+        path = [
+          pkgs.systemd
+          pkgs.iproute2
+        ];
+        serviceConfig = {
+          Type = "oneshot";
+          StandardOutput = "journal+console";
+          StandardError = "journal+console";
+          TimeoutStartSec = 180;
+        };
+        script = ''
+          # Give autoStart containers a moment to attempt their first start.
+          sleep 10
+          echo "===PANES-BOOT-REPORT-BEGIN==="
+          systemctl --failed --no-legend --plain || true
+          for unit in $(systemctl --failed --no-legend --plain | cut -d' ' -f1); do
+            echo "--- journal: $unit ---"
+            journalctl -u "$unit" -n 20 --no-pager || true
+          done
+          # DHCP evidence: gvproxy leases 192.168.127.2/24 with gateway .1.
+          ip -4 addr show || true
+          ip route show default || true
+          ls -la /run/panes 2>&1 || true
+          df -h / || true
+          echo "===PANES-BOOT-REPORT-END==="
+        '';
+      };
     };
-  };
 
   containers = lib.mapAttrs mkAppContainer apps;
 

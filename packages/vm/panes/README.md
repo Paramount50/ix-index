@@ -46,14 +46,74 @@ removable path boots a UKI, and libkrun-efi's OVMF firmware boots the disk.
 nix build .#packages.aarch64-linux.panes-guest-image
 # The store image is minimized (no free space); copy it out and enlarge it,
 # the guest grows the root partition + filesystem into the new space at boot
-# (boot.growPartition + autoResize). Minecraft downloads land in that space.
+# (boot.growPartition + autoResize).
 cp --sparse=always ./result /tmp/panes-guest.raw && chmod +w /tmp/panes-guest.raw
 truncate -s 8G /tmp/panes-guest.raw
-nix run .#vmkit -- boot-linux --disk /tmp/panes-guest.raw --gpu --net --memory-mib 6144 --cpus 6
+# Optional but recommended: a persistent data disk for /var/lib/minecraft
+# (~700 MB of MC downloads), so a new image does not mean re-downloading.
+# A blank file is enough; the guest formats it on first use (autoFormat) and
+# mounts it nofail, so booting without it still works.
+truncate -s 10G /tmp/panes-data.raw
+nix run .#vmkit -- boot-linux --disk /tmp/panes-guest.raw --disk /tmp/panes-data.raw \
+  --gpu --net --memory-mib 6144 --cpus 6 --timeout-secs 0
 ```
 
-Size the guest for Minecraft: it OOMs under ~4 GiB of guest RAM and crawls on
-2 vCPUs; `--memory-mib 6144 --cpus 6` is the validated boot line.
+`--disk` is repeatable: the first is the boot disk (guest `/dev/vda`), each
+further one attaches in order (`/dev/vdb`, ...); the image mounts `/dev/vdb`
+at `/var/lib/minecraft`. Size the guest for Minecraft: it OOMs under ~4 GiB of
+guest RAM and crawls on 2 vCPUs; `--memory-mib 6144 --cpus 6` is the validated
+boot line.
+
+## Iterating on the guest
+
+A `nixos.nix`/`apps.nix` tweak does not need a new image + fresh-disk boot
+(which wipes anything not on the data disk). The image runs sshd, and gvproxy
+(`--net`) forwards host `127.0.0.1:2222` to guest `:22` by default (its
+`-ssh-port` flag; the guest holds gvproxy's static DHCP lease,
+`192.168.127.2`). The stock image bakes **no authorized key** (a repo-built,
+cacheable image must not ship a static root credential), so pass your own
+public key at build time through the `sshAuthorizedKey` package arg. One
+option is the host's nix-darwin linux-builder keypair
+`/etc/nix/builder_ed25519` (shown below; its private half is root-owned,
+hence the `sudo`), but any ssh key works.
+
+```sh
+# Bake your key into the image you boot (and into each toplevel you push).
+# `git+file://`, not `path:`/`toString ./.`: the repo's packages filter
+# sources with lib.fileset.gitTracked, which needs the git metadata a plain
+# path copy loses. Nix evaluates the COMMITTED tree, so commit each tweak
+# before building.
+build_with_key() {
+  nix build --impure --expr '((builtins.getFlake ("git+file://" + toString ./.))
+    .packages.aarch64-linux.panes-guest-image.override {
+      sshAuthorizedKey = builtins.readFile /etc/nix/builder_ed25519.pub;
+    })'"$1" -o "$2"
+}
+build_with_key "" result-image   # boot this as above; then, per iteration:
+build_with_key .toplevel result-toplevel
+# The guest's host key changes with every fresh disk, hence the known-hosts
+# opt-outs.
+guest_ssh="sudo ssh -i /etc/nix/builder_ed25519 -p 2222 \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+sudo env NIX_SSHOPTS="-i /etc/nix/builder_ed25519 -p 2222 \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null" \
+  nix copy --no-check-sigs --to ssh://root@localhost "$(readlink result-toplevel)"
+$guest_ssh root@localhost "$(readlink result-toplevel)/bin/switch-to-configuration test"
+```
+
+Do not hand ssh a manual `--port ...:22` forward instead: vmkit's gvproxy
+expose API binds forwards on **all** host interfaces (`"local": ":port"`),
+unlike the built-in loopback-only 2222 (which a `--port 2222:22` would also
+collide with).
+
+`test` activates the configuration now (services restart, containers pick up
+new store paths) without touching the boot entry, which is right here: the
+bootloader + UKI are baked into the ESP by repart, so a reboot deliberately
+returns to the shipped image (`switch` would only add a warning that no
+bootloader is configured). The guest can receive closures because the image
+registers its baked closure in the nix db at first boot
+(`/nix-path-registration` + `nix-store --load-db`, the make-disk-image
+pattern).
 
 GPU: `--gpu` attaches libkrun's virtio-gpu **venus** device (Vulkan on the
 Mac's GPU via MoltenVK). The image loads `virtio_gpu`, ships mesa's venus ICD
