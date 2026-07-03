@@ -43,7 +43,15 @@ import webbrowser
 from collections.abc import Callable
 from pathlib import Path
 
-from .config import Config, hub_state_path, live_hub, port_open, runtime_dir, set_config
+from .config import (
+    Config,
+    hub_state_path,
+    is_tailnet_ipv4,
+    live_hub,
+    port_open,
+    runtime_dir,
+    set_config,
+)
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _WILDCARD_HOSTS = {"0.0.0.0", "::"}  # noqa: S104 -- deliberate set of wildcard host strings for comparison
@@ -181,9 +189,19 @@ def _store_path(dashboard_port: int) -> Path:
     return runtime_dir() / f"store-{dashboard_port}.db"
 
 
+def _stat_exists(path: str) -> bool:
+    """``Path.exists`` that treats an unstatable path as absent: a sandboxed
+    or hardened host can deny even ``stat`` on ``/usr`` (PermissionError, not
+    False), and tailscale discovery must degrade to "none", never crash."""
+    try:
+        return Path(path).exists()
+    except OSError:
+        return False
+
+
 def _tailscale_status() -> dict | None:
     tailscale = shutil.which("tailscale") or next(
-        (p for p in ("/usr/local/bin/tailscale", "/usr/bin/tailscale") if Path(p).exists()), None
+        (p for p in ("/usr/local/bin/tailscale", "/usr/bin/tailscale") if _stat_exists(p)), None
     )
     if not tailscale:
         return None
@@ -214,7 +232,10 @@ def _tailscale_ip() -> str | None:
     if status.get("BackendState") != "Running":
         return None
     for ip in status.get("Self", {}).get("TailscaleIPs", []) or []:
-        if isinstance(ip, str) and "." in ip and ":" not in ip:
+        # CGNAT-only (100.64.0.0/10): a malformed or spoofed status must not be
+        # able to steer a bind to 0.0.0.0 or a LAN address (index#1789 review).
+        # Every real tailscale IPv4 is CGNAT, so nothing legitimate is lost.
+        if isinstance(ip, str) and is_tailnet_ipv4(ip):
             return ip
     return None
 
@@ -424,6 +445,11 @@ def _serve(args: argparse.Namespace, *, engine_only: bool = False) -> int:
         advertised_host=advertised_host,
         dashboard_port=dashboard_port,
         hub_port=hub_port,
+        # The `/mesh` endpoint binds ONLY the tailscale IP (index#1787): unlike
+        # `bind_host` above there is no loopback fallback, because a
+        # loopback-only mesh card is unreachable by every peer and a wider bind
+        # would leave the trust boundary. None -> mesh.start skips serving.
+        mesh_host=_tailscale_ip(),
         auto_dashboard=_auto_dashboard(),
         store_path=store_path,
         session_path=session_path,
@@ -513,7 +539,7 @@ def _spawn_hub(cfg: Config) -> subprocess.Popen | None:
 
 
 async def _run(cfg: Config) -> None:
-    from . import dashboard, pane_bridge, tools, transport
+    from . import dashboard, mesh, pane_bridge, tools, transport
     from .kernel import Kernel, set_kernel
 
     kernel = Kernel(cfg)
@@ -559,6 +585,14 @@ async def _run(cfg: Config) -> None:
     # Bake the live URL into the MCP instructions before serving, so the client
     # gets it in the `initialize` response -- no tool call to discover it.
     tools.set_dashboard_url(url)
+    # Advertise this server on the tailnet mesh (`GET /mesh`, index#1787):
+    # default-on and best-effort -- no tailscale, an occupied port, or
+    # IX_MCP_MESH=0 log one line and skip, never blocking the MCP itself.
+    # Started only now, AFTER the hub-spawn decision resolved `url`, so the
+    # card advertises the URL a human can actually open (a failed auto hub
+    # falls back to the data API here, not to a dead pre-spawn hub URL --
+    # index#1789 review).
+    mesh_runner = await mesh.start(cfg, tools.session_names, url)
     if hub is not None:
         print(f"[ix-mcp] dashboard (all running things + output): {url}", file=sys.stderr, flush=True)
     else:
@@ -591,6 +625,8 @@ async def _run(cfg: Config) -> None:
             # Final checkpoint so the last cells' state reopens instantly even
             # when the debounced checkpoint had not fired yet.
             await kernel.snapshot_session()
+        if mesh_runner is not None:
+            await mesh_runner.cleanup()
         await runner.cleanup()
         await kernel.shutdown()
 
