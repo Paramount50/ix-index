@@ -35,7 +35,9 @@ import binascii
 import collections
 import contextlib
 import contextvars
+import datetime
 import dataclasses
+import html as html_lib
 import inspect
 import json
 import os
@@ -285,10 +287,18 @@ class Job:
     """A single ``python_exec`` execution: an awaitable handle over the asyncio
     task running the code, with its captured output, result, and status."""
 
-    def __init__(self, code: str, name: str | None = None, budget: float = 15.0, kind: str = "cell") -> None:
+    def __init__(
+        self,
+        code: str,
+        name: str | None = None,
+        budget: float = 15.0,
+        kind: str = "cell",
+        topic: str = "",
+    ) -> None:
         self.id = uuid.uuid4().hex[:8]
         self.code = code
         self.name = name or self.id
+        self.topic = topic
         # 'cell' for a normal execution; 'replay' for a re-run performed while
         # reopening a session file. Replays never feed future replays
         # (store.replayable filters on this), so a session cannot double-run
@@ -336,6 +346,9 @@ class Job:
         # a per-session namespace -- see _session_ns). Set by __ix_run so the
         # bindings snapshot reads the namespace the cell actually wrote to.
         self._ns: dict | None = None
+        # Set once __ix_run returns before the task finishes. When such a job
+        # reaches a terminal state later, notify the agent session.
+        self.backgrounded = False
 
     def _append(self, s: str) -> None:
         """Append output, trimming to the most recent _MAX_OUTPUT_CHARS so a
@@ -1006,8 +1019,9 @@ class Resource:
     widget, anything with a current HTML representation. Register one with
     :func:`register_resource`; while it stays alive the runtime mirrors its
     latest HTML to the store every flush tick and the dashboard sidebar shows
-    all live resources updating in place. The resource closes itself (leaves the
-    sidebar) when its ``alive`` predicate reports the source is gone.
+    all resources updating in place. The resource closes itself (switches to a
+    closed indicator while keeping its final pane) when its ``alive`` predicate
+    reports the source is gone.
 
     Pass ``actions={"name": handler}`` to make the resource interactive: its HTML
     gets ``ix.act(name, payload)`` and ``ix.events(fn)`` injected (see
@@ -1024,10 +1038,12 @@ class Resource:
         render: Any,
         alive: Any = None,
         actions: Mapping[str, Any] | None = None,
+        execution_id: str = "",
     ) -> None:
         self.id = id
         self.title = title
         self.kind = kind
+        self.execution_id = execution_id
         self._render = render
         self._alive = alive
         self.status = "live"
@@ -1044,9 +1060,7 @@ class Resource:
         return self.status == "closed"
 
     def close(self) -> Resource:
-        """Close the resource so the sidebar drops it on the next tick (and tear
-        down its action channel/dispatcher, so a stale page can no longer queue
-        work for it)."""
+        """Close the resource and tear down any action channel/dispatcher."""
         self.status = "closed"
         if self._dispatcher is not None:
             self._dispatcher.cancel()
@@ -1223,7 +1237,7 @@ def register_resource(
       updating one view), instead of spawning a new pane each call. Omitted -> a
       random id, i.e. a new resource every time.
     - ``alive``: optional predicate; when it returns False the resource closes
-      itself and leaves the sidebar. Else call ``.close()`` on the returned handle.
+      itself but keeps its final pane. Else call ``.close()`` on the returned handle.
 
     Viewing it as a native overlay window (macOS): besides the web dashboard, the
     ``ix-windows`` consumer renders each live resource as its own floating, blurred,
@@ -1317,7 +1331,9 @@ def register_resource(
     old = resources.get(rid)
     if old is not None:
         old.close()
-    res = Resource(rid, str(title), kind, render, alive, actions=actions)
+    current = _ix_current.get()
+    execution_id = getattr(current, "id", "") if current is not None else ""
+    res = Resource(rid, str(title), kind, render, alive, actions=actions, execution_id=execution_id)
     resources[rid] = res
     return res
 
@@ -1471,7 +1487,7 @@ def _ask_form_html(
     submit_label: str,
 ) -> str:
     """The self-contained form HTML :func:`ask` renders: a prompt, the inputs, and
-    a wiring script that gathers the values and calls ``ixSubmit``. Themed for the
+    a wiring script that gathers the values and calls ``ixSubmit``. Arranged for the
     dashboard's light/dark surface; every agent-supplied string is escaped."""
     if choices is not None:
         body = "".join(
@@ -1621,6 +1637,190 @@ async def notify(content: str, **meta: Any) -> None:
         content=str(content),
         meta=json.dumps({key: str(value) for key, value in meta.items()}),
     )
+
+
+def _parse_github_time(value: Any) -> datetime.datetime | None:
+    if not isinstance(value, str) or not value or value.startswith("0001-"):
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return ""
+    seconds = max(0, int(seconds))
+    minutes, sec = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {sec}s"
+    return f"{sec}s"
+
+
+def _pr_check_duration(check: Mapping[str, Any], now: datetime.datetime) -> str:
+    started = _parse_github_time(check.get("startedAt"))
+    if started is None:
+        return ""
+    completed = _parse_github_time(check.get("completedAt"))
+    end = completed or now
+    return _format_duration((end - started).total_seconds())
+
+
+def _pr_resource_html(state: Mapping[str, Any]) -> str:
+    pr = html_lib.escape(str(state.get("pr") or ""))
+    title = html_lib.escape(str(state.get("title") or "PR"))
+    url = html_lib.escape(str(state.get("url") or "#"))
+    status = html_lib.escape(str(state.get("status") or "starting"))
+    merge = html_lib.escape(str(state.get("merge_state") or ""))
+    elapsed = html_lib.escape(str(state.get("elapsed") or ""))
+    auto = html_lib.escape(str(state.get("auto_merge") or ""))
+    error = state.get("error")
+    now = datetime.datetime.now(datetime.UTC)
+    rows = []
+    for check in state.get("checks") or []:
+        name = html_lib.escape(str(check.get("name") or check.get("workflowName") or "check"))
+        raw_state = str(check.get("conclusion") or check.get("status") or "pending")
+        css_state = re.sub(r"[^a-z0-9_-]+", "-", raw_state.lower())
+        shown_state = html_lib.escape(raw_state.lower())
+        duration = html_lib.escape(_pr_check_duration(check, now))
+        rows.append(
+            "<tr>"
+            f"<td>{name}</td>"
+            f"<td><span class=\"state {css_state}\">{shown_state}</span></td>"
+            f"<td>{duration}</td>"
+            "</tr>"
+        )
+    if not rows:
+        rows.append('<tr><td colspan="3" class="empty">waiting for checks</td></tr>')
+    error_html = ""
+    if error:
+        error_html = f'<div class="error">{html_lib.escape(str(error))}</div>'
+    return (
+        "<style>"
+        "body{margin:0;font:13px ui-sans-serif,system-ui;color:#e5e7eb;background:#111827}"
+        ".card{padding:14px;min-width:360px}.top{display:flex;gap:10px;align-items:baseline}"
+        "a{color:#93c5fd;text-decoration:none}.title{font-weight:650}.meta{color:#9ca3af;margin:8px 0 12px}"
+        "table{border-collapse:collapse;width:100%}td,th{padding:6px 8px;border-top:1px solid #374151;text-align:left}"
+        "th{font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:.04em}.state{border-radius:999px;padding:2px 7px;background:#374151}"
+        ".completed,.success{background:#064e3b;color:#a7f3d0}.in_progress,.queued,.pending{background:#78350f;color:#fde68a}"
+        ".failure,.cancelled,.timed_out,.action_required{background:#7f1d1d;color:#fecaca}.empty{color:#9ca3af;text-align:center}"
+        ".error{margin-top:10px;color:#fecaca;background:#7f1d1d;padding:8px;border-radius:6px;white-space:pre-wrap}"
+        "</style>"
+        "<div class=\"card\">"
+        f"<div class=\"top\"><a href=\"{url}\" target=\"_blank\">PR {pr}</a><span class=\"title\">{title}</span></div>"
+        f"<div class=\"meta\">{status} {merge} {elapsed} {auto}</div>"
+        "<table><thead><tr><th>required action</th><th>state</th><th>time</th></tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>{error_html}</div>"
+    )
+
+
+async def watch_pr(
+    pr: str | int,
+    *,
+    cwd: str | None = None,
+    auto_merge: bool = True,
+    merge_method: str = "squash",
+    delete_branch: bool = True,
+    interval: float = 15.0,
+    timeout: float = 3600.0,
+) -> dict[str, Any]:
+    """Watch a GitHub PR, mirror required checks as a resource, and optionally enable auto merge."""
+    clean_pr = str(pr).strip()
+    if not clean_pr:
+        raise ValueError("pr must be a number, URL, or branch understood by gh")
+    if merge_method not in {"merge", "squash", "rebase"}:
+        raise ValueError("merge_method must be merge, squash, or rebase")
+    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "-", clean_pr).strip("-") or uuid.uuid4().hex[:8]
+    state: dict[str, Any] = {
+        "pr": clean_pr,
+        "title": "",
+        "url": "",
+        "status": "starting",
+        "merge_state": "",
+        "checks": [],
+        "auto_merge": "",
+        "error": "",
+        "elapsed": "",
+    }
+    started = time.time()
+    resource = register_resource(
+        render=lambda: _pr_resource_html(state),
+        id=f"pr-{safe_id}",
+        title=f"PR {clean_pr}",
+        kind="pr",
+        alive=lambda: state.get("status") not in {"merged", "closed", "failed", "timed out"},
+    )
+    import nu as nu_call
+
+    async def run_nu(code: str) -> Any:
+        return await nu_call(
+            code,
+            cwd=cwd,
+            env={"PR": clean_pr},
+            timeout=60,
+        )
+
+    async def refresh() -> dict[str, Any]:
+        out = await run_nu(
+            'with-env {NO_COLOR: "1" CLICOLOR: "0" CLICOLOR_FORCE: "0" FORCE_COLOR: "0"} '
+            '{ gh pr view $env.PR --json number,title,state,mergeStateStatus,statusCheckRollup,'
+            'url,autoMergeRequest,isDraft,reviewDecision | complete | get stdout | from json }'
+        )
+        row = out.to_dicts()[0]
+        checks = row.get("statusCheckRollup") or []
+        title = row.get("title") or f"PR {row.get('number') or clean_pr}"
+        state.update(
+            {
+                "pr": row.get("number") or clean_pr,
+                "title": title,
+                "url": row.get("url") or "",
+                "status": str(row.get("state") or "").lower(),
+                "merge_state": row.get("mergeStateStatus") or "",
+                "checks": checks,
+                "auto_merge": "auto merge on" if row.get("autoMergeRequest") else "auto merge off",
+                "elapsed": _format_duration(time.time() - started),
+                "error": "",
+            }
+        )
+        return row
+
+    if auto_merge:
+        flag = f"--{merge_method}"
+        delete = "--delete-branch" if delete_branch else ""
+        merge = await run_nu(f"gh pr merge $env.PR --auto {flag} {delete} | complete")
+        if int(merge["exit_code"][0]) != 0:
+            state["error"] = str(merge["stderr"][0] or merge["stdout"][0])
+
+    last: dict[str, Any] = {}
+    while True:
+        last = await refresh()
+        checks = last.get("statusCheckRollup") or []
+        failures = [
+            check
+            for check in checks
+            if check.get("conclusion") in {"FAILURE", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED"}
+        ]
+        if last.get("state") != "OPEN":
+            state["status"] = "merged" if last.get("state") == "MERGED" else "closed"
+            resource.close()
+            await notify(f"PR {clean_pr} finished with state {last.get('state')}", resource=resource.id, pr=clean_pr)
+            return {"state": last.get("state"), "url": last.get("url"), "checks": len(checks)}
+        if failures:
+            state["status"] = "failed"
+            state["error"] = "One or more required actions failed."
+            resource.close()
+            await notify(f"PR {clean_pr} has failing checks", resource=resource.id, pr=clean_pr)
+            return {"state": "failed", "url": last.get("url"), "failures": failures}
+        if time.time() - started > timeout:
+            state["status"] = "timed out"
+            resource.close()
+            await notify(f"PR {clean_pr} watch timed out", resource=resource.id, pr=clean_pr)
+            return {"state": "timed out", "url": last.get("url"), "checks": len(checks)}
+        await asyncio.sleep(interval)
 
 
 @dataclasses.dataclass
@@ -1778,6 +1978,7 @@ class Session:
         self._name = ""  # explicit, user-set via `session.name = ...`
         self._client = ""  # the connecting MCP client's reported identity
         self._workdir = ""  # this kernel's cwd basename, for the default label
+        self._topic = ""  # current fold group for runs in this session
         self._rev = 0
         self._synced = -1
 
@@ -1795,6 +1996,16 @@ class Session:
         self._rev += 1
 
     @property
+    def topic(self) -> str:
+        """The current dashboard fold group for future runs."""
+        return self._topic or "unfiled"
+
+    @topic.setter
+    def topic(self, value: str) -> None:
+        self._topic = " ".join((value or "").split())
+        self._rev += 1
+
+    @property
     def client(self) -> str:
         """The connecting MCP client's reported identity (read-only)."""
         return self._client
@@ -1809,7 +2020,8 @@ class Session:
 
     def __repr__(self) -> str:
         tail = f" · {self._client}" if self._client and self._client != self.name else ""
-        return f"<Session {self.name!r}{tail}>"
+        topic = f" topic={self.topic!r}" if self._topic else ""
+        return f"<Session {self.name!r}{tail}{topic}>"
 
     def _sync(self) -> None:
         """Mirror the session label to the store when it has changed, so the
@@ -2092,6 +2304,7 @@ async def _runner(job: Job, ns: dict) -> None:
                 started_at=job.started,
                 budget=job.budget,
                 kind=job.kind,
+                topic=job.topic,
             )
     try:
         # Static type check BEFORE running (default on; IX_MCP_TYPECHECK=0 or the
@@ -2215,6 +2428,15 @@ async def _runner(job: Job, ns: dict) -> None:
         _ix_current.reset(token)
         _persist_final(job)
         _mark_snapshot_dirty()
+        if job.backgrounded and job.kind != "replay":
+            with contextlib.suppress(Exception):
+                await notify(
+                    f"Background job {job.name} finished with status {job.status}.",
+                    job_id=job.id,
+                    job_name=job.name,
+                    status=job.status,
+                    topic=job.topic,
+                )
 
 
 def _persist_final(job: Job) -> None:
@@ -3003,6 +3225,7 @@ async def _sweep_resources() -> None:
                 status=status,
                 created_at=res.created,
                 updated_at=now,
+                execution_id=res.execution_id,
             )
 
 
@@ -3418,16 +3641,19 @@ async def __ix_run(
     name: str | None = None,
     kind: str = "cell",
     session: str | None = None,
+    topic: str | None = None,
 ) -> Job:
     """Run ``code`` as a task; wait up to ``budget`` for it; return the Job either
     way (done, or still running in the background). ``session`` selects the
     namespace the code runs in (see :func:`_session_ns`)."""
     ns = _session_ns(session)
-    job = Job(code, name, budget=budget, kind=kind)
+    job = Job(code, name, budget=budget, kind=kind, topic=topic or globals()["session"].topic)
     job._ns = ns
     jobs[job.id] = job
     job.task = asyncio.ensure_future(_runner(job, ns))
     await asyncio.wait({job.task}, timeout=budget)
+    if not job.task.done():
+        job.backgrounded = True
     return job
 
 
@@ -3460,6 +3686,7 @@ def _job_summary(job: Job) -> dict:
     return {
         "id": job.id,
         "name": job.name,
+        "topic": job.topic,
         "status": job.status,
         "running": job.running(),
         "output": job.tail(_SUMMARY_CHARS),
@@ -3514,12 +3741,16 @@ def _emit(job: Job) -> None:
 
 
 async def __ix_exec(
-    code: str, budget: float = 15.0, name: str | None = None, session: str | None = None
+    code: str,
+    budget: float = 15.0,
+    name: str | None = None,
+    session: str | None = None,
+    topic: str | None = None,
 ) -> None:
     """The MCP server's per-call entrypoint: run with a budget, emit the summary.
     ``session`` is the caller's MCP session id (per-session namespace; None for
     the shared one)."""
-    job = await __ix_run(code, budget=budget, name=name, session=session)
+    job = await __ix_run(code, budget=budget, name=name, session=session, topic=topic)
     _emit(job)
 
 
@@ -3857,6 +4088,7 @@ def install(user_ns: dict | None = None) -> None:
     target["Input"] = Input
     target["ask"] = ask
     target["notify"] = notify
+    target["watch_pr"] = watch_pr
     target["input_channels"] = input_channels
     target["__ix_run"] = __ix_run
     target["__ix_exec"] = __ix_exec

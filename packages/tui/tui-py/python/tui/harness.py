@@ -30,6 +30,13 @@ Quick start, exactly the shape of a Playwright test:
     # or the one-liner: submit, wait for the turn to finish, return the reply
     answer = await agent.run("summarize CONTRIBUTING.md", timeout=180)
 
+    # or fan out across mixed agents through the shared Agent interface
+    claude, codex = await Claude.launch(cwd="/repo"), await Codex.launch(cwd="/repo")
+    replies = await asyncio.gather(
+        claude.run_to_completion("find one risk"),
+        codex.run_to_completion("find one risk"),
+    )
+
 Why drive the real TUI instead of `claude -p`? A headless `-p` run is invisible
 and uninterruptible. A harness drives the actual TUI in a PTY, so the session
 shows up live on the `tui` web dashboard (`nix run .#tui-dashboard`) just like a
@@ -67,7 +74,15 @@ from typing import ClassVar, Self
 
 from . import Key, Pattern, Snapshot, Tui, WaitTimeout
 
-__all__ = ["Agent", "AgentAssertions", "Claude", "Codex", "Gate", "Keyboard", "expect"]
+__all__ = [
+    "Agent",
+    "AgentAssertions",
+    "Claude",
+    "Codex",
+    "Gate",
+    "Keyboard",
+    "expect",
+]
 
 
 class Gate:
@@ -259,6 +274,8 @@ class Agent:
         then presses Enter, and presses it once more if the turn has not started.
         Grounded against Claude Code, which drops the occasional fast Enter.
         """
+        if not self._started:
+            await self.start()
         await self.keyboard.type(text)
         # The box may wrap/scroll the text; submit anyway if it times out.
         with contextlib.suppress(WaitTimeout):
@@ -266,6 +283,14 @@ class Agent:
         await self.keyboard.press(Key.ENTER)
         if not await self._turn_started():
             await self.keyboard.press(Key.ENTER)
+
+    async def send_message(self, text: str) -> None:
+        """Submit `text` without waiting for the agent to finish the turn.
+
+        High-level interface alias for `prompt`, shared by `Claude` and `Codex`
+        so orchestrators can type against `AgentLike`.
+        """
+        await self.prompt(text)
 
     async def run(self, text: str, *, timeout: float = 180.0, settle: float = 0.6) -> str:
         """Submit `text`, wait for the turn to finish, return the agent's reply.
@@ -279,6 +304,28 @@ class Agent:
         await self.wait_for_idle(timeout=timeout, settle=settle)
         delta = _tail_delta(before, await self._lines())
         return self.parse_reply(delta)
+
+    async def run_to_completion(
+        self,
+        text: str,
+        *,
+        timeout: float = 180.0,
+        settle: float = 0.6,
+    ) -> str:
+        """Submit `text`, wait for idle, and return the parsed reply.
+
+        This is the agent-interface name for `run`, meant for mixed fan-out:
+        `await asyncio.gather(claude.run_to_completion(q), codex.run_to_completion(q))`.
+        """
+        return await self.run(text, timeout=timeout, settle=settle)
+
+    async def ask(self, text: str, *, timeout: float = 180.0, settle: float = 0.6) -> str:
+        """Submit one question and return the parsed reply.
+
+        `ask` is the high-level name for simple delegation; it keeps the visible
+        resource open, unlike a headless one-shot command.
+        """
+        return await self.run_to_completion(text, timeout=timeout, settle=settle)
 
     # -- waiting (Playwright-style) -----------------------------------------
 
@@ -439,6 +486,41 @@ class Codex(Agent):
     binary = "codex"
     ready = re.compile(r"[›❯>]\s*$", re.MULTILINE)
     busy_marker = None
+
+    def __init__(
+        self,
+        *args: str,
+        model: str = "gpt-5.5",
+        reasoning_effort: str = "low",
+        approval: str = "never",
+        sandbox: str = "danger-full-access",
+        **kwargs: object,
+    ) -> None:
+        defaults = (
+            "-c",
+            f"model_reasoning_effort={reasoning_effort!r}",
+            "--model",
+            model,
+            "--ask-for-approval",
+            approval,
+            "--sandbox",
+            sandbox,
+        )
+        super().__init__(*defaults, *args, **kwargs)  # type: ignore[arg-type]
+
+    def parse_reply(self, transcript: str) -> str:
+        """Keep the final Codex answer block from a TUI transcript."""
+        lines = transcript.splitlines()
+        starts = [i for i, line in enumerate(lines) if line.lstrip().startswith("•")]
+        if not starts:
+            return transcript.strip()
+        out: list[str] = []
+        for line in lines[starts[-1]:]:
+            stripped = line.strip()
+            if out and (stripped.startswith("›") or " · " in stripped and "gpt-" in stripped):
+                break
+            out.append(line.lstrip("• ").rstrip())
+        return "\n".join(out).strip()
 
 
 # --------------------------------------------------------------------------- #

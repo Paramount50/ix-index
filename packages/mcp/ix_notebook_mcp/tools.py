@@ -147,7 +147,9 @@ _dashboard_started = False
 # (index#1789 review). The one stdio/embedder client has no session object to
 # key on; its label lives in `_solo_session_name` and dies with the process.
 _session_labels: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+_session_topics: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 _solo_session_name: str | None = None
+_solo_topic: str | None = None
 
 
 def _session_label(ctx: Context | None) -> str | None:
@@ -166,6 +168,51 @@ def _set_session_label(ctx: Context | None, name: str) -> None:
     else:
         _session_labels[session] = name
 
+
+
+
+def _session_topic(ctx: Context | None) -> str | None:
+    """The current fold topic this call's session chose."""
+    session = _http_session(ctx)
+    if session is None:
+        return _solo_topic
+    return _session_topics.get(session)
+
+
+def _set_session_topic(ctx: Context | None, topic: str) -> None:
+    global _solo_topic
+    session = _http_session(ctx)
+    if session is None:
+        _solo_topic = topic
+    else:
+        _session_topics[session] = topic
+
+
+def _topic_required() -> bool:
+    """Whether python_exec requires an explicit topic first."""
+    return os.environ.get("IX_MCP_REQUIRE_TOPIC", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+async def _require_topic(ctx: Context | None, *, intent: str | None = None) -> None:
+    """Fail fast until this MCP session has named the current dashboard topic."""
+    if not _topic_required() or _session_topic(ctx) is not None:
+        return
+    suggestion = f" Suggested topic from this call: {intent!r}." if intent else ""
+    raise McpError(
+        ErrorData(
+            code=types.INVALID_REQUEST,
+            message=(
+                "Set a dashboard topic first: call topic_set with a short label for "
+                "the current cluster of related tool calls."
+                f"{suggestion}"
+            ),
+        )
+    )
 
 def session_names() -> list[str]:
     """The labels live MCP sessions gave themselves, for the mesh endpoint.
@@ -360,6 +407,42 @@ async def session_set_name(
     return [outputs.text(f"dashboard session named: {clean}")]
 
 
+@mcp.tool(
+    structured_output=False,
+    description=(
+        "Set the current dashboard topic for this MCP connection. Call this before "
+        "a related cluster of python_exec calls, and change it when the work moves "
+        "to a new phase; runs fold under the topic inside the session."
+    ),
+)
+async def topic_set(
+    topic: Annotated[
+        str,
+        Field(
+            description=(
+                "Short label for the current cluster of related tool calls, 3 to "
+                "80 characters, with no code or secrets"
+            )
+        ),
+    ],
+    ctx: Context | None = None,
+) -> Content:
+    await _start_dashboard_once()
+    await _identify_client_once(ctx)
+    await _require_session_name(ctx, intent=topic)
+    clean = " ".join((topic or "").split())
+    if not 3 <= len(clean) <= 80:
+        raise McpError(
+            ErrorData(
+                code=types.INVALID_PARAMS,
+                message="Topic must be 3 to 80 non-whitespace characters.",
+            )
+        )
+    await current_kernel().set_topic(clean)
+    _set_session_topic(ctx, clean)
+    return [outputs.text(f"dashboard topic set: {clean}")]
+
+
 # Every tool sets structured_output=False: FastMCP otherwise derives an output
 # schema from the return annotation and DUPLICATES the entire reply as
 # `structuredContent` JSON, so each image block went to the client twice (once
@@ -374,6 +457,7 @@ async def session_set_name(
         guide.NAMESPACE,
         guide.BLOCKING,
         guide.RESULT_CONTRACT,
+        guide.PR_WATCH,
         guide.SEE_INSTRUCTIONS,
     ),
 )
@@ -386,6 +470,7 @@ async def python_exec(
     await _start_dashboard_once()
     await _identify_client_once(ctx)
     await _require_session_name(ctx, intent=intent)
+    await _require_topic(ctx, intent=intent)
     # A foreground budget is how long the run holds the one shared shell channel
     # before it backgrounds, so cap it: a giant budget (a 15-minute `await
     # jobs[...]`) would block every other call behind it. The clamp is surfaced
@@ -395,7 +480,7 @@ async def python_exec(
     # `intent` is the run's human label (the dashboard feed's title); it flows to
     # the kernel as the job name and lands in the store's `name` column.
     cell_outputs, summary = await current_kernel().python_exec(
-        code, effective_budget, intent, session=_session_id(ctx)
+        code, effective_budget, intent, session=_session_id(ctx), topic=_session_topic(ctx)
     )
     rendered = outputs.to_mcp(cell_outputs)
     if summary is None:
@@ -457,6 +542,71 @@ async def python_exec(
             )
         )
     return parts
+
+
+@mcp.tool(
+    structured_output=False,
+    description=(
+        "Watch a GitHub pull request in the dashboard. Creates a live PR resource "
+        "nested under this task, lists required checks and actions with elapsed "
+        "time, enables auto merge by default, and notifies the CLI when the PR "
+        "merges, fails, or times out. Use this instead of hand-written PR polling."
+    ),
+)
+async def pr_watch(
+    pr: Annotated[
+        str,
+        Field(description="PR number, URL, or branch understood by gh, for example 1856."),
+    ],
+    cwd: Annotated[
+        str,
+        Field(description="Repository worktree where gh should run."),
+    ],
+    auto_merge: Annotated[
+        bool,
+        Field(description="Enable gh auto merge for this PR before watching."),
+    ] = True,
+    interval: Annotated[
+        float,
+        Field(description="Seconds between GitHub status refreshes."),
+    ] = 15.0,
+    timeout: Annotated[
+        float,
+        Field(description="Seconds to watch before the resource closes as timed out."),
+    ] = 3600.0,
+    ctx: Context | None = None,
+) -> Content:
+    await _start_dashboard_once()
+    await _identify_client_once(ctx)
+    await _require_session_name(ctx, intent=f"watch PR {pr}")
+    await _require_topic(ctx, intent=f"watch PR {pr}")
+    code = (
+        "await watch_pr("
+        f"{pr!r}, cwd={cwd!r}, auto_merge={auto_merge!r}, "
+        f"interval={interval!r}, timeout={timeout!r}"
+        ")"
+    )
+    cell_outputs, summary = await current_kernel().python_exec(
+        code,
+        min(5.0, config().max_budget),
+        f"watch PR {pr}",
+        session=_session_id(ctx),
+        topic=_session_topic(ctx),
+    )
+    rendered = outputs.to_mcp(cell_outputs)
+    resource = f"pr-{re.sub(r'[^A-Za-z0-9._-]+', '-', str(pr)).strip('-')}"
+    header = outputs.text(
+        json.dumps(
+            {
+                "job": summary.get("id") if summary else None,
+                "status": summary.get("status") if summary else None,
+                "running": summary.get("running") if summary else None,
+                "elapsed_s": summary.get("elapsed_s") if summary else None,
+                "resource": resource,
+            }
+        )
+    )
+    return [header, *(item for item in rendered if getattr(item, "text", None) != "(no output)")]
 
 
 @mcp.tool(structured_output=False, description=guide.READ)
