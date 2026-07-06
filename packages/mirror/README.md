@@ -54,10 +54,30 @@ tree:
   a mirror's first `cargo build` may drop entries the mirrored crate never
   activates, but it never changes a version and never touches the network for
   resolution.
-- The README leads with a banner naming the mirror a read-only generated
-  artifact, linking the exact monorepo tree (path + commit) it came from and
-  pointing issues/PRs at the monorepo. Below it: the package's own README
-  when it has one, else a minimal generated body from the crate metadata.
+- The README and changelog are generated, never hand-written per mirror
+  (house style: the `creating-a-readme` skill, which the generator conforms
+  to). A package with its own README leads the mirror with it verbatim --
+  the skill already makes it open with an `assets/hero.svg` and a hook, and
+  the assets ride along -- behind a banner naming the mirror a read-only
+  generated artifact (exact monorepo tree link, issues/PRs to the monorepo);
+  a derived Install section is appended only when the body has none
+  (flake-exposed -> `nix run github:indexable-inc/index#<attr>`, binary ->
+  `cargo install --git`, library -> a git-dependency snippet). A package
+  without a README gets the whole skill shape synthesized from metadata: a
+  generated `assets/hero.svg` (name, tagline, deterministic mark; dark/light
+  via CSS `prefers-color-scheme` embedded in the SVG), a hook question and
+  pitch from the declarative `mirror.description` (crate `[package]
+  description` fallback), Install, and a minimal Use section. Every README
+  ends with a one-line pointer to `CHANGELOG.md`. Pass `gen` `--mirror-json`
+  (the rendered `.#lib.mirrorPackages`) to source the repo/description/flake
+  attr; `publish` resolves it automatically.
+- `CHANGELOG.md` is derived from the monorepo commits that touched the
+  package path (`git log -- packages/<pkg>`): Keep a Changelog section
+  names picked from conventional-commit prefixes, grouped by month (a
+  mirror tracks the monorepo continuously; there are no versioned releases),
+  every entry linking its monorepo commit. It needs full history, so the
+  generator refuses a shallow clone and mirror-sync checks out with
+  `fetch-depth: 0`.
 
 `mirror publish --package packages/<path> [--create]` runs `gen` into a
 scratch directory, clones the mirror repo, swaps its working tree for the
