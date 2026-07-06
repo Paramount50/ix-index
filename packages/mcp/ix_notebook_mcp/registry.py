@@ -74,8 +74,10 @@ MODULES: tuple[Module, ...] = (
         "| from json`); a lone string result (an external's plain stdout) returns as the full "
         "`str`, never a clipped 1x1 frame; `let`/`def`/`cd` persist across calls like a REPL; "
         "`input=df` pipes a frame through a pipeline; `nu.value(code)` returns the plain Python "
-        "value; a failure raises NuError carrying nushell's own diagnostic. Replaces jq/awk/sed "
-        "text munging and the retired `sh`",
+        "value; a failure raises NuError carrying nushell's own diagnostic, and `check=False` "
+        "returns `NuResult(result, exit_code)` instead of raising when a trailing external "
+        "exits non-zero (grep with no match). Replaces jq/awk/sed text munging and the retired "
+        "`sh`",
         preimport=True,
     ),
     Module(

@@ -60,6 +60,15 @@ Contract:
 - A failing pipeline raises :class:`NuError` whose message is nushell's own
   rendered diagnostic (span, label, and "did you mean" hints) -- read it,
   fix the pipeline, retry. ``exit`` raises too; it never ends this process.
+- ``check=False`` is the grep escape hatch (subprocess.run semantics): a
+  trailing external that exits non-zero stops raising and ``nu()`` returns
+  :class:`NuResult` -- ``result`` is what the call would have returned
+  anyway, built from the output the external DID produce, plus its
+  ``exit_code`` -- so ``^ls | ^grep pattern`` with no match is an empty
+  result with ``exit_code == 1``, not an exception. Only exit-status
+  semantics change: parse errors, unknown commands, and runtime shell
+  errors raise either way. A signal-terminated external reports the
+  negative signal number, like subprocess.
 - ``timeout=`` REQUESTS a stop the way ctrl-c would (nushell checks the
   flag between pipeline elements), raises ``TimeoutError``, and abandons
   the shared engine for a fresh one: a single stuck element (a hung
@@ -87,14 +96,14 @@ import os
 import pathlib
 import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, NamedTuple, overload
 
 from ._nu import Engine, NuError
 
 if TYPE_CHECKING:
     import polars as pl
 
-__all__ = ["Engine", "NuError", "nu", "reset", "value"]
+__all__ = ["Engine", "NuError", "NuResult", "nu", "reset", "value"]
 
 __version__ = "0.1.0"
 
@@ -258,6 +267,21 @@ def _serialize_input(input: object) -> object:
     return input
 
 
+class NuResult(NamedTuple):
+    """What ``nu(code, check=False)`` returns: the result plus the exit code.
+
+    ``result`` is whatever the call would have returned anyway, built from
+    the output the pipeline produced (a failing ``grep`` still hands over
+    the lines it matched before exiting non-zero; a lone string stays plain
+    text); ``exit_code`` is the trailing external's exit code, ``0`` when
+    the pipeline ends in an internal command, negative-signal when the
+    external was signal-terminated (the subprocess convention).
+    """
+
+    result: pl.DataFrame | str
+    exit_code: int
+
+
 async def _run(
     code: str,
     *,
@@ -266,8 +290,13 @@ async def _run(
     env: dict[str, str] | None = None,
     timeout: float | None = None,
     name: str | None = None,
-) -> object:
-    """Evaluate ``code`` on the shared engine; return the plain Python value."""
+    check: bool = True,
+) -> tuple[object, int]:
+    """Evaluate ``code`` on the shared engine; return ``(value, exit_code)``.
+
+    With ``check=True`` a non-zero trailing external raises inside the engine,
+    so the exit code of anything that returns is 0.
+    """
     if cwd is None:
         cwd = pathlib.Path.cwd()
     if name is not None and _rename_current_job is not None and (
@@ -292,6 +321,7 @@ async def _run(
         input=_serialize_input(input) if input is not None else None,
         cwd=os.fspath(cwd) if cwd is not None else None,
         env=env,
+        check=check,
     )
     try:
         decoded = await asyncio.wait_for(asyncio.ensure_future(coroutine), timeout)
@@ -331,13 +361,24 @@ async def _run(
             close()
         raise
     else:
+        # check=False resolves to a (value, exit_code) pair; check=True keeps
+        # the engine's historical value-only shape (exit code 0 by survival --
+        # a non-zero trailing external raised inside the engine).
+        if check:
+            value, exit_code = decoded, 0
+        else:
+            if not (isinstance(decoded, tuple) and len(decoded) == 2):
+                raise TypeError(f"engine returned {type(decoded).__name__} for check=False")
+            value, exit_code = decoded
+            if not isinstance(exit_code, int):
+                raise TypeError(f"engine exit code is {type(exit_code).__name__}")
         state["status"] = "done"
-        state["result"] = decoded
+        state["result"] = value
         state["ended"] = loop.time()
         close = getattr(resource, "close", None)
         if callable(close):
             close()
-        return decoded
+        return value, exit_code
 
 
 def _rows_frame(rows: list[dict]) -> pl.DataFrame:
@@ -378,6 +419,32 @@ def _to_frame(decoded: object) -> pl.DataFrame:
     return pl.DataFrame({"value": [decoded]})
 
 
+@overload
+async def nu(
+    code: str,
+    *,
+    input: object | None = ...,
+    cwd: str | os.PathLike | None = ...,
+    env: dict[str, str] | None = ...,
+    timeout: float | None = ...,
+    name: str | None = ...,
+    check: Literal[True] = ...,
+) -> pl.DataFrame | str: ...
+
+
+@overload
+async def nu(
+    code: str,
+    *,
+    input: object | None = ...,
+    cwd: str | os.PathLike | None = ...,
+    env: dict[str, str] | None = ...,
+    timeout: float | None = ...,
+    name: str | None = ...,
+    check: Literal[False],
+) -> NuResult: ...
+
+
 async def nu(
     code: str,
     *,
@@ -386,7 +453,8 @@ async def nu(
     env: dict[str, str] | None = None,
     timeout: float | None = None,
     name: str | None = None,
-) -> pl.DataFrame | str:
+    check: bool = True,
+) -> pl.DataFrame | str | NuResult:
     """Run ``code`` as nushell source and return the result as a polars
     DataFrame, or as the plain ``str`` when the pipeline's value is a lone
     string.
@@ -405,16 +473,29 @@ async def nu(
     the plain ``str`` (an external's stdout round-trips verbatim); no output
     -> empty frame. A failure raises :class:`NuError` carrying nushell's
     diagnostic.
+
+    ``check=False`` (subprocess.run semantics) keeps a grep-style pipeline
+    usable: a trailing external's non-zero exit stops raising and the call
+    returns :class:`NuResult` -- ``result`` is whatever the call would have
+    returned (the output the external did produce, a lone string staying
+    text), plus ``exit_code`` -- so "no match" reads as an empty result with
+    ``exit_code == 1``. Everything else still raises.
     """
-    decoded = await _run(code, input=input, cwd=cwd, env=env, timeout=timeout, name=name)
-    if isinstance(decoded, str):
+    value, exit_code = await _run(
+        code, input=input, cwd=cwd, env=env, timeout=timeout, name=name, check=check
+    )
+    if isinstance(value, str):
         # A lone string is TEXT (an external's stdout, `to text`), not a table:
         # hand it back verbatim. Framing it as a 1x1 DataFrame made every
         # `print()` of it write polars' width-clipped box repr into the
         # captured stdout, and the full text was unrecoverable afterwards
         # (issue #2068).
-        return decoded
-    return _to_frame(decoded)
+        result: pl.DataFrame | str = value
+    else:
+        result = _to_frame(value)
+    if check:
+        return result
+    return NuResult(result, exit_code)
 
 
 async def value(
@@ -431,7 +512,8 @@ async def value(
     The escape hatch for a scalar (``await nu.value("sys host | get
     hostname")``) or a nested structure you want as plain dicts/lists.
     """
-    return await _run(code, input=input, cwd=cwd, env=env, timeout=timeout, name=name)
+    value, _ = await _run(code, input=input, cwd=cwd, env=env, timeout=timeout, name=name)
+    return value
 
 
 # Make the module itself callable (same pattern as the bundled `sh`), so the

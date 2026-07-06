@@ -162,6 +162,55 @@ def test_trailing_external_output_is_collected(tmp_path: pathlib.Path) -> None:
     assert out.strip() == "collected"
 
 
+def test_check_false_keeps_output_and_surfaces_exit_code() -> None:
+    # The whole point of check=False (index#2067): the output the external
+    # produced before exiting non-zero must survive, alongside its exit code
+    # (check=True drops the collected output on the NuError path). The output
+    # is a lone string, so it stays plain text (index#2068 semantics).
+    import sys
+
+    script = "print('kept'); raise SystemExit(3)"
+    res = run(nu(f'^{sys.executable} -c "{script}"', check=False))
+    assert isinstance(res, nu.NuResult)
+    result, exit_code = res
+    assert exit_code == 3
+    assert isinstance(result, str)
+    assert result.strip() == "kept"
+
+
+def test_check_false_grep_no_match_is_empty_not_an_error() -> None:
+    # grep exits 1 on "no match", which is an answer, not a failure.
+    import sys
+
+    script = "raise SystemExit(1)"
+    result, exit_code = run(nu(f'^{sys.executable} -c "{script}"', check=False))
+    assert exit_code == 1
+    assert result == ""
+
+
+def test_check_false_success_reports_exit_code_zero() -> None:
+    res = run(nu("2 + 2", check=False))
+    assert isinstance(res, nu.NuResult)
+    assert res.exit_code == 0
+    assert isinstance(res.result, pl.DataFrame)
+    assert res.result["value"].item() == 4
+
+
+def test_check_true_default_still_raises_on_non_zero_exit() -> None:
+    import sys
+
+    with pytest.raises(nu.NuError, match="non-zero exit code"):
+        run(nu(f"^{sys.executable} -c 'raise SystemExit(3)'"))
+
+
+def test_check_false_still_raises_on_real_errors() -> None:
+    # Only exit-status semantics are relaxed; a broken pipeline is still an
+    # exception either way.
+    with pytest.raises(nu.NuError):
+        run(nu("[{a: 1}] | wherex a > 0", check=False))
+
+
+
 def test_big_external_output_inside_try_does_not_deadlock() -> None:
     # index#2015: nushell's experimental `pipefail` (the 0.113 default) made
     # try/catch collection wait on the child's exit status BEFORE draining its
