@@ -42,6 +42,8 @@ pub enum Backend {
     Py,
     /// The napi-rs backend (`unibind-backend-ts`, cargo feature `ts`).
     Ts,
+    /// The rustler backend (`unibind-backend-ex`, cargo feature `ex`).
+    Ex,
 }
 
 /// The backends `#[unibind::export(backends(...))]` selected; `None` when

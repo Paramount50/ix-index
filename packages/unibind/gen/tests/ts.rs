@@ -13,6 +13,7 @@ fn names(py: Option<&str>, ts: Option<&str>) -> ir::Names {
     ir::Names {
         py: py.map(str::to_owned),
         ts: ts.map(str::to_owned),
+        ex: None,
     }
 }
 

@@ -12,6 +12,7 @@ use anyhow::{bail, Context as _};
 use clap::Parser as _;
 use unibind_core::ir::Interface;
 use unibind_gen::artifact;
+use unibind_gen::ex::ExEmitter;
 use unibind_gen::host::{self, HostEmitter};
 use unibind_gen::py::PyEmitter;
 use unibind_gen::ts::TsEmitter;
@@ -25,8 +26,7 @@ struct Cli {
     command: Command,
 }
 
-/// One subcommand per target language. `ex` (phase 5, issue #1995) joins
-/// alongside `py` and `ts` with its backend.
+/// One subcommand per target language.
 #[derive(clap::Subcommand)]
 enum Command {
     /// Emit the Python host files: `<package>/<module>.pyi`,
@@ -35,6 +35,9 @@ enum Command {
     /// Emit the TypeScript host files: `index.d.ts` and the `CommonJS`
     /// `index.js` wrapper around the native addon.
     Ts(TsArgs),
+    /// Emit the Elixir host files: `lib/<app>/native.ex` with the NIF
+    /// stubs and the typespec'd `lib/<app>.ex` wrapper.
+    Ex(ExArgs),
 }
 
 #[derive(clap::Args)]
@@ -72,11 +75,25 @@ struct TsArgs {
     out: PathBuf,
 }
 
+#[derive(clap::Args)]
+struct ExArgs {
+    /// Compiled NIF library carrying the embedded IR; its file name is the
+    /// soname the generated loader strips the extension from.
+    #[arg(long)]
+    artifact: PathBuf,
+
+    /// Output root; files are written at paths relative to it.
+    #[arg(long)]
+    out: PathBuf,
+}
+
+
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Py(args) => run_py(&args),
         Command::Ts(args) => run_ts(&args),
+        Command::Ex(args) => run_ex(&args),
     }
 }
 
@@ -134,6 +151,44 @@ fn emit_and_write(
         .emit(interface)
         .with_context(|| format!("emitting the {} host files", emitter.target()))?;
     host::write_host_files(out, &files)?;
+
+    for file in &files {
+        println!("{}", file.path);
+    }
+    Ok(())
+}
+
+fn run_ex(args: &ExArgs) -> anyhow::Result<()> {
+    let embedded = artifact::read(&args.artifact)?;
+    let interface = match embedded.interfaces.as_slice() {
+        [interface] => interface,
+        [] => bail!("{} embeds no unibind interface", args.artifact.display()),
+        several => bail!(
+            "{} embeds {} unibind interfaces ({}); the ex generator handles exactly one \
+             per artifact",
+            args.artifact.display(),
+            several.len(),
+            several
+                .iter()
+                .map(|interface| interface.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+
+    let Some(nif_soname) = args.artifact.file_name() else {
+        bail!(
+            "{} has no file name to derive the NIF soname from",
+            args.artifact.display()
+        );
+    };
+    let emitter = ExEmitter {
+        nif_soname: nif_soname.to_string_lossy().into_owned(),
+    };
+    let files = emitter
+        .emit(interface)
+        .with_context(|| format!("emitting the {} host files", emitter.target()))?;
+    host::write_host_files(&args.out, &files)?;
 
     for file in &files {
         println!("{}", file.path);

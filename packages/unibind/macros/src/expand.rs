@@ -67,6 +67,9 @@ fn backends(
     if selects(unibind_core::Backend::Ts) {
         glue.extend(backend_ts(interface, module, selected.is_some())?);
     }
+    if selects(unibind_core::Backend::Ex) {
+        glue.extend(backend_ex(interface, module, selected.is_some())?);
+    }
     Ok(glue)
 }
 
@@ -142,18 +145,62 @@ fn backend_ts(
     Ok(TokenStream::new())
 }
 
+#[cfg(feature = "ex")]
+fn backend_ex(
+    interface: &unibind_core::ir::Interface,
+    module: &mut syn::ItemMod,
+    _explicit: bool,
+) -> Result<TokenStream, LowerError> {
+    // The consuming crate's name, for the plain `nif_init` alias; set
+    // by every cargo-compatible driver, as rustler's own macro assumes.
+    let crate_name = std::env::var("CARGO_CRATE_NAME").map_err(|_| LowerError {
+        span: proc_macro2::Span::call_site(),
+        message: "the ex backend needs CARGO_CRATE_NAME during expansion".to_owned(),
+    })?;
+    let rendered =
+        unibind_backend_ex::render(interface, Some(&crate_name)).map_err(|error| LowerError {
+            span: proc_macro2::Span::call_site(),
+            message: error.message,
+        })?;
+    splice_record_attrs(
+        interface,
+        module,
+        rendered.records.iter().map(|record| RecordAttrs {
+            outer: &record.outer,
+            fields: &record.fields,
+        }),
+    );
+    Ok(rendered.glue)
+}
+
+#[cfg(not(feature = "ex"))]
+fn backend_ex(
+    _interface: &unibind_core::ir::Interface,
+    _module: &mut syn::ItemMod,
+    explicit: bool,
+) -> Result<TokenStream, LowerError> {
+    if explicit {
+        return Err(LowerError {
+            span: proc_macro2::Span::call_site(),
+            message: "backends(ex) needs the `ex` cargo feature of unibind".to_owned(),
+        });
+    }
+    Ok(TokenStream::new())
+}
+
 /// One record's backend-rendered attributes, index-aligned with the
 /// record's fields.
-#[cfg(any(feature = "py", feature = "ts"))]
+#[cfg(any(feature = "py", feature = "ts", feature = "ex"))]
 struct RecordAttrs<'a> {
     outer: &'a [syn::Attribute],
     fields: &'a [Vec<syn::Attribute>],
 }
 
-/// Attach a backend's `#[pyclass]`- or `#[napi(object)]`-shaped attributes
-/// to the record structs the IR was lowered from. Records and rendered
-/// attribute sets are index-aligned by construction.
-#[cfg(any(feature = "py", feature = "ts"))]
+/// Attach a backend's `#[pyclass]`-, `#[napi(object)]`-, or
+/// `#[derive(NifStruct)]`-shaped attributes to the record structs the IR
+/// was lowered from. Records and rendered attribute sets are index-aligned
+/// by construction.
+#[cfg(any(feature = "py", feature = "ts", feature = "ex"))]
 fn splice_record_attrs<'a>(
     interface: &unibind_core::ir::Interface,
     module: &mut syn::ItemMod,

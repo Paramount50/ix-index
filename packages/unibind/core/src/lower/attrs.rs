@@ -8,14 +8,16 @@ use crate::ir;
 
 /// The options a `#[unibind(...)]` attribute (or marker argument list) can
 /// carry: `py(name = "...")`, `py(base = "...")`, `ts(name = "...")`,
-/// `default = ...`, the bare flags `resource`, `constructor`, and
-/// `blocking`, and (on `#[unibind::export]` only) `backends(...)`.
+/// `ex(name = "...")`, `default = ...`, the bare flags `resource`,
+/// `constructor`, and `blocking`, and (on `#[unibind::export]` only)
+/// `backends(...)`.
 #[derive(Debug, Default)]
 pub struct UnibindMeta {
     pub(crate) span: Option<Span>,
     pub(crate) py_name: Option<String>,
     pub(crate) py_base: Option<String>,
     pub(crate) ts_name: Option<String>,
+    pub(crate) ex_name: Option<String>,
     pub(crate) default: Option<ir::Literal>,
     pub(crate) resource: bool,
     pub(crate) constructor: bool,
@@ -81,6 +83,12 @@ impl UnibindMeta {
             }
             self.ts_name = other.ts_name;
         }
+        if other.ex_name.is_some() {
+            if self.ex_name.is_some() {
+                return Err(LowerError::new(span, "duplicate unibind `ex(name = ...)`"));
+            }
+            self.ex_name = other.ex_name;
+        }
         if other.default.is_some() {
             if self.default.is_some() {
                 return Err(LowerError::new(span, "duplicate unibind `default`"));
@@ -143,6 +151,19 @@ impl UnibindMeta {
                 .map_err(|error| LowerError::new(span, format!("bad `ts` options: {error}")))?;
             for nested in entries {
                 self.apply_ts(&nested)?;
+            }
+            return Ok(());
+        }
+        if entry.path().is_ident("ex") {
+            let syn::Meta::List(list) = entry else {
+                return Err(LowerError::new(span, "`ex` takes a list: ex(name = \"...\")"));
+            };
+            let parser =
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+            let entries = syn::parse::Parser::parse2(parser, list.tokens.clone())
+                .map_err(|error| LowerError::new(span, format!("bad `ex` options: {error}")))?;
+            for nested in entries {
+                self.apply_ex(&nested)?;
             }
             return Ok(());
         }
@@ -227,10 +248,34 @@ impl UnibindMeta {
         Ok(())
     }
 
-    /// Parse `backends(py, ts)`: which enabled backends an export renders.
+    /// Parse `ex(name = "...")`: the Elixir-side rename.
+    fn apply_ex(&mut self, entry: &syn::Meta) -> Result<()> {
+        let span = entry.span();
+        let syn::Meta::NameValue(pair) = entry else {
+            return Err(LowerError::new(span, "the `ex` option is name = \"...\""));
+        };
+        let syn::Expr::Lit(syn::ExprLit {
+            lit: syn::Lit::Str(value),
+            ..
+        }) = &pair.value
+        else {
+            return Err(LowerError::new(span, "`ex` options take string literals"));
+        };
+        if pair.path.is_ident("name") {
+            self.ex_name = Some(value.value());
+        } else {
+            return Err(LowerError::new(
+                span,
+                "unknown `ex` option; expected name = \"...\"",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Parse `backends(py, ts, ex)`: which enabled backends an export renders.
     fn apply_backends(&mut self, entry: &syn::Meta, span: Span) -> Result<()> {
         let syn::Meta::List(list) = entry else {
-            return Err(LowerError::new(span, "`backends` takes a list: backends(py, ts)"));
+            return Err(LowerError::new(span, "`backends` takes a list: backends(py, ts, ex)"));
         };
         let parser = syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated;
         let entries = syn::parse::Parser::parse2(parser, list.tokens.clone())
@@ -241,8 +286,13 @@ impl UnibindMeta {
                 Backend::Py
             } else if path.is_ident("ts") {
                 Backend::Ts
+            } else if path.is_ident("ex") {
+                Backend::Ex
             } else {
-                return Err(LowerError::new(path.span(), "unknown backend; expected `py` or `ts`"));
+                return Err(LowerError::new(
+                    path.span(),
+                    "unknown backend; expected `py`, `ts`, or `ex`",
+                ));
             };
             if backends.contains(&backend) {
                 return Err(LowerError::new(path.span(), "duplicate backend"));
@@ -260,6 +310,7 @@ impl UnibindMeta {
         ir::Names {
             py: self.py_name.clone(),
             ts: self.ts_name.clone(),
+            ex: self.ex_name.clone(),
         }
     }
 
@@ -338,8 +389,8 @@ fn unknown_option(span: Span) -> LowerError {
     LowerError::new(
         span,
         "unknown unibind option; expected py(name = \"...\"), \
-         py(base = \"...\"), ts(name = \"...\"), backends(...), \
-         default = ..., resource, constructor, or blocking",
+         py(base = \"...\"), ts(name = \"...\"), ex(name = \"...\"), \
+         backends(...), default = ..., resource, constructor, or blocking",
     )
 }
 

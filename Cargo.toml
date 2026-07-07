@@ -93,13 +93,17 @@ members = [
   "packages/tui/tui",
   "packages/tui/tui-node",
   "packages/tui/tui-py",
+  "packages/unibind/backend-ex",
   "packages/unibind/backend-py",
   "packages/unibind/backend-ts",
   "packages/unibind/conformance",
+  "packages/unibind/conformance-ex",
   "packages/unibind/conformance-ts",
   "packages/unibind/core",
+  "packages/unibind/ex-runtime",
   "packages/unibind/gen",
   "packages/unibind/macros",
+  "packages/unibind/py-runtime",
   "packages/unibind/runtime",
   "packages/vm/panes/audio",
   "packages/vm/panes/compositor",
@@ -204,6 +208,7 @@ fontdue = "0.9"
 futures = "0.3"
 git2 = { version = "0.21", default-features = false }
 glob = "0.3"
+heck = "0.5"
 hex = "0.4"
 hegeltest = { version = "0.14", default-features = false }
 # The Iceberg corpus lake (issue #752). iceberg 0.9 pins arrow/parquet ^57.1
@@ -279,6 +284,7 @@ rmp-serde = "1"
 rodio = { version = "0.22", default-features = false, features = ["playback", "vorbis"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 rustc-hash = "2.1"
+rustler = "0.38"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 scip = "0.9"
@@ -350,9 +356,12 @@ tree-sitter-typescript = "0.23"
 tree-sitter-yaml = "0.7"
 tui = { path = "packages/tui/tui" }
 unibind = { path = "packages/unibind/macros" }
+unibind-backend-ex = { path = "packages/unibind/backend-ex" }
 unibind-backend-py = { path = "packages/unibind/backend-py" }
 unibind-backend-ts = { path = "packages/unibind/backend-ts" }
 unibind-core = { path = "packages/unibind/core" }
+unibind-ex-runtime = { path = "packages/unibind/ex-runtime" }
+unibind-py-runtime = { path = "packages/unibind/py-runtime" }
 unibind-runtime = { path = "packages/unibind/runtime" }
 url = { version = "2.5.8", default-features = false }
 uuid = "1"

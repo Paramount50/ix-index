@@ -10,8 +10,9 @@
 //! and the module registration) from these declarations.
 
 // `backends(py)`: a whole-workspace build unifies unibind's backend
-// features across consumers (the ts conformance crate enables `ts`), so pin
-// this crate's glue to the backend whose runtime deps it declares.
+// features across consumers (the ts and ex conformance crates enable `ts`
+// and `ex`), so pin this crate's glue to the backend whose runtime deps it
+// declares.
 #[unibind::export(backends(py))]
 mod _scipql {
     use std::collections::HashMap;
