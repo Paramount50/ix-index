@@ -56,7 +56,21 @@ agent content from Nix outputs instead of invoking `nix build` interactively.
 `env_defaults` are applied only if the user has not set them
 (`default.nix:147-152`, `382`): `CLAUDE_CODE_DISABLE_1M_CONTEXT=1` keeps every
 session on the standard 200K window instead of the silently auto-upgraded 1M
-window (uncached, slower per turn). Re-enable per machine with
+window (uncached, slower per turn, ~5x the input price; past-the-window work
+belongs in subagents, and the smaller window makes auto-compaction trigger
+sooner). Verified against 2.1.197, the flag gates every 1M path in the CLI:
+the explicit `[1m]` model suffix, the silent auto-upgrade on eligible models,
+honoring a `context-1m` beta header, and the built-in `[1m]` rows in `/model`.
+One cosmetic residual: server-pushed model options
+(`additionalModelOptionsCache` in `~/.claude.json`, e.g. an org-offered row
+valued `claude-fable-5[1m]`) can still appear in the picker — selecting one
+still runs at the standard window when the disable flag is active.
+
+The wrapper also bakes the same knobs into the read-only `--settings` `env`
+layer (`CLAUDE_CODE_DISABLE_1M_CONTEXT=1`,
+`CLAUDE_CODE_AUTO_COMPACT_WINDOW=300000`) so `/context` and autocompact stay
+on the ~300K working window even if launch-time `env_defaults` are missing.
+Install checks assert both paths. Re-enable 1M per machine with
 `export CLAUDE_CODE_DISABLE_1M_CONTEXT=`.
 
 ### Prepended flags (`wrapperFlags`, `default.nix:353-361`)
