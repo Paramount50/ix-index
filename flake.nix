@@ -468,6 +468,25 @@
       symphony = import ./packages/agent/symphony/home-module.nix {
         indexPackages = system: packages.${system};
         portableServicesModule = ix.portableServices.homeModule;
+        # The beamvm runtime (services.symphony.runtime = "beamvm", the
+        # default) hosts the compiled release in the persistent VM; the
+        # module composes it directly so importing homeModules.symphony
+        # alone is enough.
+        beamvmModule = import ./packages/beamvm/home-module.nix {
+          indexPackages = system: packages.${system};
+          portableServicesModule = ix.portableServices.homeModule;
+          inherit ix;
+        };
+        inherit ix;
+      };
+      # Workstation-facing module: persistent BEAM VMs as user services with
+      # the OTP applications they host declared in Nix. Updating an app
+      # hot-swaps its code in the running VM (no restart, no dropped
+      # connections); only a beamvm/toolchain update restarts. See
+      # packages/beamvm/home-module.nix and packages/beamvm/harness.ex.
+      beamvm = import ./packages/beamvm/home-module.nix {
+        indexPackages = system: packages.${system};
+        portableServicesModule = ix.portableServices.homeModule;
         inherit ix;
       };
     };
