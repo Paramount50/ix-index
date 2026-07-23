@@ -163,7 +163,7 @@ ast-merge-langs = { path = "packages/code/ast-merge/langs" }
 ast-merge-matcher = { path = "packages/code/ast-merge/matcher" }
 astlog-core = { path = "packages/code/astlog/core" }
 axum = "0.8"
-base64 = "0.22"
+base64 = "0.23"
 build-version = { path = "packages/build-version" }
 bytes = "1"
 # Pure-Rust bzip2 (the 0.6 default backend is libbz2-rs-sys), used to read
@@ -214,9 +214,9 @@ hegeltest = { version = "0.14", default-features = false }
 # The Iceberg corpus lake (issue #752). iceberg 0.9 pins arrow/parquet ^57.1
 # while the workspace parquet pair is on 59; the 57 tree stays isolated inside
 # lake-iceberg (see its Cargo.toml).
-iceberg = "0.9"
-iceberg-catalog-rest = "0.9"
-iceberg-storage-opendal = { version = "0.9", features = ["opendal-s3"] }
+iceberg = "0.10"
+iceberg-catalog-rest = "0.10"
+iceberg-storage-opendal = { version = "0.10", features = ["opendal-s3"] }
 ignore = "0.4"
 indicatif = "0.18"
 insta = { version = "1.42", features = ["json"] }
@@ -238,30 +238,26 @@ nix-web-monitor-parser = { path = "packages/nix/nix-web-monitor/parser" }
 # nu-command drops its default `sqlite` feature (`stor`, `into sqlite`): its
 # rusqlite 0.37 pins libsqlite3-sys 0.35, which collides with source-atuin's
 # rusqlite 0.40 on the one-per-graph `links = "sqlite3"` native library.
-nu-cmd-extra = "0.113.1"
-nu-cmd-lang = "0.113.1"
-nu-command = { version = "0.113.1", default-features = false, features = [
-  "os",
-  "network",
-  "rustls-tls",
-] }
-nu-engine = "0.113.1"
-nu-experimental = "0.113.1"
-nu-parser = "0.113.1"
-nu-protocol = "0.113.1"
+nu-cmd-extra = "0.114.1"
+nu-cmd-lang = "0.114.1"
+nu-command = { version = "0.114.1", default-features = false, features = ["os", "network", "rustls-tls"] }
+nu-engine = "0.114.1"
+nu-experimental = "0.114.1"
+nu-parser = "0.114.1"
+nu-protocol = "0.114.1"
 numpy = "0.28"
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
 objc2-quartz-core = "0.3"
 objc2-web-kit = "0.3"
-object = { version = "0.37", default-features = false, features = ["read"] }
+object = { version = "0.39", default-features = false, features = ["read"] }
 object_store = { version = "0.14", features = ["aws"] }
 panes-protocol = { path = "packages/vm/panes/protocol" }
 parking_lot = "0.12"
 parquet = { version = "59", features = ["arrow"] }
 percent-encoding = "2"
-prettyplease = "0.2"
+prettyplease = "0.3"
 proc-macro2 = "1"
 progress-style = { path = "packages/progress-style" }
 protobuf = "3"
@@ -302,7 +298,7 @@ sink-mixedbread = { path = "packages/search/sink/mixedbread" }
 sink-parquet = { path = "packages/search/sink/parquet" }
 snafu = "0.9"
 strip-ansi-escapes = "0.2"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 tango-bench = "0.7"
 tantivy = "0.26"
 tao = "0.35"
